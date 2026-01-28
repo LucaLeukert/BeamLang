@@ -1,0 +1,29 @@
+type User {
+    age: i32,
+    name: String
+}
+
+fn main() -> i32 {
+    let user = test_user();
+    let age = match (user) {
+        case User { age = 1, name = "Peter" } => 10,
+        case User { age, name } if age > 5 => 20,
+        case _ => 0
+    };
+
+    println("age computed");
+
+    guard age >= 10 else {
+        return 2;
+    }
+
+    return age;
+}
+
+fn test_user() -> User {
+    let user: User = { 
+        age = 0, 
+        name = "Peter" 
+    };
+    return user;
+}

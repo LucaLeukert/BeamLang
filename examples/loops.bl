@@ -1,0 +1,19 @@
+fn main() -> i32 {
+    let mut count = 0;
+
+    while (true) {
+        count = 1;
+        break;
+    }
+
+    loop {
+        break;
+    }
+
+    for (ch in "hi") {
+        println("test");
+        break;
+    }
+
+    return count;
+}
