@@ -33,7 +33,7 @@ defmodule BeamLang.Semantic do
 
   @spec typecheck_return(BeamLang.AST.type_name(), BeamLang.AST.block(), map(), map(), map()) ::
           :ok | {:error, [BeamLang.Error.t()]}
-  defp typecheck_return(expected_type, {:block, %{stmts: stmts}}, func_table, type_table, env) do
+  defp typecheck_return(expected_type, {:block, %{stmts: stmts}} = block, func_table, type_table, env) do
     case List.last(stmts) do
       {:return, %{expr: nil, span: span}} ->
         if expected_type == :void do
@@ -93,8 +93,12 @@ defmodule BeamLang.Semantic do
         if expected_type == :void do
           :ok
         else
-          {:error,
-           [BeamLang.Error.new(:type, "Missing return statement.", block_span(stmts))]}
+          if block_returns?(block) do
+            :ok
+          else
+            {:error,
+             [BeamLang.Error.new(:type, "Missing return statement.", block_span(stmts))]}
+          end
         end
     end
   end
@@ -1219,6 +1223,28 @@ defmodule BeamLang.Semantic do
       _ -> false
     end
   end
+
+  @spec block_returns?(BeamLang.AST.block()) :: boolean()
+  defp block_returns?({:block, %{stmts: stmts}}) do
+    case List.last(stmts) do
+      nil -> false
+      stmt -> stmt_returns?(stmt)
+    end
+  end
+
+  @spec stmt_returns?(BeamLang.AST.stmt()) :: boolean()
+  defp stmt_returns?({:return, _}), do: true
+
+  defp stmt_returns?({:if_stmt, %{then_block: then_block, else_branch: else_branch}}) do
+    block_returns?(then_block) and else_branch_returns?(else_branch)
+  end
+
+  defp stmt_returns?(_stmt), do: false
+
+  @spec else_branch_returns?(BeamLang.AST.if_else_branch() | nil) :: boolean()
+  defp else_branch_returns?(nil), do: false
+  defp else_branch_returns?({:else_block, %{block: block}}), do: block_returns?(block)
+  defp else_branch_returns?({:else_if, %{if: if_stmt}}), do: stmt_returns?(if_stmt)
 
   @spec select_match_type([{BeamLang.AST.type_name(), BeamLang.Span.t()}]) :: BeamLang.AST.type_name()
   defp select_match_type(case_types) do
