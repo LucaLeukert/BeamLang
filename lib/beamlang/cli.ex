@@ -67,32 +67,39 @@ defmodule BeamLang.CLI do
   defp run_file(path, opts) do
     source = File.read!(path)
 
-    case BeamLang.compile_source(source, path) do
-      {:ok, %{tokens: tokens, ast: ast, forms: forms, module: module, binary: binary}} ->
-        if opts[:print_tokens] do
-          IO.inspect(tokens, label: "TOKENS")
-        end
-
-        if opts[:print_ast] do
-          IO.inspect(ast, label: "AST")
-        end
-
-        if opts[:print_ast_pretty] do
-          IO.puts("AST (pretty):")
-          IO.puts(BeamLang.ASTPrinter.format(ast))
-        end
-
-        if opts[:print_forms] do
-          IO.inspect(forms, label: "ERLANG_FORMS", limit: :infinity)
+    case BeamLang.compile_file(path) do
+      {:ok, %{entry: entry_module, modules: modules}} ->
+        if opts[:print_tokens] || opts[:print_ast] || opts[:print_ast_pretty] || opts[:print_forms] do
+          case BeamLang.compile_source(source, path) do
+            {:ok, %{tokens: tokens, ast: ast, forms: forms}} ->
+              if opts[:print_tokens], do: IO.inspect(tokens, label: "TOKENS")
+              if opts[:print_ast], do: IO.inspect(ast, label: "AST")
+              if opts[:print_ast_pretty] do
+                IO.puts("AST (pretty):")
+                IO.puts(BeamLang.ASTPrinter.format(ast))
+              end
+              if opts[:print_forms], do: IO.inspect(forms, label: "ERLANG_FORMS", limit: :infinity)
+            _ -> :ok
+          end
         end
 
         if is_binary(opts[:emit_beam]) do
-          File.write!(opts[:emit_beam], binary)
+          case List.keyfind(modules, entry_module, 0) do
+            {^entry_module, binary} -> File.write!(opts[:emit_beam], binary)
+            _ -> :ok
+          end
         end
 
         unless opts[:no_run] do
-          case BeamLang.Runtime.load_and_run(module, binary) do
-            {:ok, value} -> IO.puts(value)
+          case BeamLang.Runtime.load_modules(modules) do
+            :ok ->
+              case BeamLang.Runtime.load_and_run(entry_module, elem(List.keyfind(modules, entry_module, 0), 1)) do
+                {:ok, value} -> IO.puts(value)
+                {:error, %{message: message}} ->
+                  IO.puts(:stderr, "Error: #{message}")
+                  System.halt(1)
+              end
+
             {:error, %{message: message}} ->
               IO.puts(:stderr, "Error: #{message}")
               System.halt(1)
@@ -100,8 +107,28 @@ defmodule BeamLang.CLI do
         end
 
       {:error, errors} when is_list(errors) ->
-        IO.puts(:stderr, BeamLang.Errors.format(errors, source))
+        IO.puts(:stderr, format_errors(errors, source, path))
         System.halt(1)
     end
+  end
+
+  defp format_errors(errors, entry_source, entry_path) do
+    errors
+    |> Enum.group_by(fn %BeamLang.Error{span: span} -> span.file_id end)
+    |> Enum.map(fn {file, errs} ->
+      source =
+        cond do
+          file == entry_path -> entry_source
+          file == "<source>" -> entry_source
+          true ->
+            case File.read(file) do
+              {:ok, contents} -> contents
+              _ -> entry_source
+            end
+        end
+
+      BeamLang.Errors.format(errs, source)
+    end)
+    |> Enum.join("\n")
   end
 end

@@ -10,9 +10,12 @@ defmodule BeamLang.ASTPrinter do
     |> Enum.join("\n")
   end
 
-  defp format_node({:program, %{types: types, functions: functions}}, indent) do
+  defp format_node({:program, %{module: module, imports: imports, types: types, functions: functions}}, indent) do
     [
-      indent_line(indent, "Program"),
+      indent_line(indent, "Program#{module_suffix(module)}"),
+      indent_line(indent + 2, "Imports"),
+      imports
+      |> Enum.flat_map(&format_node(&1, indent + 4)),
       indent_line(indent + 2, "Types"),
       types
       |> Enum.flat_map(&format_node(&1, indent + 4)),
@@ -23,9 +26,15 @@ defmodule BeamLang.ASTPrinter do
     |> List.flatten()
   end
 
-  defp format_node({:type_def, %{name: name, fields: fields}}, indent) do
+  defp format_node({:type_def, %{name: name, params: params, fields: fields, exported: exported}}, indent) do
+    params_text =
+      case params do
+        [] -> ""
+        _ -> "<" <> Enum.join(params, ", ") <> ">"
+      end
+
     [
-      indent_line(indent, "Type #{name}"),
+      indent_line(indent, "Type #{name}#{params_text}#{exported_suffix(exported)}"),
       indent_line(indent + 2, "Fields"),
       fields
       |> Enum.flat_map(fn %{name: field, type: type} ->
@@ -34,7 +43,7 @@ defmodule BeamLang.ASTPrinter do
     ]
   end
 
-  defp format_node({:function, %{name: name, params: params, return_type: type, body: body}}, indent) do
+  defp format_node({:function, %{name: name, params: params, return_type: type, body: body, exported: exported}}, indent) do
     params_text =
       params
       |> Enum.map(fn %{name: param_name, type: param_type} ->
@@ -50,10 +59,30 @@ defmodule BeamLang.ASTPrinter do
       end
 
     [
-      indent_line(indent, "Fn #{name} -> #{format_type(type)}"),
+      indent_line(indent, "Fn #{name} -> #{format_type(type)}#{exported_suffix(exported)}"),
       params_line,
       format_node(body, indent + 2)
     ]
+  end
+
+  defp format_node(nil, indent) do
+    [indent_line(indent, "External")]
+  end
+
+  defp format_node({:import, %{module: module, alias: alias_name, items: :all}}, indent) do
+    alias_text = if alias_name == nil, do: "", else: " as #{alias_name}"
+    [indent_line(indent, "Import #{module}.*#{alias_text}")]
+  end
+
+  defp format_node({:import, %{module: module, alias: alias_name, items: :none}}, indent) do
+    alias_text = if alias_name == nil, do: "", else: " as #{alias_name}"
+    [indent_line(indent, "Import #{module}#{alias_text}")]
+  end
+
+  defp format_node({:import, %{module: module, alias: alias_name, items: items}}, indent) do
+    names = items |> Enum.map(& &1.name) |> Enum.join(", ")
+    alias_text = if alias_name == nil, do: "", else: " as #{alias_name}"
+    [indent_line(indent, "Import #{module}.{#{names}}#{alias_text}")]
   end
 
   defp format_node({:block, %{stmts: stmts}}, indent) do
@@ -133,6 +162,7 @@ defmodule BeamLang.ASTPrinter do
     ]
   end
 
+
   defp format_node({:loop, %{body: body}}, indent) do
     [
       indent_line(indent, "Loop"),
@@ -203,6 +233,9 @@ defmodule BeamLang.ASTPrinter do
   defp format_node({:string, %{value: value}}, indent),
     do: [indent_line(indent, "String \"#{value}\"")]
 
+  defp format_node({:char, %{value: value}}, indent),
+    do: [indent_line(indent, "Char #{value}")]
+
   defp format_node({:bool, %{value: value}}, indent),
     do: [indent_line(indent, "Bool #{value}")]
 
@@ -244,6 +277,31 @@ defmodule BeamLang.ASTPrinter do
     ]
   end
 
+  defp format_node({:opt_some, %{expr: expr}}, indent) do
+    [
+      indent_line(indent, "OptSome"),
+      format_node(expr, indent + 2)
+    ]
+  end
+
+  defp format_node({:opt_none, %{}}, indent) do
+    [indent_line(indent, "OptNone")]
+  end
+
+  defp format_node({:res_ok, %{expr: expr}}, indent) do
+    [
+      indent_line(indent, "ResOk"),
+      format_node(expr, indent + 2)
+    ]
+  end
+
+  defp format_node({:res_err, %{expr: expr}}, indent) do
+    [
+      indent_line(indent, "ResErr"),
+      format_node(expr, indent + 2)
+    ]
+  end
+
   defp format_pattern({:integer, %{value: value}}, indent),
     do: [indent_line(indent, "Int #{value}")]
 
@@ -252,6 +310,9 @@ defmodule BeamLang.ASTPrinter do
 
   defp format_pattern({:string, %{value: value}}, indent),
     do: [indent_line(indent, "String \"#{value}\"")]
+
+  defp format_pattern({:char, %{value: value}}, indent),
+    do: [indent_line(indent, "Char #{value}")]
 
   defp format_pattern({:bool, %{value: value}}, indent),
     do: [indent_line(indent, "Bool #{value}")]
@@ -273,6 +334,22 @@ defmodule BeamLang.ASTPrinter do
         ]
       end)
     ]
+  end
+
+  defp format_pattern({:opt_some_pat, %{name: name}}, indent) do
+    [indent_line(indent, "OptSome #{name}")]
+  end
+
+  defp format_pattern({:opt_none_pat, %{}}, indent) do
+    [indent_line(indent, "OptNone")]
+  end
+
+  defp format_pattern({:res_ok_pat, %{name: name}}, indent) do
+    [indent_line(indent, "ResOk #{name}")]
+  end
+
+  defp format_pattern({:res_err_pat, %{name: name}}, indent) do
+    [indent_line(indent, "ResErr #{name}")]
   end
 
   defp format_else_branch(nil, _indent), do: []
@@ -300,7 +377,17 @@ defmodule BeamLang.ASTPrinter do
     ]
   end
 
+  defp module_suffix(nil), do: ""
+  defp module_suffix(module), do: " (#{module})"
+
+  defp exported_suffix(true), do: " [export]"
+  defp exported_suffix(_), do: ""
+
+  defp format_type({:generic, base, args}),
+    do: "#{format_type(base)}<#{Enum.map_join(args, ", ", &format_type/1)}>"
   defp format_type({:named, name}), do: name
+  defp format_type({:optional, inner}), do: "#{format_type(inner)}?"
+  defp format_type({:result, ok_type, err_type}), do: "#{format_type(ok_type)}!#{format_type(err_type)}"
   defp format_type(type) when is_atom(type), do: Atom.to_string(type)
 
   defp indent_line(indent, text) do

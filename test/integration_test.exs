@@ -5,7 +5,7 @@ defmodule BeamLang.IntegrationTest do
 
   test "compiles and runs main" do
     source = """
-    fn main() -> i32 {
+    fn main() -> number {
         return 42;
     }
     """
@@ -15,11 +15,11 @@ defmodule BeamLang.IntegrationTest do
 
   test "supports multiple functions" do
     source = """
-    fn helper(value: i32) -> i32 {
+    fn helper(value: number) -> number {
         return 1;
     }
 
-    fn main() -> i32 {
+    fn main() -> number {
         return helper(42);
     }
     """
@@ -29,11 +29,11 @@ defmodule BeamLang.IntegrationTest do
 
   test "runs function call in return" do
     source = """
-    fn helper(value: i32) -> i32 {
+    fn helper(value: number) -> number {
         return 7;
     }
 
-    fn main() -> i32 {
+    fn main() -> number {
         return helper(1);
     }
     """
@@ -43,7 +43,7 @@ defmodule BeamLang.IntegrationTest do
 
   test "runs stdlib println" do
     source = """
-    fn main() -> i32 {
+    fn main() -> number {
         println("hello");
         return 0;
     }
@@ -54,7 +54,7 @@ defmodule BeamLang.IntegrationTest do
 
   test "runs let-bound value" do
     source = """
-    fn main() -> i32 {
+    fn main() -> number {
         let value = 5;
         return value;
     }
@@ -65,7 +65,7 @@ defmodule BeamLang.IntegrationTest do
 
   test "supports mutable reassignment" do
     source = """
-    fn main() -> i32 {
+    fn main() -> number {
         let mut value = 1;
         value = 3;
         return value;
@@ -83,17 +83,17 @@ defmodule BeamLang.IntegrationTest do
     """
 
     assert {:error, [error]} = BeamLang.run_source(source)
-    assert error.message == "main must return i32, got void."
+    assert error.message == "main must return number, got void."
   end
 
   test "supports struct literal with type annotation" do
     source = """
     type User {
-        id: i32,
+        id: number,
         name: String
     }
 
-    fn main() -> i32 {
+    fn main() -> number {
         let user: User = { id = 1, name = "Peter" };
         return 1;
     }
@@ -105,11 +105,11 @@ defmodule BeamLang.IntegrationTest do
   test "supports struct field access" do
     source = """
     type User {
-        id: i32,
+        id: number,
         name: String
     }
 
-    fn main() -> i32 {
+    fn main() -> number {
         let user: User = { id = 2, name = "Peter" };
         return user->id;
     }
@@ -121,11 +121,11 @@ defmodule BeamLang.IntegrationTest do
   test "supports struct field assignment" do
     source = """
     type User {
-        id: i32,
+        id: number,
         name: String
     }
 
-    fn main() -> i32 {
+    fn main() -> number {
         let mut user: User = { id = 1, name = "Peter" };
         user->id = 3;
         return user->id;
@@ -143,12 +143,12 @@ defmodule BeamLang.IntegrationTest do
     """
 
     assert {:error, [error]} = BeamLang.run_source(source)
-    assert error.message == "main must return i32, got bool."
+    assert error.message == "main must return number, got bool."
   end
 
   test "runs match expression" do
     source = """
-    fn main() -> i32 {
+    fn main() -> number {
         return match (1) {
             case 1 if 1 == 1 => 4,
             case _ => 0
@@ -161,7 +161,7 @@ defmodule BeamLang.IntegrationTest do
 
   test "runs if expression" do
     source = """
-    fn main() -> i32 {
+    fn main() -> number {
         let value = if (true) { 1; } else { 2; };
         return value;
     }
@@ -172,7 +172,7 @@ defmodule BeamLang.IntegrationTest do
 
   test "runs loop with break" do
     source = """
-    fn main() -> i32 {
+    fn main() -> number {
         loop { break; }
         return 0;
     }
@@ -183,7 +183,7 @@ defmodule BeamLang.IntegrationTest do
 
   test "runs while with false condition" do
     source = """
-    fn main() -> i32 {
+    fn main() -> number {
         while (false) { break; }
         return 0;
     }
@@ -194,7 +194,7 @@ defmodule BeamLang.IntegrationTest do
 
   test "runs for over string" do
     source = """
-    fn main() -> i32 {
+    fn main() -> number {
         for (item in "hi") { break; }
         return 0;
     }

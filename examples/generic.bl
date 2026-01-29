@@ -1,0 +1,18 @@
+type Box<T> {
+    value: T
+}
+
+type Pair<A, B> {
+    left: A,
+    right: B
+}
+
+fn first_right(p: Pair<number, number>) -> number {
+    return p->right;
+}
+
+fn main() -> number {
+    let box: Box<number> = { value = 10 };
+    let pair: Pair<number, number> = { left = box->value, right = 32 };
+    return first_right(pair);
+}

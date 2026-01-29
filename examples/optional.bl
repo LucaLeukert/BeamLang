@@ -1,0 +1,20 @@
+fn find_name(id: number) -> String? {
+    if (id == 1) {
+        return?some "Peter";
+    } else {
+        return?none;
+    }
+}
+
+fn main() -> number {
+    match (find_name(1)) {
+        case?some name => {
+            println(name);
+            return 0;
+        }
+        case?none => {
+            println("not found");
+            return 1;
+        }
+    }
+}

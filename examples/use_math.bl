@@ -1,0 +1,7 @@
+import math.{Pair, add};
+import math as m;
+
+fn main() -> number {
+    let pair: Pair = { left = 2, right = 3 };
+    return m::add(pair->left, pair->right);
+}

@@ -1,0 +1,21 @@
+fn divide(a: number, b: number) -> number!String {
+    if (b == 0) {
+        return!err "Division by zero";
+    }
+    return!ok a / b;
+}
+
+fn main() -> number {
+    let div = divide(10, 0);
+    println(typeof(div));
+    match (div) {
+        case!ok value => {
+            println("value");
+            return 0;
+        }
+        case!err msg => {
+            println(msg);
+            return 1;
+        }
+    }
+}

@@ -1,6 +1,6 @@
-fn main() -> i32 {
+fn main() -> number {
     let value = 5;
-    guard value > 0 else {
+    guard (value > 0) else {
         return 1;
     }
     return 0;

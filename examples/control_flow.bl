@@ -1,4 +1,4 @@
-fn main() -> i32 {
+fn main() -> number {
     let value = 3;
 
     if (value == 1) {

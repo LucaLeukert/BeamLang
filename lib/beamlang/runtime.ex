@@ -22,6 +22,16 @@ defmodule BeamLang.Runtime do
     end
   end
 
+  @spec load_modules([{atom(), binary()}]) :: :ok | {:error, map()}
+  def load_modules(modules) when is_list(modules) do
+    Enum.reduce_while(modules, :ok, fn {module, binary}, _acc ->
+      case :code.load_binary(module, ~c"beamlang_module.beam", binary) do
+        {:module, ^module} -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, %{message: "Failed to load compiled module: #{inspect(reason)}"}}}
+      end
+    end)
+  end
+
   @spec compile_and_run(BeamLang.AST.t()) :: {:ok, term()} | {:error, map()}
   def compile_and_run(ast) do
     forms = Codegen.to_erlang_forms(ast)
@@ -30,5 +40,35 @@ defmodule BeamLang.Runtime do
          {:ok, value} <- load_and_run(module, binary) do
       {:ok, value}
     end
+  end
+
+  @spec typeof(term()) :: binary()
+  def typeof(value) do
+    cond do
+      is_integer(value) or is_float(value) -> "number"
+      is_binary(value) -> "String"
+      is_boolean(value) -> "bool"
+      value == :ok -> "void"
+      value == :none -> "Optional"
+      is_map(value) and Map.has_key?(value, :__beamlang_type__) -> Map.get(value, :__beamlang_type__)
+      is_tuple(value) and tuple_size(value) == 2 and elem(value, 0) == :char -> "char"
+      is_tuple(value) and tuple_size(value) == 2 and elem(value, 0) == :some -> "Optional"
+      is_tuple(value) and tuple_size(value) == 2 and elem(value, 0) in [:ok, :err] -> "Result"
+      is_list(value) -> "String"
+      is_map(value) -> "Map"
+      true -> "unknown"
+    end
+  end
+
+  @spec println(term()) :: :ok
+  def println(value) do
+    :io.format("~s~n", [value])
+    :ok
+  end
+
+  @spec print(term()) :: :ok
+  def print(value) do
+    :io.format("~s", [value])
+    :ok
   end
 end

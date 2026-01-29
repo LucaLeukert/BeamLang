@@ -1,9 +1,9 @@
 type User {
-    age: i32,
+    age: number,
     name: String
 }
 
-fn main() -> i32 {
+fn main() -> number {
     let user = test_user();
     let age = match (user) {
         case User { age = 1, name = "Peter" } => 10,
@@ -13,9 +13,11 @@ fn main() -> i32 {
 
     println("age computed");
 
-    guard age >= 10 else {
+    guard (age >= 10) else {
         return 2;
     }
+
+    println(typeof(user));
 
     return age;
 }

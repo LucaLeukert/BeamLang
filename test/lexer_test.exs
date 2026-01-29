@@ -5,7 +5,7 @@ defmodule BeamLang.LexerTest do
 
   test "tokenizes minimal function" do
     source = """
-    fn main() -> i32 {
+    fn main() -> number {
         return 42;
     }
     """
@@ -35,7 +35,7 @@ defmodule BeamLang.LexerTest do
              "(",
              ")",
              "->",
-             "i32",
+             "number",
              "{",
              "return",
              42,

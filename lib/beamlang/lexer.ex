@@ -8,6 +8,9 @@ defmodule BeamLang.Lexer do
   @keywords %{
     "fn" => :fn,
     "type" => :type_kw,
+    "import" => :import_kw,
+    "export" => :export_kw,
+    "as" => :as_kw,
     "return" => :return,
     "let" => :let,
     "mut" => :mut,
@@ -21,13 +24,12 @@ defmodule BeamLang.Lexer do
     "while" => :while_kw,
     "loop" => :loop_kw,
     "break" => :break_kw,
-    "i32" => :type,
-    "i64" => :type,
-    "f32" => :type,
-    "f64" => :type,
+    "number" => :type,
     "String" => :type,
+    "char" => :type,
     "void" => :type,
     "bool" => :type,
+    "any" => :type,
     "true" => :bool,
     "false" => :bool
   }
@@ -38,11 +40,18 @@ defmodule BeamLang.Lexer do
     ?{ => :lbrace,
     ?} => :rbrace,
     ?; => :semicolon,
+    ?. => :dot,
     ?= => :equals,
     ?< => :lt,
     ?> => :gt,
+    ?+ => :plus,
+    ?* => :star,
+    ?/ => :slash,
+    ?% => :percent,
+    ?? => :question,
     ?: => :colon,
-    ?, => :comma
+    ?, => :comma,
+    ?@ => :at
   }
 
   @spec tokenize(binary()) :: {:ok, [Token.t()]} | {:error, map()}
@@ -84,6 +93,14 @@ defmodule BeamLang.Lexer do
 
   @spec do_tokenize(binary(), binary(), non_neg_integer(), non_neg_integer(), non_neg_integer(), [Token.t()]) ::
           {:ok, [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp do_tokenize(<<"::", rest::binary>>, file, offset, line, col, acc) do
+    span = BeamLang.Span.new(file, offset, offset + 2)
+    token = %Token{type: :double_colon, value: "::", line: line, col: col, span: span}
+    do_tokenize(rest, file, offset + 2, line, col + 2, [token | acc])
+  end
+
+  @spec do_tokenize(binary(), binary(), non_neg_integer(), non_neg_integer(), non_neg_integer(), [Token.t()]) ::
+          {:ok, [Token.t()]} | {:error, BeamLang.Error.t()}
   defp do_tokenize(<<"==", rest::binary>>, file, offset, line, col, acc) do
     span = BeamLang.Span.new(file, offset, offset + 2)
     token = %Token{type: :eq_eq, value: "==", line: line, col: col, span: span}
@@ -96,6 +113,14 @@ defmodule BeamLang.Lexer do
     span = BeamLang.Span.new(file, offset, offset + 2)
     token = %Token{type: :neq, value: "!=", line: line, col: col, span: span}
     do_tokenize(rest, file, offset + 2, line, col + 2, [token | acc])
+  end
+
+  @spec do_tokenize(binary(), binary(), non_neg_integer(), non_neg_integer(), non_neg_integer(), [Token.t()]) ::
+          {:ok, [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp do_tokenize(<<"!", rest::binary>>, file, offset, line, col, acc) do
+    span = BeamLang.Span.new(file, offset, offset + 1)
+    token = %Token{type: :bang, value: "!", line: line, col: col, span: span}
+    do_tokenize(rest, file, offset + 1, line, col + 1, [token | acc])
   end
 
   @spec do_tokenize(binary(), binary(), non_neg_integer(), non_neg_integer(), non_neg_integer(), [Token.t()]) ::
@@ -133,13 +158,12 @@ defmodule BeamLang.Lexer do
         do_tokenize(rest_after, file, offset + width + 1, line, col + width + 1, [token | acc])
 
       _ ->
-        {:error, error("Unexpected '-'.", file, offset, line, col)}
+        span = BeamLang.Span.new(file, offset, offset + 1)
+        token = %Token{type: :minus, value: "-", line: line, col: col, span: span}
+        do_tokenize(rest, file, offset + 1, line, col + 1, [token | acc])
     end
   end
 
-  defp do_tokenize(<<"!", _rest::binary>>, file, offset, line, col, _acc) do
-    {:error, error("Unexpected '!'.", file, offset, line, col)}
-  end
 
   @spec do_tokenize(binary(), binary(), non_neg_integer(), non_neg_integer(), non_neg_integer(), [Token.t()]) ::
           {:ok, [Token.t()]} | {:error, BeamLang.Error.t()}
@@ -155,6 +179,18 @@ defmodule BeamLang.Lexer do
       {:ok, value, rest_after, width} ->
         span = BeamLang.Span.new(file, offset, offset + width + 2)
         token = %Token{type: :string, value: value, line: line, col: col, span: span}
+        do_tokenize(rest_after, file, offset + width + 2, line, col + width + 2, [token | acc])
+
+      {:error, message} ->
+        {:error, error(message, file, offset, line, col)}
+    end
+  end
+
+  defp do_tokenize(<<"'", rest::binary>>, file, offset, line, col, acc) do
+    case read_char(rest) do
+      {:ok, value, rest_after, width} ->
+        span = BeamLang.Span.new(file, offset, offset + width + 2)
+        token = %Token{type: :char, value: value, line: line, col: col, span: span}
         do_tokenize(rest_after, file, offset + width + 2, line, col + width + 2, [token | acc])
 
       {:error, message} ->
@@ -224,6 +260,24 @@ defmodule BeamLang.Lexer do
   end
 
   defp read_string(<<>>, _acc), do: {:error, "Unterminated string literal."}
+
+  @spec read_char(binary()) :: {:ok, integer(), binary(), non_neg_integer()} | {:error, binary()}
+  defp read_char(<<"\\", esc, "'", rest::binary>>) do
+    value =
+      case esc do
+        ?n -> ?\n
+        ?r -> ?\r
+        ?t -> ?\t
+        ?\\ -> ?\\
+        ?' -> ?'
+        other -> other
+      end
+
+    {:ok, value, rest, 2}
+  end
+
+  defp read_char(<<c, "'", rest::binary>>), do: {:ok, c, rest, 1}
+  defp read_char(_), do: {:error, "Invalid char literal."}
 
   @spec read_identifier(binary()) :: {binary(), binary(), non_neg_integer()}
   defp read_identifier(binary) do

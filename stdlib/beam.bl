@@ -1,0 +1,17 @@
+type Iterator<T> {
+}
+
+type Optional<T> {
+}
+
+type Result<Ok, Err> {
+}
+
+@external(elixir, "BeamLang.Runtime", "println")
+fn println(value: String) -> void;
+
+@external(elixir, "BeamLang.Runtime", "print")
+fn print(value: String) -> void;
+
+@external(elixir, "BeamLang.Runtime", "typeof")
+fn typeof(value: any) -> String;

@@ -18,62 +18,254 @@ defmodule BeamLang.Parser do
   @spec parse_program([Token.t()]) ::
           {:ok, BeamLang.AST.t(), [Token.t()]} | {:error, BeamLang.Error.t()}
   defp parse_program(tokens) do
-    parse_decls(tokens, [], [])
+    parse_decls(tokens, [], [], [])
   end
 
-  @spec parse_decls([Token.t()], [BeamLang.AST.type_def()], [BeamLang.AST.func()]) ::
+  @spec parse_decls([Token.t()], [BeamLang.AST.import()], [BeamLang.AST.type_def()], [BeamLang.AST.func()]) ::
           {:ok, BeamLang.AST.t(), [Token.t()]} | {:error, BeamLang.Error.t()}
-  defp parse_decls([], [], []) do
+  defp parse_decls([], [], [], []) do
     {:error, BeamLang.Error.new(:parser, "Expected at least one declaration.", eof_span("<source>"))}
   end
 
-  defp parse_decls([], types, functions) do
+  defp parse_decls([], imports, types, functions) do
+    imports = Enum.reverse(imports)
     types = Enum.reverse(types)
     functions = Enum.reverse(functions)
-    span = program_span(types, functions)
-    {:ok, {:program, %{types: types, functions: functions, span: span}}, []}
+    span = program_span(imports, types, functions)
+    {:ok, {:program, %{module: nil, imports: imports, types: types, functions: functions, span: span}}, []}
   end
 
-  defp parse_decls([%Token{type: :type_kw} | _] = tokens, types, functions) do
-    with {:ok, type_def, rest} <- parse_type_def(tokens) do
-      parse_decls(rest, [type_def | types], functions)
+  defp parse_decls([%Token{type: :import_kw} | _] = tokens, imports, types, functions) do
+    with {:ok, import_stmt, rest} <- parse_import(tokens) do
+      parse_decls(rest, [import_stmt | imports], types, functions)
     end
   end
 
-  defp parse_decls(tokens, types, functions) do
-    with {:ok, func, rest} <- parse_function(tokens) do
-      parse_decls(rest, types, [func | functions])
+  defp parse_decls([%Token{type: :export_kw} | rest] = tokens, imports, types, functions) do
+    case rest do
+      [%Token{type: :type_kw} | _] ->
+        with {:ok, _export_tok, rest1} <- expect(tokens, :export_kw),
+             {:ok, type_def, rest2} <- parse_type_def(rest1, true) do
+          parse_decls(rest2, imports, [type_def | types], functions)
+        end
+
+      [%Token{type: :at} | _] ->
+        with {:ok, _export_tok, rest1} <- expect(tokens, :export_kw),
+             {:ok, external, rest2} <- parse_external_attr(rest1),
+             {:ok, func, rest3} <- parse_function(rest2, external, true) do
+          parse_decls(rest3, imports, types, [func | functions])
+        end
+
+      [%Token{type: :fn} | _] ->
+        with {:ok, _export_tok, rest1} <- expect(tokens, :export_kw),
+             {:ok, func, rest2} <- parse_function(rest1, nil, true) do
+          parse_decls(rest2, imports, types, [func | functions])
+        end
+
+      _ ->
+        {:error, error("Expected type or fn after export.", hd(tokens))}
     end
   end
 
-  @spec parse_function([Token.t()]) ::
+  defp parse_decls([%Token{type: :type_kw} | _] = tokens, imports, types, functions) do
+    with {:ok, type_def, rest} <- parse_type_def(tokens, false) do
+      parse_decls(rest, imports, [type_def | types], functions)
+    end
+  end
+
+  defp parse_decls([%Token{type: :at} | _] = tokens, imports, types, functions) do
+    with {:ok, external, rest1} <- parse_external_attr(tokens),
+         {:ok, func, rest2} <- parse_function(rest1, external, false) do
+      parse_decls(rest2, imports, types, [func | functions])
+    end
+  end
+
+  defp parse_decls(tokens, imports, types, functions) do
+    with {:ok, func, rest} <- parse_function(tokens, nil, false) do
+      parse_decls(rest, imports, types, [func | functions])
+    end
+  end
+
+  @spec parse_function([Token.t()], map() | nil, boolean()) ::
           {:ok, BeamLang.AST.func(), [Token.t()]} | {:error, BeamLang.Error.t()}
-  defp parse_function(tokens) do
+  defp parse_function(tokens, external, exported) do
     with {:ok, _fn_tok, rest1} <- expect(tokens, :fn),
          {:ok, name_tok, rest2} <- expect(rest1, :identifier),
          {:ok, _lparen, rest3} <- expect(rest2, :lparen),
          {:ok, params, rest4} <- parse_params(rest3, []),
          {:ok, _rparen, rest5} <- expect(rest4, :rparen),
          {:ok, _arrow, rest6} <- expect(rest5, :arrow),
-         {:ok, {return_type, return_span}, rest7} <- parse_type_name(rest6),
-         {:ok, _lbrace, rest8} <- expect(rest7, :lbrace),
-         {:ok, body, rest9} <- parse_block(rest8),
-         {:ok, _rbrace, rest10} <- expect(rest9, :rbrace) do
-      span = BeamLang.Span.merge(name_tok.span, return_span)
-      span = BeamLang.Span.merge(span, rbrace_span(rest9, rest10))
+         {:ok, {return_type, return_span}, rest7} <- parse_type_name(rest6) do
+      case external do
+        nil ->
+          with {:ok, _lbrace, rest8} <- expect(rest7, :lbrace),
+               {:ok, body, rest9} <- parse_block(rest8),
+               {:ok, _rbrace, rest10} <- expect(rest9, :rbrace) do
+            span = BeamLang.Span.merge(name_tok.span, return_span)
+            span = BeamLang.Span.merge(span, rbrace_span(rest9, rest10))
 
-      ast =
-        {:function,
-         %{
-           name: name_tok.value,
-           params: params,
-           return_type: return_type,
-            body: body,
-            span: span
-         }}
+            ast =
+              {:function,
+               %{
+                 name: name_tok.value,
+                 params: params,
+                 return_type: return_type,
+                 body: body,
+                 external: nil,
+                 exported: exported,
+                 span: span
+               }}
 
-      {:ok, ast, rest10}
+            {:ok, ast, rest10}
+          end
+
+        _ ->
+          with {:ok, semi_tok, rest8} <- expect(rest7, :semicolon) do
+            span = BeamLang.Span.merge(name_tok.span, return_span)
+            span = BeamLang.Span.merge(span, semi_tok.span)
+
+            ast =
+              {:function,
+               %{
+                 name: name_tok.value,
+                 params: params,
+                 return_type: return_type,
+                 body: nil,
+                 external: external,
+                 exported: exported,
+                 span: span
+               }}
+
+            {:ok, ast, rest8}
+          end
+      end
     end
+  end
+
+  @spec parse_import([Token.t()]) ::
+          {:ok, BeamLang.AST.import(), [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_import(tokens) do
+    with {:ok, import_tok, rest1} <- expect(tokens, :import_kw),
+         {:ok, module_tok, rest2} <- expect(rest1, :identifier) do
+      {alias_name, rest3} = parse_optional_alias(rest2)
+
+      {items, rest4} =
+        case rest3 do
+          [%Token{type: :dot} | rest_after] ->
+            case parse_import_suffix(rest_after) do
+              {:ok, items, rest5} -> {items, rest5}
+              {:error, _} -> {{:error, rest3}, rest3}
+            end
+
+          _ ->
+            {:none, rest3}
+        end
+
+      case items do
+        {:error, _} ->
+          {:error, error("Expected import item.", hd(rest3))}
+
+        _ ->
+          {rest9, span} =
+            case rest4 do
+              [%Token{type: :semicolon} = semi | rest_after] ->
+                {rest_after, BeamLang.Span.merge(import_tok.span, semi.span)}
+
+              _ ->
+                {rest4, BeamLang.Span.merge(import_tok.span, module_tok.span)}
+            end
+
+          {:ok, {:import, %{module: module_tok.value, alias: alias_name, items: items, span: span}}, rest9}
+      end
+    end
+  end
+
+  @spec parse_import_suffix([Token.t()]) ::
+          {:ok, :all | [BeamLang.AST.import_item()], [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_import_suffix([%Token{type: :identifier} = tok | rest]) do
+    {:ok, [%{name: tok.value, span: tok.span}], rest}
+  end
+
+  defp parse_import_suffix([%Token{type: :star} | rest]) do
+    {:ok, :all, rest}
+  end
+
+  defp parse_import_suffix([%Token{type: :lbrace} | rest]) do
+    with {:ok, items, rest1} <- parse_import_items(rest),
+         {:ok, _rbrace, rest2} <- expect(rest1, :rbrace) do
+      {:ok, items, rest2}
+    end
+  end
+
+  defp parse_import_suffix([%Token{} = tok | _]) do
+    {:error, error("Expected import item.", tok)}
+  end
+
+  @spec parse_import_items([Token.t()]) ::
+          {:ok, :all | [BeamLang.AST.import_item()], [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_import_items([%Token{type: :star} | rest]) do
+    {:ok, :all, rest}
+  end
+
+  defp parse_import_items(tokens) do
+    parse_import_item_list(tokens, [])
+  end
+
+  @spec parse_import_item_list([Token.t()], [BeamLang.AST.import_item()]) ::
+          {:ok, [BeamLang.AST.import_item()], [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_import_item_list([%Token{type: :identifier} = tok | rest], acc) do
+    item = %{name: tok.value, span: tok.span}
+    case rest do
+      [%Token{type: :comma} | rest2] -> parse_import_item_list(rest2, [item | acc])
+      _ -> {:ok, Enum.reverse([item | acc]), rest}
+    end
+  end
+
+  defp parse_import_item_list([%Token{} = tok | _], _acc) do
+    {:error, error("Expected import item.", tok)}
+  end
+
+  @spec parse_optional_alias([Token.t()]) :: {binary() | nil, [Token.t()]}
+  defp parse_optional_alias([%Token{type: :as_kw} | rest]) do
+    case rest do
+      [%Token{type: :identifier} = tok | rest2] -> {tok.value, rest2}
+      _ -> {nil, rest}
+    end
+  end
+
+  defp parse_optional_alias(tokens), do: {nil, tokens}
+
+  @spec parse_external_attr([Token.t()]) ::
+          {:ok, map(), [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_external_attr(tokens) do
+    with {:ok, _at_tok, rest1} <- expect(tokens, :at),
+         {:ok, name_tok, rest2} <- expect(rest1, :identifier),
+         {:ok, _lparen, rest3} <- expect(rest2, :lparen),
+         {:ok, args, rest4} <- parse_external_args(rest3, []),
+         {:ok, _rparen, rest5} <- expect(rest4, :rparen) do
+      if name_tok.value == "external" and length(args) == 3 do
+        [language, mod, fun] = args
+        {:ok, %{language: language, module: mod, function: fun}, rest5}
+      else
+        {:error, BeamLang.Error.new(:parser, "Invalid external declaration.", name_tok.span)}
+      end
+    end
+  end
+
+
+  @spec parse_external_args([Token.t()], [binary()]) ::
+          {:ok, [binary()], [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_external_args([%Token{type: type} = tok | rest], acc) when type in [:identifier, :string] do
+    value = tok.value
+
+    case rest do
+      [%Token{type: :comma} | rest2] -> parse_external_args(rest2, [value | acc])
+      _ -> {:ok, Enum.reverse([value | acc]), rest}
+    end
+  end
+
+  defp parse_external_args([%Token{} = tok | _], _acc) do
+    {:error, BeamLang.Error.new(:parser, "Expected external argument.", tok.span)}
   end
 
   @spec parse_block([Token.t()]) ::
@@ -104,6 +296,10 @@ defmodule BeamLang.Parser do
 
   defp parse_statement([%Token{type: :let} | _] = tokens) do
     parse_let(tokens)
+  end
+
+  defp parse_statement([%Token{type: :match} | _] = tokens) do
+    parse_match_statement(tokens)
   end
 
   defp parse_statement([%Token{type: :if_kw} | _] = tokens) do
@@ -152,17 +348,36 @@ defmodule BeamLang.Parser do
     end
   end
 
+  @spec parse_match_statement([Token.t()]) ::
+          {:ok, BeamLang.AST.stmt(), [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_match_statement(tokens) do
+    with {:ok, expr, rest1} <- parse_expression(tokens) do
+      case rest1 do
+        [%Token{type: :semicolon} | _] ->
+          with {:ok, _semi, rest2} <- expect(rest1, :semicolon) do
+            span = BeamLang.Span.merge(expr_span(expr), semicolon_span(rest1, rest2))
+            {:ok, {:expr, %{expr: expr, span: span}}, rest2}
+          end
+
+        _ ->
+          {:ok, {:expr, %{expr: expr, span: expr_span(expr)}}, rest1}
+      end
+    end
+  end
+
   @spec parse_guard([Token.t()]) :: {:ok, BeamLang.AST.stmt(), [Token.t()]} | {:error, BeamLang.Error.t()}
   defp parse_guard(tokens) do
     with {:ok, guard_tok, rest1} <- expect(tokens, :guard),
-         {:ok, cond, rest2} <- parse_expression(rest1),
-         {:ok, _else_tok, rest3} <- expect(rest2, :else_kw),
-         {:ok, _lbrace, rest4} <- expect(rest3, :lbrace),
-         {:ok, else_block, rest5} <- parse_block(rest4),
-         {:ok, _rbrace, rest6} <- expect(rest5, :rbrace) do
+         {:ok, _lparen, rest2} <- expect(rest1, :lparen),
+         {:ok, cond, rest3} <- parse_expression(rest2),
+         {:ok, _rparen, rest4} <- expect(rest3, :rparen),
+         {:ok, _else_tok, rest5} <- expect(rest4, :else_kw),
+         {:ok, _lbrace, rest6} <- expect(rest5, :lbrace),
+         {:ok, else_block, rest7} <- parse_block(rest6),
+         {:ok, _rbrace, rest8} <- expect(rest7, :rbrace) do
       span = BeamLang.Span.merge(guard_tok.span, expr_span(cond))
-      span = BeamLang.Span.merge(span, rbrace_span(rest5, rest6))
-      {:ok, {:guard, %{cond: cond, else_block: else_block, span: span}}, rest6}
+      span = BeamLang.Span.merge(span, rbrace_span(rest7, rest8))
+      {:ok, {:guard, %{cond: cond, else_block: else_block, span: span}}, rest8}
     end
   end
 
@@ -338,6 +553,12 @@ defmodule BeamLang.Parser do
   defp parse_return(tokens) do
     with {:ok, return_tok, rest1} <- expect(tokens, :return) do
       case rest1 do
+        [%Token{type: :bang} | rest2] ->
+          parse_tagged_return(:result, return_tok, rest2)
+
+        [%Token{type: :question} | rest2] ->
+          parse_tagged_return(:optional, return_tok, rest2)
+
         [%Token{type: :semicolon} | _] ->
           with {:ok, _semi, rest2} <- expect(rest1, :semicolon) do
             span = BeamLang.Span.merge(return_tok.span, semicolon_span(rest1, rest2))
@@ -355,6 +576,43 @@ defmodule BeamLang.Parser do
     end
   end
 
+  @spec parse_tagged_return(:result | :optional, Token.t(), [Token.t()]) ::
+          {:ok, BeamLang.AST.stmt(), [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_tagged_return(kind, return_tok, tokens) do
+    with {:ok, tag_tok, rest1} <- expect(tokens, :identifier) do
+      case {kind, tag_tok.value, rest1} do
+        {:optional, "none", [%Token{type: :semicolon} | _]} ->
+          with {:ok, _semi, rest2} <- expect(rest1, :semicolon) do
+            expr = {:opt_none, %{span: tag_tok.span}}
+            span = BeamLang.Span.merge(return_tok.span, semicolon_span(rest1, rest2))
+            {:ok, {:return, %{expr: expr, span: span}}, rest2}
+          end
+
+        _ ->
+          with {:ok, expr, rest2} <- parse_expression(rest1),
+               {:ok, _semi, rest3} <- expect(rest2, :semicolon) do
+            expr =
+              case {kind, tag_tok.value} do
+                {:result, "ok"} -> {:res_ok, %{expr: expr, span: expr_span(expr)}}
+                {:result, "err"} -> {:res_err, %{expr: expr, span: expr_span(expr)}}
+                {:optional, "some"} -> {:opt_some, %{expr: expr, span: expr_span(expr)}}
+                _ -> {:invalid, %{span: tag_tok.span}}
+              end
+
+            case expr do
+              {:invalid, %{span: span}} ->
+                {:error, BeamLang.Error.new(:parser, "Invalid return tag.", span)}
+
+              _ ->
+                span = BeamLang.Span.merge(return_tok.span, expr_span(expr))
+                span = BeamLang.Span.merge(span, semicolon_span(rest2, rest3))
+                {:ok, {:return, %{expr: expr, span: span}}, rest3}
+            end
+          end
+      end
+    end
+  end
+
   @spec parse_expression([Token.t()]) ::
           {:ok, BeamLang.AST.expr(), [Token.t()]} | {:error, BeamLang.Error.t()}
   defp parse_expression(tokens) do
@@ -364,7 +622,7 @@ defmodule BeamLang.Parser do
   @spec parse_comparison([Token.t()]) ::
           {:ok, BeamLang.AST.expr(), [Token.t()]} | {:error, BeamLang.Error.t()}
   defp parse_comparison(tokens) do
-    with {:ok, left, rest} <- parse_term(tokens) do
+    with {:ok, left, rest} <- parse_additive(tokens) do
       parse_comparison_tail(left, rest)
     end
   end
@@ -379,10 +637,70 @@ defmodule BeamLang.Parser do
             {:ok, left, tokens}
 
           op ->
-            with {:ok, right, rest2} <- parse_term(rest) do
+            with {:ok, right, rest2} <- parse_additive(rest) do
               span = BeamLang.Span.merge(expr_span(left), expr_span(right))
               expr = {:binary, %{op: op, left: left, right: right, span: span}}
               parse_comparison_tail(expr, rest2)
+            end
+        end
+
+      [] ->
+        {:ok, left, []}
+    end
+  end
+
+  @spec parse_additive([Token.t()]) ::
+          {:ok, BeamLang.AST.expr(), [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_additive(tokens) do
+    with {:ok, left, rest} <- parse_multiplicative(tokens) do
+      parse_additive_tail(left, rest)
+    end
+  end
+
+  @spec parse_additive_tail(BeamLang.AST.expr(), [Token.t()]) ::
+          {:ok, BeamLang.AST.expr(), [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_additive_tail(left, tokens) do
+    case tokens do
+      [%Token{type: type} | rest] ->
+        case add_op(type) do
+          nil ->
+            {:ok, left, tokens}
+
+          op ->
+            with {:ok, right, rest2} <- parse_multiplicative(rest) do
+              span = BeamLang.Span.merge(expr_span(left), expr_span(right))
+              expr = {:binary, %{op: op, left: left, right: right, span: span}}
+              parse_additive_tail(expr, rest2)
+            end
+        end
+
+      [] ->
+        {:ok, left, []}
+    end
+  end
+
+  @spec parse_multiplicative([Token.t()]) ::
+          {:ok, BeamLang.AST.expr(), [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_multiplicative(tokens) do
+    with {:ok, left, rest} <- parse_term(tokens) do
+      parse_multiplicative_tail(left, rest)
+    end
+  end
+
+  @spec parse_multiplicative_tail(BeamLang.AST.expr(), [Token.t()]) ::
+          {:ok, BeamLang.AST.expr(), [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_multiplicative_tail(left, tokens) do
+    case tokens do
+      [%Token{type: type} | rest] ->
+        case mul_op(type) do
+          nil ->
+            {:ok, left, tokens}
+
+          op ->
+            with {:ok, right, rest2} <- parse_term(rest) do
+              span = BeamLang.Span.merge(expr_span(left), expr_span(right))
+              expr = {:binary, %{op: op, left: left, right: right, span: span}}
+              parse_multiplicative_tail(expr, rest2)
             end
         end
 
@@ -409,6 +727,13 @@ defmodule BeamLang.Parser do
     parse_if_expr(tokens)
   end
 
+  defp parse_primary([%Token{type: :lparen} | rest]) do
+    with {:ok, expr, rest1} <- parse_expression(rest),
+         {:ok, _rparen, rest2} <- expect(rest1, :rparen) do
+      {:ok, expr, rest2}
+    end
+  end
+
   defp parse_primary(tokens) do
     case parse_call(tokens) do
       {:ok, _expr, _rest} = ok -> ok
@@ -433,6 +758,16 @@ defmodule BeamLang.Parser do
   end
 
   defp parse_field_access(expr, rest), do: {:ok, expr, rest}
+
+  @spec parse_call([Token.t()]) ::
+          {:ok, BeamLang.AST.expr(), [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_call([%Token{type: :identifier} = mod_tok, %Token{type: :double_colon}, %Token{type: :identifier} = name_tok, %Token{type: :lparen} | rest]) do
+    with {:ok, args, rest1} <- parse_args(rest, []),
+         {:ok, rparen, rest2} <- expect(rest1, :rparen) do
+      span = BeamLang.Span.merge(mod_tok.span, rparen.span)
+      {:ok, {:call, %{name: "#{mod_tok.value}::#{name_tok.value}", args: args, span: span}}, rest2}
+    end
+  end
 
   @spec parse_call([Token.t()]) ::
           {:ok, BeamLang.AST.expr(), [Token.t()]} | {:error, BeamLang.Error.t()}
@@ -512,7 +847,7 @@ defmodule BeamLang.Parser do
 
   defp parse_match_cases(tokens, acc) do
     with {:ok, case_tok, rest1} <- expect(tokens, :case),
-         {:ok, pattern, rest2} <- parse_pattern(rest1),
+         {:ok, pattern, rest2} <- parse_case_pattern(rest1),
          {:ok, guard, rest3} <- parse_optional_guard(rest2),
          {:ok, _arrow, rest4} <- expect(rest3, :fat_arrow),
          {:ok, body, rest5} <- parse_case_body(rest4) do
@@ -525,6 +860,55 @@ defmodule BeamLang.Parser do
       end
     end
   end
+
+  @spec parse_case_pattern([Token.t()]) ::
+          {:ok, BeamLang.AST.pattern(), [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_case_pattern([%Token{type: :bang} | rest]) do
+    with {:ok, tag_tok, rest1} <- expect(rest, :identifier) do
+      case tag_tok.value do
+        "ok" ->
+          with {:ok, inner, rest2} <- parse_pattern(rest1) do
+            case pattern_binding(inner) do
+              {:ok, name, span} -> {:ok, {:res_ok_pat, %{name: name, span: span}}, rest2}
+              {:error, err} -> {:error, err}
+            end
+          end
+
+        "err" ->
+          with {:ok, inner, rest2} <- parse_pattern(rest1) do
+            case pattern_binding(inner) do
+              {:ok, name, span} -> {:ok, {:res_err_pat, %{name: name, span: span}}, rest2}
+              {:error, err} -> {:error, err}
+            end
+          end
+
+        _ ->
+          {:error, BeamLang.Error.new(:parser, "Invalid result case tag.", tag_tok.span)}
+      end
+    end
+  end
+
+  defp parse_case_pattern([%Token{type: :question} | rest]) do
+    with {:ok, tag_tok, rest1} <- expect(rest, :identifier) do
+      case tag_tok.value do
+        "some" ->
+          with {:ok, inner, rest2} <- parse_pattern(rest1) do
+            case pattern_binding(inner) do
+              {:ok, name, span} -> {:ok, {:opt_some_pat, %{name: name, span: span}}, rest2}
+              {:error, err} -> {:error, err}
+            end
+          end
+
+        "none" ->
+          {:ok, {:opt_none_pat, %{span: tag_tok.span}}, rest1}
+
+        _ ->
+          {:error, BeamLang.Error.new(:parser, "Invalid optional case tag.", tag_tok.span)}
+      end
+    end
+  end
+
+  defp parse_case_pattern(tokens), do: parse_pattern(tokens)
 
   @spec parse_case_body([Token.t()]) ::
           {:ok, BeamLang.AST.expr(), [Token.t()]} | {:error, BeamLang.Error.t()}
@@ -554,9 +938,9 @@ defmodule BeamLang.Parser do
   @spec parse_guard_expression([Token.t()]) ::
           {:ok, BeamLang.AST.expr(), [Token.t()]} | {:error, BeamLang.Error.t()}
   defp parse_guard_expression(tokens) do
-    with {:ok, left, rest1} <- parse_term(tokens),
+    with {:ok, left, rest1} <- parse_additive(tokens),
          {:ok, op, rest2} <- parse_compare_op(rest1),
-         {:ok, right, rest3} <- parse_term(rest2) do
+         {:ok, right, rest3} <- parse_additive(rest2) do
       span = BeamLang.Span.merge(expr_span(left), expr_span(right))
       {:ok, {:binary, %{op: op, left: left, right: right, span: span}}, rest3}
     end
@@ -581,13 +965,24 @@ defmodule BeamLang.Parser do
   defp compare_op(:gte), do: :gte
   defp compare_op(_other), do: nil
 
+  @spec add_op(atom()) :: BeamLang.AST.binary_op() | nil
+  defp add_op(:plus), do: :add
+  defp add_op(:minus), do: :sub
+  defp add_op(_other), do: nil
+
+  @spec mul_op(atom()) :: BeamLang.AST.binary_op() | nil
+  defp mul_op(:star), do: :mul
+  defp mul_op(:slash), do: :div
+  defp mul_op(:percent), do: :mod
+  defp mul_op(_other), do: nil
+
   @spec parse_struct_literal([Token.t()]) ::
           {:ok, BeamLang.AST.expr(), [Token.t()]} | {:error, BeamLang.Error.t()}
   defp parse_struct_literal([%Token{type: :lbrace} = lbrace | rest]) do
     with {:ok, fields, rest1} <- parse_struct_fields(rest, []),
          {:ok, rbrace, rest2} <- expect(rest1, :rbrace) do
       span = BeamLang.Span.merge(lbrace.span, rbrace.span)
-      {:ok, {:struct, %{fields: fields, span: span}}, rest2}
+      {:ok, {:struct, %{fields: fields, type: nil, span: span}}, rest2}
     end
   end
 
@@ -627,6 +1022,10 @@ defmodule BeamLang.Parser do
 
   defp parse_literal([%Token{type: :string} = tok | rest]) do
     {:ok, {:string, %{value: tok.value, span: tok.span}}, rest}
+  end
+
+  defp parse_literal([%Token{type: :char} = tok | rest]) do
+    {:ok, {:char, %{value: tok.value, span: tok.span}}, rest}
   end
 
   @spec parse_literal([Token.t()]) ::
@@ -670,11 +1069,13 @@ defmodule BeamLang.Parser do
 
   @spec parse_struct_pattern([Token.t()]) ::
           {:ok, BeamLang.AST.pattern(), [Token.t()]} | {:error, BeamLang.Error.t()}
-  defp parse_struct_pattern([%Token{type: :identifier} = name_tok, %Token{type: :lbrace} | rest]) do
-    with {:ok, fields, rest1} <- parse_struct_pattern_fields(rest, []),
-         {:ok, rbrace, rest2} <- expect(rest1, :rbrace) do
-      span = BeamLang.Span.merge(name_tok.span, rbrace.span)
-      {:ok, {:struct_pattern, %{name: name_tok.value, fields: fields, span: span}}, rest2}
+  defp parse_struct_pattern(tokens) do
+    with {:ok, {name, name_span}, rest1} <- parse_qualified_identifier(tokens),
+         {:ok, _lbrace, rest2} <- expect(rest1, :lbrace),
+         {:ok, fields, rest3} <- parse_struct_pattern_fields(rest2, []),
+         {:ok, rbrace, rest4} <- expect(rest3, :rbrace) do
+      span = BeamLang.Span.merge(name_span, rbrace.span)
+      {:ok, {:struct_pattern, %{name: name, fields: fields, span: span}}, rest4}
     end
   end
 
@@ -752,6 +1153,7 @@ defmodule BeamLang.Parser do
   defp expr_span({:integer, %{span: span}}), do: span
   defp expr_span({:float, %{span: span}}), do: span
   defp expr_span({:string, %{span: span}}), do: span
+  defp expr_span({:char, %{span: span}}), do: span
   defp expr_span({:bool, %{span: span}}), do: span
   defp expr_span({:identifier, %{span: span}}), do: span
   defp expr_span({:call, %{span: span}}), do: span
@@ -761,15 +1163,32 @@ defmodule BeamLang.Parser do
   defp expr_span({:match, %{span: span}}), do: span
   defp expr_span({:binary, %{span: span}}), do: span
   defp expr_span({:if_expr, %{span: span}}), do: span
+  defp expr_span({:opt_some, %{span: span}}), do: span
+  defp expr_span({:opt_none, %{span: span}}), do: span
+  defp expr_span({:res_ok, %{span: span}}), do: span
+  defp expr_span({:res_err, %{span: span}}), do: span
 
   @spec pattern_span(BeamLang.AST.pattern()) :: BeamLang.Span.t()
   defp pattern_span({:integer, %{span: span}}), do: span
   defp pattern_span({:float, %{span: span}}), do: span
   defp pattern_span({:string, %{span: span}}), do: span
+  defp pattern_span({:char, %{span: span}}), do: span
   defp pattern_span({:bool, %{span: span}}), do: span
   defp pattern_span({:wildcard, %{span: span}}), do: span
   defp pattern_span({:pat_identifier, %{span: span}}), do: span
   defp pattern_span({:struct_pattern, %{span: span}}), do: span
+  defp pattern_span({:opt_some_pat, %{span: span}}), do: span
+  defp pattern_span({:opt_none_pat, %{span: span}}), do: span
+  defp pattern_span({:res_ok_pat, %{span: span}}), do: span
+  defp pattern_span({:res_err_pat, %{span: span}}), do: span
+
+  @spec pattern_binding(BeamLang.AST.pattern()) ::
+          {:ok, binary(), BeamLang.Span.t()} | {:error, BeamLang.Error.t()}
+  defp pattern_binding({:pat_identifier, %{name: name, span: span}}), do: {:ok, name, span}
+  defp pattern_binding({:wildcard, %{span: span}}), do: {:ok, "_", span}
+  defp pattern_binding(other) do
+    {:error, BeamLang.Error.new(:parser, "Expected identifier in tagged pattern.", pattern_span(other))}
+  end
 
   @spec semicolon_span([Token.t()], [Token.t()]) :: BeamLang.Span.t()
   defp semicolon_span([%Token{type: :semicolon} = tok | _], _rest), do: tok.span
@@ -787,11 +1206,12 @@ defmodule BeamLang.Parser do
   @spec block_span(BeamLang.AST.block()) :: BeamLang.Span.t()
   defp block_span({:block, %{stmts: stmts}}), do: block_span(stmts)
 
-  @spec program_span([BeamLang.AST.type_def()], [BeamLang.AST.func()]) :: BeamLang.Span.t()
-  defp program_span(types, funcs) do
+  @spec program_span([BeamLang.AST.import()], [BeamLang.AST.type_def()], [BeamLang.AST.func()]) :: BeamLang.Span.t()
+  defp program_span(imports, types, funcs) do
     spans =
-      (types ++ funcs)
+      (imports ++ types ++ funcs)
       |> Enum.map(fn
+        {:import, %{span: span}} -> span
         {:type_def, %{span: span}} -> span
         {:function, %{span: span}} -> span
       end)
@@ -834,18 +1254,49 @@ defmodule BeamLang.Parser do
   defp eof_span(file_id) do
     BeamLang.Span.new(file_id, 0, 0)
   end
-  @spec parse_type_def([Token.t()]) ::
+  @spec parse_type_def([Token.t()], boolean()) ::
           {:ok, BeamLang.AST.type_def(), [Token.t()]} | {:error, BeamLang.Error.t()}
-  defp parse_type_def(tokens) do
+  defp parse_type_def(tokens, exported) do
     with {:ok, type_tok, rest1} <- expect(tokens, :type_kw),
          {:ok, name_tok, rest2} <- expect(rest1, :identifier),
-         {:ok, _lbrace, rest3} <- expect(rest2, :lbrace),
-         {:ok, fields, rest4} <- parse_type_fields(rest3, []),
-         {:ok, _rbrace, rest5} <- expect(rest4, :rbrace) do
+         {:ok, {params, params_span}, rest3} <- parse_type_params(rest2),
+         {:ok, _lbrace, rest4} <- expect(rest3, :lbrace),
+         {:ok, fields, rest5} <- parse_type_fields(rest4, []),
+         {:ok, _rbrace, rest6} <- expect(rest5, :rbrace) do
       span = BeamLang.Span.merge(type_tok.span, name_tok.span)
-      span = BeamLang.Span.merge(span, rbrace_span(rest4, rest5))
-      {:ok, {:type_def, %{name: name_tok.value, fields: fields, span: span}}, rest5}
+      span =
+        case params_span do
+          nil -> span
+          _ -> BeamLang.Span.merge(span, params_span)
+        end
+      span = BeamLang.Span.merge(span, rbrace_span(rest5, rest6))
+      {:ok, {:type_def, %{name: name_tok.value, params: params, fields: fields, exported: exported, span: span}}, rest6}
     end
+  end
+
+  @spec parse_type_params([Token.t()]) ::
+          {:ok, {[binary()], BeamLang.Span.t() | nil}, [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_type_params([%Token{type: :lt} = lt_tok | rest]) do
+    with {:ok, params, rest1} <- parse_type_param_list(rest, []),
+         {:ok, gt_tok, rest2} <- expect(rest1, :gt) do
+      span = BeamLang.Span.merge(lt_tok.span, gt_tok.span)
+      {:ok, {params, span}, rest2}
+    end
+  end
+
+  defp parse_type_params(tokens), do: {:ok, {[], nil}, tokens}
+
+  @spec parse_type_param_list([Token.t()], [binary()]) ::
+          {:ok, [binary()], [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_type_param_list([%Token{type: :identifier} = tok | rest], acc) do
+    case rest do
+      [%Token{type: :comma} | rest2] -> parse_type_param_list(rest2, [tok.value | acc])
+      _ -> {:ok, Enum.reverse([tok.value | acc]), rest}
+    end
+  end
+
+  defp parse_type_param_list([%Token{} = tok | _], _acc) do
+    {:error, error("Expected type parameter.", tok)}
   end
 
   @spec parse_type_fields([Token.t()], [BeamLang.AST.field_def()]) ::
@@ -870,16 +1321,77 @@ defmodule BeamLang.Parser do
 
   @spec parse_type_name([Token.t()]) ::
           {:ok, BeamLang.AST.type_name(), [Token.t()]} | {:error, BeamLang.Error.t()}
-  defp parse_type_name([%Token{type: :type} = tok | rest]) do
+  defp parse_type_name(tokens) do
+    with {:ok, {base_type, base_span}, rest} <- parse_base_type(tokens) do
+      parse_type_suffix(base_type, base_span, rest)
+    end
+  end
+
+  @spec parse_base_type([Token.t()]) ::
+          {:ok, {BeamLang.AST.type_name(), BeamLang.Span.t()}, [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_base_type([%Token{type: :type} = tok | rest]) do
     {:ok, {String.to_atom(tok.value), tok.span}, rest}
   end
 
-  defp parse_type_name([%Token{type: :identifier} = tok | rest]) do
-    {:ok, {{:named, tok.value}, tok.span}, rest}
+  defp parse_base_type(tokens) do
+    case parse_qualified_identifier(tokens) do
+      {:ok, {name, span}, rest} -> {:ok, {{:named, name}, span}, rest}
+      {:error, _} = error -> error
+    end
   end
 
-  defp parse_type_name([%Token{} = tok | _]) do
-    {:error, error("Expected type name.", tok)}
+  @spec parse_type_suffix(BeamLang.AST.type_name(), BeamLang.Span.t(), [Token.t()]) ::
+          {:ok, {BeamLang.AST.type_name(), BeamLang.Span.t()}, [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_type_suffix(type, span, [%Token{type: :lt} = lt_tok | rest]) do
+    with {:ok, args, rest1} <- parse_type_args(rest, []),
+         {:ok, gt_tok, rest2} <- expect(rest1, :gt) do
+      span = BeamLang.Span.merge(span, lt_tok.span)
+      span = BeamLang.Span.merge(span, gt_tok.span)
+      parse_type_suffix({:generic, type, args}, span, rest2)
+    end
+  end
+
+  defp parse_type_suffix(type, span, [%Token{type: :question} = tok | rest]) do
+    span = BeamLang.Span.merge(span, tok.span)
+    parse_type_suffix({:optional, type}, span, rest)
+  end
+
+  defp parse_type_suffix(type, span, [%Token{type: :bang} = tok | rest]) do
+    with {:ok, {err_type, err_span}, rest2} <- parse_type_name(rest) do
+      span = BeamLang.Span.merge(span, tok.span)
+      span = BeamLang.Span.merge(span, err_span)
+      parse_type_suffix({:result, type, err_type}, span, rest2)
+    end
+  end
+
+  defp parse_type_suffix(type, span, rest), do: {:ok, {type, span}, rest}
+
+  @spec parse_qualified_identifier([Token.t()]) ::
+          {:ok, {binary(), BeamLang.Span.t()}, [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_qualified_identifier([%Token{type: :identifier} = first | rest]) do
+    case rest do
+      [%Token{type: :double_colon}, %Token{type: :identifier} = second | rest2] ->
+        span = BeamLang.Span.merge(first.span, second.span)
+        {:ok, {"#{first.value}::#{second.value}", span}, rest2}
+
+      _ ->
+        {:ok, {first.value, first.span}, rest}
+    end
+  end
+
+  defp parse_qualified_identifier([%Token{} = tok | _]) do
+    {:error, error("Expected identifier.", tok)}
+  end
+
+  @spec parse_type_args([Token.t()], [BeamLang.AST.type_name()]) ::
+          {:ok, [BeamLang.AST.type_name()], [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_type_args(tokens, acc) do
+    with {:ok, {type_name, _span}, rest1} <- parse_type_name(tokens) do
+      case rest1 do
+        [%Token{type: :comma} | rest2] -> parse_type_args(rest2, [type_name | acc])
+        _ -> {:ok, Enum.reverse([type_name | acc]), rest1}
+      end
+    end
   end
 
   @spec parse_optional_type([Token.t()]) :: {BeamLang.AST.type_name() | nil, [Token.t()]}

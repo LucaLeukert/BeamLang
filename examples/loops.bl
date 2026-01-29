@@ -1,4 +1,4 @@
-fn main() -> i32 {
+fn main() -> number {
     let mut count = 0;
 
     while (true) {
@@ -11,8 +11,7 @@ fn main() -> i32 {
     }
 
     for (ch in "hi") {
-        println("test");
-        break;
+        println(typeof(ch));
     }
 
     return count;

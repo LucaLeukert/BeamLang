@@ -3,25 +3,26 @@ defmodule BeamLang.Semantic do
   Performs basic semantic checks for the MVP.
   """
 
-  @spec validate(BeamLang.AST.t()) :: {:ok, BeamLang.AST.t()} | {:error, [BeamLang.Error.t()]}
-  def validate({:program, %{types: types, functions: functions}} = ast) when is_list(functions) do
+  @spec validate(BeamLang.AST.t(), keyword()) :: {:ok, BeamLang.AST.t()} | {:error, [BeamLang.Error.t()]}
+  def validate({:program, %{types: types, functions: functions}} = ast, opts \\ []) when is_list(functions) do
+    require_main = Keyword.get(opts, :require_main, true)
     {:ok, func_table} = build_function_table(functions)
     {:ok, type_table} = build_type_table(types)
 
     errors =
-      collect_main_error(functions) ++
+      (if require_main, do: collect_main_error(functions), else: []) ++
         collect_type_errors(types, type_table) ++
         collect_function_errors(functions, func_table, type_table)
 
     case errors do
-      [] -> {:ok, ast}
+      [] -> {:ok, annotate_program(ast, func_table, type_table)}
       _ -> {:error, errors}
     end
   end
 
   @spec require_main_exists([BeamLang.AST.func()]) :: :ok | {:error, [BeamLang.Error.t()]}
   defp require_main_exists(functions) do
-    case Enum.find(functions, fn {:function, %{name: name}} -> name == "main" end) do
+    case Enum.find(functions, fn {:function, %{name: name, body: body}} -> name == "main" and body != nil end) do
       nil ->
         span = BeamLang.Span.new("<source>", 0, 0)
         {:error, [BeamLang.Error.new(:type, "Missing required function 'main'.", span)]}
@@ -103,21 +104,21 @@ defmodule BeamLang.Semantic do
     end
   end
 
-  @spec require_main_i32(binary(), BeamLang.AST.type_name()) :: :ok | {:error, [BeamLang.Error.t()]}
-  defp require_main_i32("main", :i32), do: :ok
+  @spec require_main_number(binary(), BeamLang.AST.type_name()) :: :ok | {:error, [BeamLang.Error.t()]}
+  defp require_main_number("main", :number), do: :ok
 
-  defp require_main_i32("main", other),
+  defp require_main_number("main", other),
     do:
       {:error,
        [
          BeamLang.Error.new(
            :type,
-           "main must return i32, got #{type_label(other)}.",
+           "main must return number, got #{type_label(other)}.",
            BeamLang.Span.new("<source>", 0, 0)
          )
        ]}
 
-  defp require_main_i32(_name, _type), do: :ok
+  defp require_main_number(_name, _type), do: :ok
 
   @spec type_of_expr(BeamLang.AST.expr(), map(), map(), map(), BeamLang.AST.type_name() | nil) ::
           {:ok, BeamLang.AST.type_name()}
@@ -127,15 +128,18 @@ defmodule BeamLang.Semantic do
              | :unknown_variable
              | :unknown_type
              | :missing_type_annotation
+             | :missing_optional_context
+             | :missing_result_context
              | {:struct, [BeamLang.Error.t()]}
              | {:match, [BeamLang.Error.t()]}
              | {:call, [BeamLang.Error.t()]}
              | :invalid_binary_op
              | {:unknown_field, binary()}
              | :not_a_struct}
-  defp type_of_expr({:integer, %{value: _value}}, _func_table, _type_table, _env, _expected), do: {:ok, :integer}
-  defp type_of_expr({:float, %{value: _value}}, _func_table, _type_table, _env, _expected), do: {:ok, :float}
+  defp type_of_expr({:integer, %{value: _value}}, _func_table, _type_table, _env, _expected), do: {:ok, :number}
+  defp type_of_expr({:float, %{value: _value}}, _func_table, _type_table, _env, _expected), do: {:ok, :number}
   defp type_of_expr({:string, %{value: _value}}, _func_table, _type_table, _env, _expected), do: {:ok, :String}
+  defp type_of_expr({:char, %{value: _value}}, _func_table, _type_table, _env, _expected), do: {:ok, :char}
   defp type_of_expr({:bool, %{value: _value}}, _func_table, _type_table, _env, _expected), do: {:ok, :bool}
 
   defp type_of_expr({:call, %{name: name, args: args}}, func_table, type_table, env, _expected) do
@@ -182,41 +186,150 @@ defmodule BeamLang.Semantic do
   end
 
   defp type_of_expr({:struct, %{fields: fields}}, func_table, type_table, env, expected) do
-    case expected do
-      {:named, type_name} ->
+    case struct_type_info(expected) do
+      {:ok, type_name, args} ->
         case Map.fetch(type_table, type_name) do
-          {:ok, type_fields} ->
-            errors = validate_struct_fields(fields, type_fields, func_table, type_table, env, type_name)
-            if errors == [], do: {:ok, {:named, type_name}}, else: {:error, {:struct, errors}}
+          {:ok, %{params: params, fields: field_map}} ->
+            case type_arg_map(params, args) do
+              {:ok, param_map} ->
+                type_fields = substitute_field_types(field_map, param_map)
+                errors = validate_struct_fields(fields, type_fields, func_table, type_table, env, type_name)
+                if errors == [], do: {:ok, expected}, else: {:error, {:struct, errors}}
 
-          :error ->
-            {:error, :unknown_type}
-        end
-
-      nil ->
-        {:error, :missing_type_annotation}
-
-      _ ->
-        {:error, :unknown_type}
-    end
-  end
-
-  defp type_of_expr({:field, %{target: target, name: name}}, func_table, type_table, env, _expected) do
-    case type_of_expr(target, func_table, type_table, env, nil) do
-      {:ok, {:named, type_name}} ->
-        case Map.fetch(type_table, type_name) do
-          {:ok, field_map} ->
-            case Map.fetch(field_map, name) do
-              {:ok, field_type} -> {:ok, field_type}
-              :error -> {:error, {:unknown_field, name}}
+              :error ->
+                {:error, :unknown_type}
             end
 
           :error ->
             {:error, :unknown_type}
         end
 
-      {:ok, _} ->
-        {:error, :not_a_struct}
+      :missing ->
+        {:error, :missing_type_annotation}
+
+      :error ->
+        {:error, :unknown_type}
+    end
+  end
+
+  defp type_of_expr({:opt_some, %{expr: expr}}, func_table, type_table, env, expected) do
+    case expected do
+      {:optional, inner} ->
+        case type_of_expr(expr, func_table, type_table, env, inner) do
+          {:ok, inferred} ->
+            if type_compatible?(inner, inferred) do
+              {:ok, {:optional, inner}}
+            else
+              {:error,
+               {:match,
+                [
+                  BeamLang.Error.new(
+                    :type,
+                    "Optional value type mismatch. Expected #{type_label(inner)}, got #{type_label(inferred)}.",
+                    expr_span(expr)
+                  )
+                ]}}
+            end
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+
+      _ ->
+        {:error, :missing_optional_context}
+    end
+  end
+
+  defp type_of_expr({:opt_none, %{span: _span}}, _func_table, _type_table, _env, expected) do
+    case expected do
+      {:optional, inner} -> {:ok, {:optional, inner}}
+      _ -> {:error, :missing_optional_context}
+    end
+  end
+
+  defp type_of_expr({:res_ok, %{expr: expr}}, func_table, type_table, env, expected) do
+    case expected do
+      {:result, ok_type, err_type} ->
+        case type_of_expr(expr, func_table, type_table, env, ok_type) do
+          {:ok, inferred} ->
+            if type_compatible?(ok_type, inferred) do
+              {:ok, {:result, ok_type, err_type}}
+            else
+              {:error,
+               {:match,
+                [
+                  BeamLang.Error.new(
+                    :type,
+                    "Result ok type mismatch. Expected #{type_label(ok_type)}, got #{type_label(inferred)}.",
+                    expr_span(expr)
+                  )
+                ]}}
+            end
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+
+      _ ->
+        {:error, :missing_result_context}
+    end
+  end
+
+  defp type_of_expr({:res_err, %{expr: expr}}, func_table, type_table, env, expected) do
+    case expected do
+      {:result, ok_type, err_type} ->
+        case type_of_expr(expr, func_table, type_table, env, err_type) do
+          {:ok, inferred} ->
+            if type_compatible?(err_type, inferred) do
+              {:ok, {:result, ok_type, err_type}}
+            else
+              {:error,
+               {:match,
+                [
+                  BeamLang.Error.new(
+                    :type,
+                    "Result err type mismatch. Expected #{type_label(err_type)}, got #{type_label(inferred)}.",
+                    expr_span(expr)
+                  )
+                ]}}
+            end
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+
+      _ ->
+        {:error, :missing_result_context}
+    end
+  end
+
+  defp type_of_expr({:field, %{target: target, name: name}}, func_table, type_table, env, _expected) do
+    case type_of_expr(target, func_table, type_table, env, nil) do
+      {:ok, type} ->
+        case struct_type_info(type) do
+          {:ok, type_name, args} ->
+            case Map.fetch(type_table, type_name) do
+              {:ok, %{params: params, fields: field_map}} ->
+                case type_arg_map(params, args) do
+                  {:ok, param_map} ->
+                    type_fields = substitute_field_types(field_map, param_map)
+
+                    case Map.fetch(type_fields, name) do
+                      {:ok, field_type} -> {:ok, field_type}
+                      :error -> {:error, {:unknown_field, name}}
+                    end
+
+                  :error ->
+                    {:error, :unknown_type}
+                end
+
+              :error ->
+                {:error, :unknown_type}
+            end
+
+          :error ->
+            {:error, :not_a_struct}
+        end
 
       {:error, reason} ->
         {:error, reason}
@@ -294,13 +407,22 @@ defmodule BeamLang.Semantic do
     end
   end
 
-  defp type_of_expr({:binary, %{op: _op, left: left, right: right}}, func_table, type_table, env, _expected) do
+  defp type_of_expr({:binary, %{op: op, left: left, right: right}}, func_table, type_table, env, _expected) do
     with {:ok, left_type} <- type_of_expr(left, func_table, type_table, env, nil),
          {:ok, right_type} <- type_of_expr(right, func_table, type_table, env, nil) do
-      if comparable_types?(left_type, right_type) do
-        {:ok, :bool}
-      else
-        {:error, :invalid_binary_op}
+      cond do
+        op in [:eq, :neq, :lt, :gt, :lte, :gte] ->
+          if comparable_types?(left_type, right_type) do
+            {:ok, :bool}
+          else
+            {:error, :invalid_binary_op}
+          end
+
+        op in [:add, :sub, :mul, :div, :mod] ->
+          arithmetic_type(op, left_type, right_type)
+
+        true ->
+          {:error, :invalid_binary_op}
       end
     end
   end
@@ -311,24 +433,36 @@ defmodule BeamLang.Semantic do
 
     param_env =
       Enum.reduce(params, %{}, fn %{name: param_name, type: param_type}, acc ->
-        Map.put(acc, param_name, %{type: param_type, mutable: false})
+        Map.put(acc, param_name, %{type: normalize_type(param_type), mutable: false})
       end)
 
+    return_type = normalize_type(return_type)
+
     {env, stmt_errors} =
-      case validate_statements(body, func_table, type_table, param_env) do
-        {:ok, env, errs} -> {env, errs}
+      case body do
+        nil -> {param_env, []}
+        _ ->
+          case validate_statements(body, func_table, type_table, param_env, return_type) do
+            {:ok, env, errs} -> {env, errs}
+          end
       end
 
     errors = errors ++ stmt_errors
 
     errors =
-      case typecheck_return(return_type, body, func_table, type_table, env) do
-        :ok -> errors
-        {:error, errs} -> errors ++ errs
+      case body do
+        nil ->
+          errors
+
+        _ ->
+          case typecheck_return(return_type, body, func_table, type_table, env) do
+            :ok -> errors
+            {:error, errs} -> errors ++ errs
+          end
       end
 
     errors =
-      case require_main_i32(name, return_type) do
+      case require_main_number(name, return_type) do
         :ok -> errors
         {:error, errs} -> errors ++ errs
       end
@@ -339,12 +473,18 @@ defmodule BeamLang.Semantic do
   @spec validate_statements(BeamLang.AST.block(), map(), map(), map()) ::
           {:ok, map(), [BeamLang.Error.t()]}
   defp validate_statements(block, func_table, type_table, env) do
-    validate_statements(block, func_table, type_table, env, 0)
+    validate_statements(block, func_table, type_table, env, 0, nil)
   end
 
-  @spec validate_statements(BeamLang.AST.block(), map(), map(), map(), non_neg_integer()) ::
+  @spec validate_statements(BeamLang.AST.block(), map(), map(), map(), BeamLang.AST.type_name() | nil) ::
           {:ok, map(), [BeamLang.Error.t()]}
-  defp validate_statements({:block, %{stmts: stmts}}, func_table, type_table, env, loop_depth) do
+  defp validate_statements(block, func_table, type_table, env, return_type) do
+    validate_statements(block, func_table, type_table, env, 0, return_type)
+  end
+
+  @spec validate_statements(BeamLang.AST.block(), map(), map(), map(), non_neg_integer(), BeamLang.AST.type_name() | nil) ::
+          {:ok, map(), [BeamLang.Error.t()]}
+  defp validate_statements({:block, %{stmts: stmts}}, func_table, type_table, env, loop_depth, return_type) do
     Enum.reduce_while(stmts, {:ok, env, []}, fn stmt, {:ok, acc_env, errors} ->
       case stmt do
         {:break, %{span: span}} ->
@@ -356,25 +496,30 @@ defmodule BeamLang.Semantic do
 
         {:if_stmt, %{cond: cond, then_block: then_block, else_branch: else_branch}} ->
           errors = errors ++ condition_errors(cond, func_table, type_table, acc_env)
-          {:ok, _env_then, then_errors} = validate_statements(then_block, func_table, type_table, acc_env, loop_depth)
+          {:ok, _env_then, then_errors} =
+            validate_statements(then_block, func_table, type_table, acc_env, loop_depth, return_type)
           errors = then_errors ++ errors
-          {errors, _} = else_errors(else_branch, func_table, type_table, acc_env, loop_depth, errors)
+          {errors, _} =
+            else_errors(else_branch, func_table, type_table, acc_env, loop_depth, return_type, errors)
           {:cont, {:ok, acc_env, errors}}
 
         {:while, %{cond: cond, body: body}} ->
           errors = errors ++ condition_errors(cond, func_table, type_table, acc_env)
-          {:ok, _env_body, body_errors} = validate_statements(body, func_table, type_table, acc_env, loop_depth + 1)
+          {:ok, _env_body, body_errors} =
+            validate_statements(body, func_table, type_table, acc_env, loop_depth + 1, return_type)
           {:cont, {:ok, acc_env, body_errors ++ errors}}
 
         {:loop, %{body: body}} ->
-          {:ok, _env_body, body_errors} = validate_statements(body, func_table, type_table, acc_env, loop_depth + 1)
+          {:ok, _env_body, body_errors} =
+            validate_statements(body, func_table, type_table, acc_env, loop_depth + 1, return_type)
           {:cont, {:ok, acc_env, body_errors ++ errors}}
 
         {:for, %{name: name, collection: collection, body: body, span: span}} ->
           errors = errors ++ iterator_errors(collection, func_table, type_table, acc_env, span)
           item_type = iterator_item_type(collection, func_table, type_table, acc_env)
           loop_env = Map.put(acc_env, name, %{type: item_type, mutable: false})
-          {:ok, _env_body, body_errors} = validate_statements(body, func_table, type_table, loop_env, loop_depth + 1)
+          {:ok, _env_body, body_errors} =
+            validate_statements(body, func_table, type_table, loop_env, loop_depth + 1, return_type)
           {:cont, {:ok, acc_env, body_errors ++ errors}}
 
         {:guard, %{cond: cond, else_block: else_block}} ->
@@ -397,7 +542,8 @@ defmodule BeamLang.Semantic do
                 expr_error(reason, cond) ++ errors
             end
 
-          {:ok, _env, else_errors} = validate_statements(else_block, func_table, type_table, acc_env, loop_depth)
+          {:ok, _env, else_errors} =
+            validate_statements(else_block, func_table, type_table, acc_env, loop_depth, return_type)
           errors = else_errors ++ errors
 
           errors =
@@ -410,6 +556,8 @@ defmodule BeamLang.Semantic do
           {:cont, {:ok, acc_env, errors}}
 
         {:let, %{name: name, expr: expr, mutable: mutable, type: declared_type}} ->
+          declared_type = normalize_type(declared_type)
+
           case type_of_expr(expr, func_table, type_table, acc_env, declared_type) do
             {:error, :unknown_function} ->
               {:cont,
@@ -586,11 +734,16 @@ defmodule BeamLang.Semantic do
               end
           end
 
-        {:return, %{expr: nil}} ->
-          {:cont, {:ok, acc_env, errors}}
+        {:return, %{expr: nil, span: span}} ->
+          if return_type == :void or return_type == nil do
+            {:cont, {:ok, acc_env, errors}}
+          else
+            {:cont,
+             {:ok, acc_env, [BeamLang.Error.new(:type, "Non-void return requires a value.", span) | errors]}}
+          end
 
         {:return, %{expr: expr}} ->
-          case type_of_expr(expr, func_table, type_table, acc_env, nil) do
+          case type_of_expr(expr, func_table, type_table, acc_env, return_type) do
             {:error, :unknown_function} ->
               {:cont,
                {:ok, acc_env, [BeamLang.Error.new(:type, "Unknown function in expression.", expr_span(expr)) | errors]}}
@@ -632,8 +785,21 @@ defmodule BeamLang.Semantic do
             {:error, {:call, errs}} ->
               {:cont, {:ok, acc_env, errs ++ errors}}
 
-            {:ok, _} ->
-              {:cont, {:ok, acc_env, errors}}
+            {:ok, inferred} ->
+              if return_type == nil or return_type == :void or type_compatible?(return_type, inferred) do
+                {:cont, {:ok, acc_env, errors}}
+              else
+                {:cont,
+                 {:ok, acc_env,
+                  [
+                    BeamLang.Error.new(
+                      :type,
+                      "Return type mismatch. Expected #{type_label(return_type)}, got #{type_label(inferred)}.",
+                      expr_span(expr)
+                    )
+                    | errors
+                  ]}}
+              end
           end
 
         {:expr, %{expr: expr}} ->
@@ -690,32 +856,25 @@ defmodule BeamLang.Semantic do
   @spec build_function_table([BeamLang.AST.func()]) :: {:ok, map()}
   defp build_function_table(functions) do
     table =
-      Enum.reduce(functions, stdlib_functions(), fn {:function, %{name: name, params: params, return_type: return_type}}, acc ->
-        param_types = Enum.map(params, & &1.type)
-        Map.put(acc, name, {param_types, return_type})
+      Enum.reduce(functions, %{}, fn {:function, %{name: name, params: params, return_type: return_type}}, acc ->
+        param_types = Enum.map(params, &normalize_type(&1.type))
+        Map.put(acc, name, {param_types, normalize_type(return_type)})
       end)
 
     {:ok, table}
   end
 
-  @spec stdlib_functions() :: map()
-  defp stdlib_functions() do
-    %{
-      "println" => {[:String], :void},
-      "print" => {[:String], :void}
-    }
-  end
-
   @spec build_type_table([BeamLang.AST.type_def()]) :: {:ok, map()}
   defp build_type_table(types) do
     table =
-      Enum.reduce(types, %{}, fn {:type_def, %{name: name, fields: fields}}, acc ->
+      types
+      |> Enum.reduce(%{}, fn {:type_def, %{name: name, params: params, fields: fields}}, acc ->
         field_map =
           Enum.reduce(fields, %{}, fn %{name: fname, type: ftype}, f_acc ->
-            Map.put(f_acc, fname, ftype)
+            Map.put(f_acc, fname, normalize_type(ftype))
           end)
 
-        Map.put(acc, name, field_map)
+        Map.put(acc, name, %{params: params, fields: field_map})
       end)
 
     {:ok, table}
@@ -838,6 +997,55 @@ defmodule BeamLang.Semantic do
     {%{name => %{type: match_type, mutable: false}}, []}
   end
 
+  defp pattern_bindings({:opt_some_pat, %{name: name}}, match_type, _type_table) do
+    case match_type do
+      {:optional, inner} ->
+        if name == "_" do
+          {%{}, []}
+        else
+          {%{name => %{type: inner, mutable: false}}, []}
+        end
+
+      _ ->
+        {%{}, [BeamLang.Error.new(:type, "Optional pattern requires an optional value.", BeamLang.Span.new("<source>", 0, 0))]}
+    end
+  end
+
+  defp pattern_bindings({:opt_none_pat, %{span: span}}, match_type, _type_table) do
+    case match_type do
+      {:optional, _inner} -> {%{}, []}
+      _ -> {%{}, [BeamLang.Error.new(:type, "Optional pattern requires an optional value.", span)]}
+    end
+  end
+
+  defp pattern_bindings({:res_ok_pat, %{name: name, span: span}}, match_type, _type_table) do
+    case match_type do
+      {:result, ok_type, _err_type} ->
+        if name == "_" do
+          {%{}, []}
+        else
+          {%{name => %{type: ok_type, mutable: false}}, []}
+        end
+
+      _ ->
+        {%{}, [BeamLang.Error.new(:type, "Result ok pattern requires a result value.", span)]}
+    end
+  end
+
+  defp pattern_bindings({:res_err_pat, %{name: name, span: span}}, match_type, _type_table) do
+    case match_type do
+      {:result, _ok_type, err_type} ->
+        if name == "_" do
+          {%{}, []}
+        else
+          {%{name => %{type: err_type, mutable: false}}, []}
+        end
+
+      _ ->
+        {%{}, [BeamLang.Error.new(:type, "Result err pattern requires a result value.", span)]}
+    end
+  end
+
   defp pattern_bindings({:integer, _} = pattern, match_type, _type_table) do
     literal_pattern_bindings(pattern, match_type)
   end
@@ -855,31 +1063,39 @@ defmodule BeamLang.Semantic do
   end
 
   defp pattern_bindings({:struct_pattern, %{name: name, fields: fields, span: span}}, match_type, type_table) do
-    case match_type do
-      {:named, ^name} ->
+    case struct_type_info(match_type) do
+      {:ok, ^name, args} ->
         case Map.fetch(type_table, name) do
-          {:ok, field_map} ->
-            Enum.reduce(fields, {%{}, []}, fn %{name: field_name, pattern: pattern, span: field_span},
-                                             {env, errors} ->
-              case Map.fetch(field_map, field_name) do
-                :error ->
-                  {env,
-                   [BeamLang.Error.new(:type, "Unknown field '#{field_name}' in struct pattern.", field_span) | errors]}
+          {:ok, %{params: params, fields: field_map}} ->
+            case type_arg_map(params, args) do
+              {:ok, param_map} ->
+                type_fields = substitute_field_types(field_map, param_map)
 
-                {:ok, field_type} ->
-                  {bindings, field_errors} = pattern_bindings(pattern, field_type, type_table)
-                  {Map.merge(env, bindings), errors ++ field_errors}
-              end
-            end)
+                Enum.reduce(fields, {%{}, []}, fn %{name: field_name, pattern: pattern, span: field_span},
+                                                 {env, errors} ->
+                  case Map.fetch(type_fields, field_name) do
+                    :error ->
+                      {env,
+                       [BeamLang.Error.new(:type, "Unknown field '#{field_name}' in struct pattern.", field_span) | errors]}
+
+                    {:ok, field_type} ->
+                      {bindings, field_errors} = pattern_bindings(pattern, field_type, type_table)
+                      {Map.merge(env, bindings), errors ++ field_errors}
+                  end
+                end)
+
+              :error ->
+                {%{}, [BeamLang.Error.new(:type, "Unknown type '#{name}' in struct pattern.", span)]}
+            end
 
           :error ->
             {%{}, [BeamLang.Error.new(:type, "Unknown type '#{name}' in struct pattern.", span)]}
         end
 
-      {:named, other} ->
+      {:ok, other, _args} ->
         {%{}, [BeamLang.Error.new(:type, "Struct pattern expects #{name}, got #{type_label({:named, other})}.", span)]}
 
-      _ ->
+      :error ->
         {%{}, [BeamLang.Error.new(:type, "Struct pattern requires a struct value.", span)]}
     end
   end
@@ -904,9 +1120,10 @@ defmodule BeamLang.Semantic do
   end
 
   @spec literal_type(BeamLang.AST.literal()) :: BeamLang.AST.type_name()
-  defp literal_type({:integer, _}), do: :integer
-  defp literal_type({:float, _}), do: :float
+  defp literal_type({:integer, _}), do: :number
+  defp literal_type({:float, _}), do: :number
   defp literal_type({:string, _}), do: :String
+  defp literal_type({:char, _}), do: :char
   defp literal_type({:bool, _}), do: :bool
 
   @spec mismatch_type(BeamLang.AST.type_name(), [{BeamLang.AST.type_name(), BeamLang.Span.t()}]) ::
@@ -945,6 +1162,12 @@ defmodule BeamLang.Semantic do
       :missing_type_annotation ->
         [BeamLang.Error.new(:type, "Struct literal requires a type annotation.", expr_span(expr))]
 
+      :missing_optional_context ->
+        [BeamLang.Error.new(:type, "Optional literal requires an optional type context.", expr_span(expr))]
+
+      :missing_result_context ->
+        [BeamLang.Error.new(:type, "Result literal requires a result type context.", expr_span(expr))]
+
       :not_a_struct ->
         [BeamLang.Error.new(:type, "Field access requires a struct value.", expr_span(expr))]
 
@@ -975,6 +1198,7 @@ defmodule BeamLang.Semantic do
   defp pattern_span({:integer, %{span: span}}), do: span
   defp pattern_span({:float, %{span: span}}), do: span
   defp pattern_span({:string, %{span: span}}), do: span
+  defp pattern_span({:char, %{span: span}}), do: span
   defp pattern_span({:bool, %{span: span}}), do: span
   defp pattern_span({:wildcard, %{span: span}}), do: span
   defp pattern_span({:pat_identifier, %{span: span}}), do: span
@@ -1017,6 +1241,7 @@ defmodule BeamLang.Semantic do
   defp guard_operand?({:integer, _}), do: true
   defp guard_operand?({:float, _}), do: true
   defp guard_operand?({:string, _}), do: true
+  defp guard_operand?({:char, _}), do: true
   defp guard_operand?({:bool, _}), do: true
   defp guard_operand?({:identifier, _}), do: true
   defp guard_operand?(_), do: false
@@ -1041,18 +1266,19 @@ defmodule BeamLang.Semantic do
     end
   end
 
-  @spec else_errors(BeamLang.AST.if_else_branch() | nil, map(), map(), map(), non_neg_integer(), [BeamLang.Error.t()]) ::
+  @spec else_errors(BeamLang.AST.if_else_branch() | nil, map(), map(), map(), non_neg_integer(), BeamLang.AST.type_name() | nil, [BeamLang.Error.t()]) ::
           {[BeamLang.Error.t()], map()}
-  defp else_errors(nil, _func_table, _type_table, _env, _loop_depth, errors), do: {errors, %{}}
+  defp else_errors(nil, _func_table, _type_table, _env, _loop_depth, _return_type, errors), do: {errors, %{}}
 
-  defp else_errors({:else_block, %{block: block}}, func_table, type_table, env, loop_depth, errors) do
-    {:ok, _env_else, else_errors} = validate_statements(block, func_table, type_table, env, loop_depth)
+  defp else_errors({:else_block, %{block: block}}, func_table, type_table, env, loop_depth, return_type, errors) do
+    {:ok, _env_else, else_errors} = validate_statements(block, func_table, type_table, env, loop_depth, return_type)
     {else_errors ++ errors, %{}}
   end
 
-  defp else_errors({:else_if, %{if: if_stmt}}, func_table, type_table, env, loop_depth, errors) do
-    {:ok, _env, if_errors} = validate_statements({:block, %{stmts: [if_stmt], span: BeamLang.Span.new("<source>", 0, 0)}},
-      func_table, type_table, env, loop_depth)
+  defp else_errors({:else_if, %{if: if_stmt}}, func_table, type_table, env, loop_depth, return_type, errors) do
+    {:ok, _env, if_errors} =
+      validate_statements({:block, %{stmts: [if_stmt], span: BeamLang.Span.new("<source>", 0, 0)}},
+        func_table, type_table, env, loop_depth, return_type)
     {if_errors ++ errors, %{}}
   end
 
@@ -1103,10 +1329,12 @@ defmodule BeamLang.Semantic do
 
   @spec iterator_errors(BeamLang.AST.expr(), map(), map(), map(), BeamLang.Span.t()) :: [BeamLang.Error.t()]
   defp iterator_errors(collection, func_table, type_table, env, span) do
-    case type_of_expr(collection, func_table, type_table, env, :String) do
-      {:ok, :String} -> []
+    case type_of_expr(collection, func_table, type_table, env, nil) do
       {:ok, type} ->
-        [BeamLang.Error.new(:type, "For loop requires String iterable, got #{type_label(type)}.", span)]
+        case iterator_item_type_from_type(type) do
+          {:ok, _item_type} -> []
+          :error -> [BeamLang.Error.new(:type, "For loop requires Iterator<T> or String, got #{type_label(type)}.", span)]
+        end
 
       {:error, reason} ->
         expr_error(reason, collection)
@@ -1114,12 +1342,32 @@ defmodule BeamLang.Semantic do
   end
 
   @spec iterator_item_type(BeamLang.AST.expr(), map(), map(), map()) :: BeamLang.AST.type_name()
-  defp iterator_item_type(_collection, _func_table, _type_table, _env), do: :i32
+  defp iterator_item_type(collection, func_table, type_table, env) do
+    case type_of_expr(collection, func_table, type_table, env, nil) do
+      {:ok, type} ->
+        case iterator_item_type_from_type(type) do
+          {:ok, item_type} -> item_type
+          :error -> :number
+        end
+
+      {:error, _} ->
+        :number
+    end
+  end
+
+  defp iterator_item_type_from_type(type) do
+    case normalize_type(type) do
+      :String -> {:ok, :char}
+      {:generic, {:named, "Iterator"}, [item_type]} -> {:ok, item_type}
+      _ -> :error
+    end
+  end
 
   @spec expr_span(BeamLang.AST.expr()) :: BeamLang.Span.t()
   defp expr_span({:integer, %{span: span}}), do: span
   defp expr_span({:float, %{span: span}}), do: span
   defp expr_span({:string, %{span: span}}), do: span
+  defp expr_span({:char, %{span: span}}), do: span
   defp expr_span({:bool, %{span: span}}), do: span
   defp expr_span({:call, %{span: span}}), do: span
   defp expr_span({:identifier, %{span: span}}), do: span
@@ -1129,22 +1377,43 @@ defmodule BeamLang.Semantic do
   defp expr_span({:match, %{span: span}}), do: span
   defp expr_span({:binary, %{span: span}}), do: span
   defp expr_span({:if_expr, %{span: span}}), do: span
+  defp expr_span({:opt_some, %{span: span}}), do: span
+  defp expr_span({:opt_none, %{span: span}}), do: span
+  defp expr_span({:res_ok, %{span: span}}), do: span
+  defp expr_span({:res_err, %{span: span}}), do: span
 
   @spec type_compatible?(BeamLang.AST.type_name(), BeamLang.AST.type_name()) :: boolean()
-  defp type_compatible?(expected, inferred) when expected == inferred, do: true
-  defp type_compatible?(expected, :integer) when expected in [:i32, :i64], do: true
-  defp type_compatible?(expected, :float) when expected in [:f32, :f64], do: true
-  defp type_compatible?(_expected, _inferred), do: false
+  defp type_compatible?(expected, inferred) do
+    expected = normalize_type(expected)
+    inferred = normalize_type(inferred)
+    do_type_compatible?(expected, inferred)
+  end
+
+  defp do_type_compatible?(:any, _inferred), do: true
+  defp do_type_compatible?(expected, inferred) when expected == inferred, do: true
+  defp do_type_compatible?({:optional, expected_inner}, {:optional, inferred_inner}),
+    do: type_compatible?(expected_inner, inferred_inner)
+  defp do_type_compatible?({:result, expected_ok, expected_err}, {:result, inferred_ok, inferred_err}),
+    do: type_compatible?(expected_ok, inferred_ok) and type_compatible?(expected_err, inferred_err)
+  defp do_type_compatible?(_expected, _inferred), do: false
 
   @spec comparable_types?(BeamLang.AST.type_name(), BeamLang.AST.type_name()) :: boolean()
-  defp comparable_types?(left, right) when left == right, do: true
-  defp comparable_types?(left, :integer) when left in [:i32, :i64], do: true
-  defp comparable_types?(:integer, right) when right in [:i32, :i64], do: true
-  defp comparable_types?(left, :float) when left in [:f32, :f64], do: true
-  defp comparable_types?(:float, right) when right in [:f32, :f64], do: true
-  defp comparable_types?(left, right) when left in [:i32, :i64] and right in [:i32, :i64], do: true
-  defp comparable_types?(left, right) when left in [:f32, :f64] and right in [:f32, :f64], do: true
-  defp comparable_types?(_left, _right), do: false
+  defp comparable_types?(left, right) do
+    left = normalize_type(left)
+    right = normalize_type(right)
+    do_comparable_types?(left, right)
+  end
+
+  defp do_comparable_types?(left, right) when left == right, do: true
+  defp do_comparable_types?(_left, _right), do: false
+
+  defp arithmetic_type(op, left, right) do
+    if left == :number and right == :number and op in [:add, :sub, :mul, :div, :mod] do
+      {:ok, :number}
+    else
+      {:error, :invalid_binary_op}
+    end
+  end
 
   @spec stmt_span(BeamLang.AST.stmt()) :: BeamLang.Span.t()
   defp stmt_span({:return, %{span: span}}), do: span
@@ -1187,21 +1456,31 @@ defmodule BeamLang.Semantic do
 
   @spec resolve_field_type(BeamLang.AST.type_name(), binary(), map()) ::
           {:ok, BeamLang.AST.type_name()} | {:error, BeamLang.Error.t()}
-  defp resolve_field_type({:named, type_name}, field, type_table) do
-    case Map.fetch(type_table, type_name) do
-      {:ok, field_map} ->
-        case Map.fetch(field_map, field) do
-          {:ok, field_type} -> {:ok, field_type}
-          :error -> {:error, BeamLang.Error.new(:type, "Unknown field '#{field}'.", BeamLang.Span.new("<source>", 0, 0))}
+  defp resolve_field_type(type, field, type_table) do
+    case struct_type_info(type) do
+      {:ok, type_name, args} ->
+        case Map.fetch(type_table, type_name) do
+          {:ok, %{params: params, fields: field_map}} ->
+            case type_arg_map(params, args) do
+              {:ok, param_map} ->
+                type_fields = substitute_field_types(field_map, param_map)
+
+                case Map.fetch(type_fields, field) do
+                  {:ok, field_type} -> {:ok, field_type}
+                  :error -> {:error, BeamLang.Error.new(:type, "Unknown field '#{field}'.", BeamLang.Span.new("<source>", 0, 0))}
+                end
+
+              :error ->
+                {:error, BeamLang.Error.new(:type, "Unknown type '#{type_name}'.", BeamLang.Span.new("<source>", 0, 0))}
+            end
+
+          :error ->
+            {:error, BeamLang.Error.new(:type, "Unknown type '#{type_name}'.", BeamLang.Span.new("<source>", 0, 0))}
         end
 
       :error ->
-        {:error, BeamLang.Error.new(:type, "Unknown type '#{type_name}'.", BeamLang.Span.new("<source>", 0, 0))}
+        {:error, BeamLang.Error.new(:type, "Field access requires a struct value.", BeamLang.Span.new("<source>", 0, 0))}
     end
-  end
-
-  defp resolve_field_type(_other, _field, _type_table) do
-    {:error, BeamLang.Error.new(:type, "Field access requires a struct value.", BeamLang.Span.new("<source>", 0, 0))}
   end
 
   @spec block_span([BeamLang.AST.stmt()]) :: BeamLang.Span.t()
@@ -1239,7 +1518,17 @@ defmodule BeamLang.Semantic do
     block_returns?(then_block) and else_branch_returns?(else_branch)
   end
 
+  defp stmt_returns?({:expr, %{expr: {:match, %{cases: cases}}}}) do
+    Enum.all?(cases, &match_case_returns?/1)
+  end
+
   defp stmt_returns?(_stmt), do: false
+
+  defp match_case_returns?(%{body: {:block_expr, %{block: block}}}) do
+    block_returns?(block)
+  end
+
+  defp match_case_returns?(_case), do: false
 
   @spec else_branch_returns?(BeamLang.AST.if_else_branch() | nil) :: boolean()
   defp else_branch_returns?(nil), do: false
@@ -1251,7 +1540,7 @@ defmodule BeamLang.Semantic do
     preferred =
       case_types
       |> Enum.map(&elem(&1, 0))
-      |> Enum.reject(&(&1 in [:integer, :float, :void]))
+      |> Enum.reject(&(&1 in [:void]))
 
     case preferred do
       [first | _] -> first
@@ -1259,9 +1548,342 @@ defmodule BeamLang.Semantic do
     end
   end
 
+  defp struct_type_info(nil), do: :missing
+  defp struct_type_info({:named, name}) when is_binary(name), do: {:ok, name, []}
+  defp struct_type_info({:generic, {:named, name}, args}), do: {:ok, name, args}
+  defp struct_type_info(_type), do: :error
+
+  defp annotate_program({:program, %{module: module, imports: imports, types: types, functions: functions, span: span}}, func_table, type_table) do
+    functions = Enum.map(functions, &annotate_function(&1, func_table, type_table))
+    {:program, %{module: module, imports: imports, types: types, functions: functions, span: span}}
+  end
+
+  defp annotate_function({:function, %{body: nil}} = func, _func_table, _type_table), do: func
+
+  defp annotate_function({:function, %{params: params, return_type: return_type, body: body} = info}, func_table, type_table) do
+    env =
+      Enum.reduce(params, %{}, fn %{name: name, type: type}, acc ->
+        Map.put(acc, name, %{type: normalize_type(type), mutable: false})
+      end)
+
+    {body, _env} = annotate_block(body, env, func_table, type_table, normalize_type(return_type))
+    {:function, %{info | body: body}}
+  end
+
+  defp annotate_block({:block, %{stmts: stmts, span: span}}, env, func_table, type_table, return_type) do
+    {stmts, env} =
+      Enum.map_reduce(stmts, env, fn stmt, acc_env ->
+        annotate_stmt(stmt, acc_env, func_table, type_table, return_type)
+      end)
+
+    {{:block, %{stmts: stmts, span: span}}, env}
+  end
+
+  defp annotate_stmt({:let, %{name: name, expr: expr, mutable: mutable, type: declared_type} = info}, env, func_table, type_table, _return_type) do
+    declared_type = normalize_type(declared_type)
+    {expr, _inferred} = annotate_expr(expr, declared_type, env, func_table, type_table)
+    inferred =
+      case declared_type do
+        nil ->
+          case type_of_expr(expr, func_table, type_table, env, nil) do
+            {:ok, type} -> type
+            _ -> :any
+          end
+
+        _ ->
+          declared_type
+      end
+
+    env = Map.put(env, name, %{type: inferred, mutable: mutable})
+    {{:let, %{info | expr: expr}}, env}
+  end
+
+  defp annotate_stmt({:assign, %{target: target, expr: expr} = info}, env, func_table, type_table, _return_type) do
+    expected =
+      case assignment_target(target, env) do
+        {:ok, %{type: type}} -> type
+        _ -> nil
+      end
+
+    {expr, _inferred} = annotate_expr(expr, expected, env, func_table, type_table)
+    {{:assign, %{info | expr: expr}}, env}
+  end
+
+  defp annotate_stmt({:return, %{expr: nil}} = stmt, env, _func_table, _type_table, _return_type), do: {stmt, env}
+
+  defp annotate_stmt({:return, %{expr: expr} = info}, env, func_table, type_table, return_type) do
+    {expr, _inferred} = annotate_expr(expr, return_type, env, func_table, type_table)
+    {{:return, %{info | expr: expr}}, env}
+  end
+
+  defp annotate_stmt({:expr, %{expr: expr} = info}, env, func_table, type_table, _return_type) do
+    {expr, _inferred} = annotate_expr(expr, nil, env, func_table, type_table)
+    {{:expr, %{info | expr: expr}}, env}
+  end
+
+  defp annotate_stmt({:if_stmt, %{cond: cond, then_block: then_block, else_branch: else_branch} = info}, env, func_table, type_table, return_type) do
+    {cond, _} = annotate_expr(cond, :bool, env, func_table, type_table)
+    {then_block, _} = annotate_block(then_block, env, func_table, type_table, return_type)
+    else_branch = annotate_else_branch(else_branch, env, func_table, type_table, return_type)
+    {{:if_stmt, %{info | cond: cond, then_block: then_block, else_branch: else_branch}}, env}
+  end
+
+  defp annotate_stmt({:while, %{cond: cond, body: body} = info}, env, func_table, type_table, return_type) do
+    {cond, _} = annotate_expr(cond, :bool, env, func_table, type_table)
+    {body, _} = annotate_block(body, env, func_table, type_table, return_type)
+    {{:while, %{info | cond: cond, body: body}}, env}
+  end
+
+  defp annotate_stmt({:loop, %{body: body} = info}, env, func_table, type_table, return_type) do
+    {body, _} = annotate_block(body, env, func_table, type_table, return_type)
+    {{:loop, %{info | body: body}}, env}
+  end
+
+  defp annotate_stmt({:for, %{name: name, collection: collection, body: body} = info}, env, func_table, type_table, return_type) do
+    {collection, _} = annotate_expr(collection, nil, env, func_table, type_table)
+
+    collection_type =
+      case type_of_expr(collection, func_table, type_table, env, nil) do
+        {:ok, type} -> normalize_type(type)
+        _ -> :any
+      end
+
+    item_type =
+      case iterator_item_type_from_type(collection_type) do
+        {:ok, t} -> t
+        :error -> :any
+      end
+
+    loop_env = Map.put(env, name, %{type: item_type, mutable: false})
+    {body, _} = annotate_block(body, loop_env, func_table, type_table, return_type)
+    updated = Map.merge(info, %{collection: collection, body: body, collection_type: collection_type, item_type: item_type})
+    {{:for, updated}, env}
+  end
+
+  defp annotate_stmt({:guard, %{cond: cond, else_block: else_block} = info}, env, func_table, type_table, return_type) do
+    {cond, _} = annotate_expr(cond, :bool, env, func_table, type_table)
+    {else_block, _} = annotate_block(else_block, env, func_table, type_table, return_type)
+    {{:guard, %{info | cond: cond, else_block: else_block}}, env}
+  end
+
+  defp annotate_stmt(stmt, env, _func_table, _type_table, _return_type), do: {stmt, env}
+
+  defp annotate_else_branch(nil, _env, _func_table, _type_table, _return_type), do: nil
+  defp annotate_else_branch({:else_block, %{block: block, span: span}}, env, func_table, type_table, return_type) do
+    {block, _} = annotate_block(block, env, func_table, type_table, return_type)
+    {:else_block, %{block: block, span: span}}
+  end
+  defp annotate_else_branch({:else_if, %{if: if_stmt, span: span}}, env, func_table, type_table, return_type) do
+    {if_stmt, _} = annotate_stmt(if_stmt, env, func_table, type_table, return_type)
+    {:else_if, %{if: if_stmt, span: span}}
+  end
+
+  defp annotate_expr({:struct, %{fields: fields, span: span} = info}, expected, env, func_table, type_table) do
+    expected = normalize_type(expected)
+    {field_types, struct_type} =
+      case struct_type_info(expected) do
+        {:ok, name, args} ->
+          case Map.fetch(type_table, name) do
+            {:ok, %{params: params, fields: field_map}} ->
+              case type_arg_map(params, args) do
+                {:ok, param_map} ->
+                  {substitute_field_types(field_map, param_map), expected}
+
+                :error ->
+                  {%{}, nil}
+              end
+
+            :error ->
+              {%{}, nil}
+          end
+
+        _ ->
+          {%{}, nil}
+      end
+
+    fields =
+      Enum.map(fields, fn %{name: name, expr: expr} = field ->
+        expected_field = Map.get(field_types, name, nil)
+        {expr, _} = annotate_expr(expr, expected_field, env, func_table, type_table)
+        %{field | expr: expr}
+      end)
+
+    expr = {:struct, %{info | fields: fields, type: struct_type, span: span}}
+    {expr, struct_type || expected}
+  end
+
+  defp annotate_expr({:call, %{name: name, args: args, span: span}}, _expected, env, func_table, type_table) do
+    args =
+      case Map.fetch(func_table, name) do
+        {:ok, {param_types, _return_type}} ->
+          args
+          |> Enum.zip(param_types)
+          |> Enum.map(fn {arg, expected_type} ->
+            {arg, _} = annotate_expr(arg, expected_type, env, func_table, type_table)
+            arg
+          end)
+
+        :error ->
+          Enum.map(args, fn arg ->
+            {arg, _} = annotate_expr(arg, nil, env, func_table, type_table)
+            arg
+          end)
+      end
+
+    {{:call, %{name: name, args: args, span: span}}, nil}
+  end
+
+  defp annotate_expr({:field, %{target: target, name: name, span: span}}, _expected, env, func_table, type_table) do
+    {target, _} = annotate_expr(target, nil, env, func_table, type_table)
+    {{:field, %{target: target, name: name, span: span}}, nil}
+  end
+
+  defp annotate_expr({:match, %{expr: expr, cases: cases, span: span}}, expected, env, func_table, type_table) do
+    {expr, _} = annotate_expr(expr, nil, env, func_table, type_table)
+
+    cases =
+      Enum.map(cases, fn %{pattern: pattern, guard: guard, body: body, span: cspan} = match_case ->
+        {body, _} =
+          case body do
+            {:block_expr, %{block: block, span: bspan}} ->
+              {block, _} = annotate_block(block, env, func_table, type_table, expected)
+              {{:block_expr, %{block: block, span: bspan}}, nil}
+
+            _ ->
+              annotate_expr(body, expected, env, func_table, type_table)
+          end
+
+        {guard, _} =
+          case guard do
+            nil -> {nil, nil}
+            _ -> annotate_expr(guard, :bool, env, func_table, type_table)
+          end
+
+        %{match_case | pattern: pattern, guard: guard, body: body, span: cspan}
+      end)
+
+    {{:match, %{expr: expr, cases: cases, span: span}}, expected}
+  end
+
+  defp annotate_expr({:if_expr, %{cond: cond, then_block: then_block, else_branch: else_branch, span: span}}, expected, env, func_table, type_table) do
+    {cond, _} = annotate_expr(cond, :bool, env, func_table, type_table)
+    {then_block, _} = annotate_block(then_block, env, func_table, type_table, expected)
+    else_branch = annotate_else_branch(else_branch, env, func_table, type_table, expected)
+    {{:if_expr, %{cond: cond, then_block: then_block, else_branch: else_branch, span: span}}, expected}
+  end
+
+  defp annotate_expr({:block_expr, %{block: block, span: span}}, expected, env, func_table, type_table) do
+    {block, _} = annotate_block(block, env, func_table, type_table, expected)
+    {{:block_expr, %{block: block, span: span}}, expected}
+  end
+
+  defp annotate_expr({:binary, %{op: op, left: left, right: right, span: span}}, _expected, env, func_table, type_table) do
+    {left, _} = annotate_expr(left, nil, env, func_table, type_table)
+    {right, _} = annotate_expr(right, nil, env, func_table, type_table)
+    {{:binary, %{op: op, left: left, right: right, span: span}}, nil}
+  end
+
+  defp annotate_expr({:opt_some, %{expr: expr, span: span}}, expected, env, func_table, type_table) do
+    inner =
+      case normalize_type(expected) do
+        {:optional, inner} -> inner
+        _ -> nil
+      end
+
+    {expr, _} = annotate_expr(expr, inner, env, func_table, type_table)
+    {{:opt_some, %{expr: expr, span: span}}, expected}
+  end
+
+  defp annotate_expr({:res_ok, %{expr: expr, span: span}}, expected, env, func_table, type_table) do
+    inner =
+      case normalize_type(expected) do
+        {:result, ok_type, _} -> ok_type
+        _ -> nil
+      end
+
+    {expr, _} = annotate_expr(expr, inner, env, func_table, type_table)
+    {{:res_ok, %{expr: expr, span: span}}, expected}
+  end
+
+  defp annotate_expr({:res_err, %{expr: expr, span: span}}, expected, env, func_table, type_table) do
+    inner =
+      case normalize_type(expected) do
+        {:result, _, err_type} -> err_type
+        _ -> nil
+      end
+
+    {expr, _} = annotate_expr(expr, inner, env, func_table, type_table)
+    {{:res_err, %{expr: expr, span: span}}, expected}
+  end
+
+  defp annotate_expr(expr, _expected, _env, _func_table, _type_table), do: {expr, nil}
+
+  defp normalize_type(nil), do: nil
+
+  defp normalize_type({:generic, {:named, "Optional"}, [inner]}),
+    do: {:optional, normalize_type(inner)}
+
+  defp normalize_type({:generic, {:named, "Result"}, [ok_type, err_type]}),
+    do: {:result, normalize_type(ok_type), normalize_type(err_type)}
+
+  defp normalize_type({:generic, base, args}),
+    do: {:generic, normalize_type(base), Enum.map(args, &normalize_type/1)}
+
+  defp normalize_type({:optional, inner}), do: {:optional, normalize_type(inner)}
+
+  defp normalize_type({:result, ok_type, err_type}),
+    do: {:result, normalize_type(ok_type), normalize_type(err_type)}
+
+  defp normalize_type(:any), do: :any
+
+  defp normalize_type(type), do: type
+
+  defp type_arg_map(params, args) do
+    if length(params) == length(args) do
+      {:ok, Map.new(Enum.zip(params, args))}
+    else
+      :error
+    end
+  end
+
+  defp substitute_field_types(field_map, param_map) do
+    Enum.reduce(field_map, %{}, fn {name, type}, acc ->
+      Map.put(acc, name, substitute_type(type, param_map))
+    end)
+  end
+
+  defp substitute_type({:named, name}, param_map) do
+    case Map.fetch(param_map, name) do
+      {:ok, type} -> type
+      :error -> {:named, name}
+    end
+  end
+
+  defp substitute_type({:generic, base, args}, param_map) do
+    {:generic, substitute_type(base, param_map), Enum.map(args, &substitute_type(&1, param_map))}
+  end
+
+  defp substitute_type({:optional, inner}, param_map) do
+    {:optional, substitute_type(inner, param_map)}
+  end
+
+  defp substitute_type({:result, ok_type, err_type}, param_map) do
+    {:result, substitute_type(ok_type, param_map), substitute_type(err_type, param_map)}
+  end
+
+  defp substitute_type(type, _param_map), do: type
+
   @spec type_label(BeamLang.AST.type_name()) :: binary()
+  defp type_label({:generic, base, args}) do
+    "#{type_label(base)}<#{Enum.map_join(args, ", ", &type_label/1)}>"
+  end
   defp type_label({:named, name}) when is_binary(name), do: name
-  defp type_label(:integer), do: "i32"
-  defp type_label(:float), do: "f32"
+  defp type_label(:any), do: "any"
+  defp type_label(:number), do: "number"
+  defp type_label(:char), do: "char"
+  defp type_label(:integer), do: "number"
+  defp type_label(:float), do: "number"
+  defp type_label({:optional, inner}), do: "#{type_label(inner)}?"
+  defp type_label({:result, ok_type, err_type}), do: "#{type_label(ok_type)}!#{type_label(err_type)}"
   defp type_label(type) when is_atom(type), do: Atom.to_string(type)
 end

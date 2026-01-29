@@ -3,32 +3,51 @@ defmodule BeamLang.AST do
   AST types for BeamLang. These will expand as the language grows.
   """
 
-  @type type_name :: :i32 | :i64 | :f32 | :f64 | :String | :bool | :void | {:named, binary()}
+  @type type_name ::
+          :number
+          | :String
+          | :char
+          | :bool
+          | :void
+          | :any
+          | {:named, binary()}
+          | {:generic, type_name(), [type_name()]}
+          | {:optional, type_name()}
+          | {:result, type_name(), type_name()}
 
   @type literal ::
           {:integer, %{value: integer(), span: BeamLang.Span.t()}}
           | {:float, %{value: float(), span: BeamLang.Span.t()}}
           | {:string, %{value: binary(), span: BeamLang.Span.t()}}
+          | {:char, %{value: integer(), span: BeamLang.Span.t()}}
           | {:bool, %{value: boolean(), span: BeamLang.Span.t()}}
 
   @type expr ::
           literal()
           | {:call, %{name: binary(), args: [expr()], span: BeamLang.Span.t()}}
           | {:identifier, %{name: binary(), span: BeamLang.Span.t()}}
-          | {:struct, %{fields: [field_assign()], span: BeamLang.Span.t()}}
+          | {:struct, %{fields: [field_assign()], type: type_name() | nil, span: BeamLang.Span.t()}}
           | {:field, %{target: expr(), name: binary(), span: BeamLang.Span.t()}}
           | {:block_expr, %{block: block(), span: BeamLang.Span.t()}}
           | {:match, %{expr: expr(), cases: [match_case()], span: BeamLang.Span.t()}}
           | {:binary, %{op: binary_op(), left: expr(), right: expr(), span: BeamLang.Span.t()}}
           | {:if_expr, %{cond: expr(), then_block: block(), else_branch: if_else_branch(), span: BeamLang.Span.t()}}
+          | {:opt_some, %{expr: expr(), span: BeamLang.Span.t()}}
+          | {:opt_none, %{span: BeamLang.Span.t()}}
+          | {:res_ok, %{expr: expr(), span: BeamLang.Span.t()}}
+          | {:res_err, %{expr: expr(), span: BeamLang.Span.t()}}
 
-  @type binary_op :: :eq | :neq | :lt | :gt | :lte | :gte
+  @type binary_op :: :eq | :neq | :lt | :gt | :lte | :gte | :add | :sub | :mul | :div | :mod
 
   @type pattern ::
           literal()
           | {:wildcard, %{span: BeamLang.Span.t()}}
           | {:pat_identifier, %{name: binary(), span: BeamLang.Span.t()}}
           | {:struct_pattern, %{name: binary(), fields: [pattern_field()], span: BeamLang.Span.t()}}
+          | {:opt_some_pat, %{name: binary(), span: BeamLang.Span.t()}}
+          | {:opt_none_pat, %{span: BeamLang.Span.t()}}
+          | {:res_ok_pat, %{name: binary(), span: BeamLang.Span.t()}}
+          | {:res_err_pat, %{name: binary(), span: BeamLang.Span.t()}}
 
   @type pattern_field ::
           %{name: binary(), pattern: pattern(), span: BeamLang.Span.t()}
@@ -72,7 +91,9 @@ defmodule BeamLang.AST do
              name: binary(),
              params: [func_param()],
              return_type: type_name(),
-             body: block(),
+             body: block() | nil,
+             external: map() | nil,
+             exported: boolean(),
              span: BeamLang.Span.t()
            }}
 
@@ -80,15 +101,35 @@ defmodule BeamLang.AST do
           {:type_def,
            %{
              name: binary(),
+             params: [binary()],
              fields: [field_def()],
+             exported: boolean(),
              span: BeamLang.Span.t()
            }}
 
   @type field_def ::
           %{name: binary(), type: type_name(), span: BeamLang.Span.t()}
 
+  @type import_item :: %{name: binary(), span: BeamLang.Span.t()}
+
+  @type import ::
+          {:import,
+           %{
+             module: binary(),
+             alias: binary() | nil,
+             items: :all | :none | [import_item()],
+             span: BeamLang.Span.t()
+           }}
+
   @type program ::
-          {:program, %{types: [type_def()], functions: [func()], span: BeamLang.Span.t()}}
+          {:program,
+           %{
+             module: binary() | nil,
+             imports: [import()],
+             types: [type_def()],
+             functions: [func()],
+             span: BeamLang.Span.t()
+           }}
 
   @type t :: program()
 end

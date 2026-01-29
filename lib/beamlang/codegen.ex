@@ -5,17 +5,16 @@ defmodule BeamLang.Codegen do
 
   @module_name :beamlang_program
 
-  @spec module_name() :: atom()
-  def module_name, do: @module_name
-
   @spec to_erlang_forms(BeamLang.AST.t()) :: list()
-  def to_erlang_forms({:program, %{functions: functions}}) when is_list(functions) do
+  def to_erlang_forms({:program, %{module: module, functions: functions}}) when is_list(functions) do
     line = 1
 
-    function_forms = Enum.map(functions, &function_form/1)
+    externals = externals_map(functions)
+    function_forms = functions |> Enum.filter(&function_has_body?/1) |> Enum.map(&function_form(&1, externals))
+    module_atom = module_atom(module)
 
     [
-      {:attribute, line, :module, @module_name},
+      {:attribute, line, :module, module_atom},
       {:attribute, line, :export, exports(functions)}
       | function_forms
     ]
@@ -23,19 +22,43 @@ defmodule BeamLang.Codegen do
 
   @spec exports([BeamLang.AST.func()]) :: list()
   defp exports(functions) do
-    Enum.map(functions, fn {:function, %{name: name, params: params}} ->
+    functions
+    |> Enum.filter(&function_has_body?/1)
+    |> Enum.filter(fn {:function, %{name: name, exported: exported}} -> exported or name == "main" end)
+    |> Enum.map(fn {:function, %{name: name, params: params}} ->
       {String.to_atom(name), length(params)}
     end)
   end
 
-  @spec function_form(BeamLang.AST.func()) :: tuple()
-  defp function_form({:function, %{name: name, params: params, body: {:block, %{stmts: stmts}}}}) do
+  @spec function_form(BeamLang.AST.func(), map()) :: tuple()
+  defp function_form({:function, %{name: name, params: params, body: {:block, %{stmts: stmts}}}}, externals) do
     line = 1
     {params_form, env, counter} = params_form(params, line, %{}, 0)
-    {expr, _env, _counter} = stmt_expr_tree(stmts, env, counter)
+    env = Map.put(env, :__externals__, externals)
+    {expr, _env, counter} = stmt_expr_tree(stmts, env, counter)
+    {expr, _counter} = unwrap_return(expr, counter)
 
     {:function, line, String.to_atom(name), length(params),
      [return_clause(line, params_form, [expr])]}
+  end
+
+  defp function_has_body?({:function, %{body: body}}), do: body != nil
+
+  defp externals_map(functions) do
+    names_with_body =
+      functions
+      |> Enum.filter(&function_has_body?/1)
+      |> Enum.map(fn {:function, %{name: name}} -> name end)
+      |> MapSet.new()
+
+    functions
+    |> Enum.reduce(%{}, fn {:function, %{name: name, external: external}}, acc ->
+      cond do
+        external == nil -> acc
+        MapSet.member?(names_with_body, name) -> acc
+        true -> Map.put(acc, name, external)
+      end
+    end)
   end
 
   @spec stmt_expr_tree([BeamLang.AST.stmt()], map(), non_neg_integer()) ::
@@ -58,8 +81,9 @@ defmodule BeamLang.Codegen do
         {expr, env, counter} = loop_expr(body_stmts, env, counter)
         {expr, env, counter}
 
-      {:for, %{name: name, collection: collection, body: {:block, %{stmts: body_stmts}}}} ->
-        {expr, env, counter} = for_expr(name, collection, body_stmts, env, counter)
+      {:for, %{name: name, collection: collection, body: {:block, %{stmts: body_stmts}}} = info} ->
+        collection_type = Map.get(info, :collection_type, :any)
+        {expr, env, counter} = for_expr(name, collection, body_stmts, env, counter, collection_type)
         {expr, env, counter}
 
       {:guard, %{cond: cond, else_block: {:block, %{stmts: else_stmts}}}} ->
@@ -87,17 +111,21 @@ defmodule BeamLang.Codegen do
       {:while, %{cond: cond, body: {:block, %{stmts: body_stmts}}}} ->
         {loop_expr, env, counter} = while_expr(cond, body_stmts, env, counter)
         {rest_expr, env, counter} = stmt_expr_tree(rest, env, counter)
-        {{:block, 1, [loop_expr, rest_expr]}, env, counter}
+        {expr, counter} = sequence_expr(loop_expr, rest_expr, counter)
+        {expr, env, counter}
 
       {:loop, %{body: {:block, %{stmts: body_stmts}}}} ->
         {loop_expr, env, counter} = loop_expr(body_stmts, env, counter)
         {rest_expr, env, counter} = stmt_expr_tree(rest, env, counter)
-        {{:block, 1, [loop_expr, rest_expr]}, env, counter}
+        {expr, counter} = sequence_expr(loop_expr, rest_expr, counter)
+        {expr, env, counter}
 
-      {:for, %{name: name, collection: collection, body: {:block, %{stmts: body_stmts}}}} ->
-        {for_expr, env, counter} = for_expr(name, collection, body_stmts, env, counter)
+      {:for, %{name: name, collection: collection, body: {:block, %{stmts: body_stmts}}} = info} ->
+        collection_type = Map.get(info, :collection_type, :any)
+        {for_expr, env, counter} = for_expr(name, collection, body_stmts, env, counter, collection_type)
         {rest_expr, env, counter} = stmt_expr_tree(rest, env, counter)
-        {{:block, 1, [for_expr, rest_expr]}, env, counter}
+        {expr, counter} = sequence_expr(for_expr, rest_expr, counter)
+        {expr, env, counter}
 
       {:guard, %{cond: cond, else_block: {:block, %{stmts: else_stmts}}}} ->
         cond_form = expr_form(1, cond, env)
@@ -112,7 +140,8 @@ defmodule BeamLang.Codegen do
       _ ->
         {form, env, counter} = stmt_form(stmt, env, counter)
         {rest_expr, env, counter} = stmt_expr_tree(rest, env, counter)
-        {{:block, 1, [form, rest_expr]}, env, counter}
+        {expr, counter} = sequence_expr(form, rest_expr, counter)
+        {expr, env, counter}
     end
   end
 
@@ -136,11 +165,11 @@ defmodule BeamLang.Codegen do
   end
 
   defp stmt_form({:return, %{expr: nil}}, env, counter) do
-    {{:atom, 1, :ok}, env, counter}
+    {return_marker({:atom, 1, :ok}), env, counter}
   end
 
   defp stmt_form({:return, %{expr: expr}}, env, counter) do
-    {expr_form(1, expr, env), env, counter}
+    {return_marker(expr_form(1, expr, env)), env, counter}
   end
 
   defp stmt_form({:break, %{}}, env, counter) do
@@ -168,11 +197,30 @@ defmodule BeamLang.Codegen do
   end
 
   @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
-  defp expr_form(line, {:struct, %{fields: fields}}, env) do
+  defp expr_form(line, {:char, %{value: value}}, _env) do
+    {:tuple, line, [{:atom, line, :char}, {:integer, line, value}]}
+  end
+
+  @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
+  defp expr_form(line, {:struct, %{fields: fields, type: type}}, env) do
     entries =
       Enum.map(fields, fn %{name: name, expr: expr} ->
         {:map_field_assoc, line, {:atom, line, String.to_atom(name)}, expr_form(line, expr, env)}
       end)
+
+    entries =
+      case type do
+        nil ->
+          entries
+
+        _ ->
+          type_label = type_label(type)
+          [
+            {:map_field_assoc, line, {:atom, line, :__beamlang_type__},
+             {:string, line, String.to_charlist(type_label)}}
+            | entries
+          ]
+      end
 
     {:map, line, entries}
   end
@@ -212,13 +260,20 @@ defmodule BeamLang.Codegen do
 
   @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
   defp expr_form(line, {:call, %{name: name, args: args}}, env) do
-    case stdlib_call(name, args, line, env) do
+    case external_call(name, args, line, env) do
       {:ok, form} ->
         form
 
       :error ->
-        {:call, line, {:atom, line, String.to_atom(name)},
-         Enum.map(args, &expr_form(line, &1, env))}
+        case qualified_name(name) do
+          {:ok, mod, fun} ->
+            {:call, line, {:remote, line, {:atom, line, String.to_atom(mod)}, {:atom, line, String.to_atom(fun)}},
+             Enum.map(args, &expr_form(line, &1, env))}
+
+          :error ->
+            {:call, line, {:atom, line, String.to_atom(name)},
+             Enum.map(args, &expr_form(line, &1, env))}
+        end
     end
   end
 
@@ -230,6 +285,26 @@ defmodule BeamLang.Codegen do
   @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
   defp expr_form(line, {:binary, %{op: op, left: left, right: right}}, env) do
     {:op, line, op_atom(op), expr_form(line, left, env), expr_form(line, right, env)}
+  end
+
+  @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
+  defp expr_form(line, {:opt_some, %{expr: expr}}, env) do
+    {:tuple, line, [{:atom, line, :some}, expr_form(line, expr, env)]}
+  end
+
+  @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
+  defp expr_form(line, {:opt_none, %{}}, _env) do
+    {:atom, line, :none}
+  end
+
+  @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
+  defp expr_form(line, {:res_ok, %{expr: expr}}, env) do
+    {:tuple, line, [{:atom, line, :ok}, expr_form(line, expr, env)]}
+  end
+
+  @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
+  defp expr_form(line, {:res_err, %{expr: expr}}, env) do
+    {:tuple, line, [{:atom, line, :err}, expr_form(line, expr, env)]}
   end
 
   @spec assignment_form(
@@ -282,8 +357,14 @@ defmodule BeamLang.Codegen do
         _ -> else_branch_expr(else_branch, env)
       end
 
-    then_seq = sequence_expr(then_expr, rest_expr)
-    else_seq = if else_branch == nil, do: rest_expr, else: sequence_expr(else_expr, rest_expr)
+    {then_seq, counter} = sequence_expr(then_expr, rest_expr, counter)
+
+    {else_seq, counter} =
+      if else_branch == nil do
+        {rest_expr, counter}
+      else
+        sequence_expr(else_expr, rest_expr, counter)
+      end
 
     clause_true = {:clause, 1, [{:atom, 1, true}], [], [then_seq]}
     clause_false = {:clause, 1, [{:atom, 1, false}], [], [else_seq]}
@@ -302,22 +383,40 @@ defmodule BeamLang.Codegen do
     loop_fun_expr(:always_true, body_stmts, env, counter, :loop)
   end
 
-  @spec for_expr(binary(), BeamLang.AST.expr(), [BeamLang.AST.stmt()], map(), non_neg_integer()) ::
+  @spec for_expr(binary(), BeamLang.AST.expr(), [BeamLang.AST.stmt()], map(), non_neg_integer(), BeamLang.AST.type_name()) ::
           {tuple(), map(), non_neg_integer()}
-  defp for_expr(name, collection, body_stmts, env, counter) do
+  defp for_expr(name, collection, body_stmts, env, counter, collection_type) do
     line = 1
     {fun_var, counter} = fresh_var("for_loop", counter)
     fun_name = fun_var
     {item_var, counter} = fresh_var(name, counter)
     {rest_var, counter} = fresh_var("rest", counter)
+    wrap_char? = collection_type == :String
+    {head_var, counter} =
+      if wrap_char? do
+        fresh_var("#{name}_head", counter)
+      else
+        {item_var, counter}
+      end
 
     body_env = Map.put(env, name, item_var)
     {body_expr, _env_body, counter} = stmt_expr_tree(body_stmts, body_env, counter)
+    {body_expr, counter} =
+      if wrap_char? do
+        wrap_match =
+          {:match, line, {:var, line, item_var},
+           {:tuple, line, [{:atom, line, :char}, {:var, line, head_var}]}}
+
+        sequence_expr(wrap_match, body_expr, counter)
+      else
+        {body_expr, counter}
+      end
     continue_call = {:call, line, {:var, line, fun_name}, [{:var, line, rest_var}]}
-    body_case = break_case(body_expr, continue_call)
+    {body_case, counter} = break_case(body_expr, continue_call, counter)
 
     clause_nil = {:clause, line, [{:nil, line}], [], [{:atom, line, :ok}]}
-    clause_cons = {:clause, line, [{:cons, line, {:var, line, item_var}, {:var, line, rest_var}}], [], [body_case]}
+    clause_cons =
+      {:clause, line, [{:cons, line, {:var, line, head_var}, {:var, line, rest_var}}], [], [body_case]}
     fun_expr = {:named_fun, line, fun_name, [clause_nil, clause_cons]}
     match_fun = {:match, line, {:var, line, fun_var}, fun_expr}
     call_fun = {:call, line, {:var, line, fun_var}, [expr_form(line, collection, env)]}
@@ -332,7 +431,7 @@ defmodule BeamLang.Codegen do
     fun_name = fun_var
     {body_expr, _env_body, counter} = stmt_expr_tree(body_stmts, env, counter)
     continue_call = {:call, line, {:var, line, fun_name}, []}
-    body_case = break_case(body_expr, continue_call)
+    {body_case, counter} = break_case(body_expr, continue_call, counter)
 
     cond_form =
       case cond do
@@ -348,12 +447,15 @@ defmodule BeamLang.Codegen do
     {{:block, line, [match_fun, call_fun]}, env, counter}
   end
 
-  @spec break_case(tuple(), tuple()) :: tuple()
-  defp break_case(body_expr, continue_expr) do
+  @spec break_case(tuple(), tuple(), non_neg_integer()) :: {tuple(), non_neg_integer()}
+  defp break_case(body_expr, continue_expr, counter) do
     line = 1
+    ret_var = internal_var("return_value")
+    return_tuple = {:tuple, line, [{:atom, line, :__return__}, {:var, line, ret_var}]}
+    clause_return = {:clause, line, [return_tuple], [], [return_tuple]}
     clause_break = {:clause, line, [{:atom, line, :__break__}], [], [{:atom, line, :ok}]}
     clause_continue = {:clause, line, [{:var, line, :_}], [], [continue_expr]}
-    {:case, line, body_expr, [clause_break, clause_continue]}
+    {{:case, line, body_expr, [clause_return, clause_break, clause_continue]}, counter}
   end
 
   @spec block_expr_form(BeamLang.AST.block(), map()) :: tuple()
@@ -386,9 +488,39 @@ defmodule BeamLang.Codegen do
     end
   end
 
-  @spec sequence_expr(tuple(), tuple()) :: tuple()
-  defp sequence_expr(expr1, expr2) do
-    {:block, 1, [expr1, expr2]}
+  @spec sequence_expr(tuple(), tuple(), non_neg_integer()) :: {tuple(), non_neg_integer()}
+  defp sequence_expr(expr1, expr2, counter) do
+    return_case(expr1, expr2, counter)
+  end
+
+  defp return_marker(expr) do
+    line = 1
+    {:tuple, line, [{:atom, line, :__return__}, expr]}
+  end
+
+  defp return_case(expr, continue_expr, counter) do
+    line = 1
+    ret_var = internal_var("return_value")
+    return_tuple = {:tuple, line, [{:atom, line, :__return__}, {:var, line, ret_var}]}
+    clause_return = {:clause, line, [return_tuple], [], [return_tuple]}
+    clause_continue = {:clause, line, [{:var, line, :_}], [], [continue_expr]}
+    {{:case, line, expr, [clause_return, clause_continue]}, counter}
+  end
+
+  defp unwrap_return(expr, counter) do
+    line = 1
+    ret_var = internal_var("return_value")
+    other_var = internal_var("return_other")
+    return_tuple = {:tuple, line, [{:atom, line, :__return__}, {:var, line, ret_var}]}
+    clause_return = {:clause, line, [return_tuple], [], [{:var, line, ret_var}]}
+    clause_other = {:clause, line, [{:var, line, other_var}], [], [{:var, line, other_var}]}
+    {{:case, line, expr, [clause_return, clause_other]}, counter}
+  end
+
+  defp internal_var(name) do
+    id = System.unique_integer([:positive])
+    {first, rest} = String.split_at(name, 1)
+    String.to_atom(String.upcase(first) <> rest <> "_" <> Integer.to_string(id))
   end
 
 
@@ -402,42 +534,62 @@ defmodule BeamLang.Codegen do
     end)
   end
 
-  @spec stdlib_call(binary(), [BeamLang.AST.expr()], non_neg_integer(), map()) ::
+  @spec external_call(binary(), [BeamLang.AST.expr()], non_neg_integer(), map()) ::
           {:ok, tuple()} | :error
-  defp stdlib_call("println", [arg], line, env) do
-    {:ok,
-     {:call, line, {:remote, line, {:atom, line, :io}, {:atom, line, :format}},
-      [
-        {:string, line, ~c"~s~n"},
-        list_form(line, [expr_form(line, arg, env)])
-      ]}}
+  defp external_call(name, args, line, env) do
+    if String.contains?(name, "::") do
+      :error
+    else
+      externals = Map.get(env, :__externals__, %{})
+
+      case Map.fetch(externals, name) do
+        {:ok, %{language: language, module: mod, function: fun}} ->
+          mod_atom = external_module_atom(language, mod)
+          fun_atom = String.to_atom(fun)
+          {:ok, {:call, line, {:remote, line, {:atom, line, mod_atom}, {:atom, line, fun_atom}},
+           Enum.map(args, &expr_form(line, &1, env))}}
+
+        :error ->
+          :error
+      end
+    end
   end
 
-  defp stdlib_call("print", [arg], line, env) do
-    {:ok,
-     {:call, line, {:remote, line, {:atom, line, :io}, {:atom, line, :format}},
-      [
-        {:string, line, ~c"~s"},
-        list_form(line, [expr_form(line, arg, env)])
-      ]}}
-  end
-
-  defp stdlib_call(_name, _args, _line, _env), do: :error
-
-  @spec list_form(non_neg_integer(), [tuple()]) :: tuple()
-  defp list_form(line, []), do: {:nil, line}
-
-  defp list_form(line, [head | tail]) do
-    {:cons, line, head, list_form(line, tail)}
-  end
+  defp external_module_atom("erlang", mod), do: String.to_atom(mod)
+  defp external_module_atom("elixir", mod), do: String.to_atom("Elixir." <> mod)
+  defp external_module_atom(_other, mod), do: String.to_atom(mod)
 
   @spec op_atom(BeamLang.AST.binary_op()) :: atom()
+  defp op_atom(:add), do: :+
+  defp op_atom(:sub), do: :-
+  defp op_atom(:mul), do: :*
+  defp op_atom(:div), do: :/
+  defp op_atom(:mod), do: :rem
   defp op_atom(:eq), do: :"=:="
   defp op_atom(:neq), do: :"=/="
   defp op_atom(:lt), do: :<
   defp op_atom(:gt), do: :>
   defp op_atom(:lte), do: :"=<"
   defp op_atom(:gte), do: :>=
+
+  defp module_atom(nil), do: @module_name
+  defp module_atom(name) when is_binary(name), do: String.to_atom(name)
+
+  defp qualified_name(name) when is_binary(name) do
+    case String.split(name, "::", parts: 2) do
+      [mod, fun] -> {:ok, mod, fun}
+      _ -> :error
+    end
+  end
+
+  defp type_label({:generic, base, args}) do
+    "#{type_label(base)}<#{Enum.map_join(args, ", ", &type_label/1)}>"
+  end
+
+  defp type_label({:named, name}) when is_binary(name), do: name
+  defp type_label({:optional, inner}), do: "#{type_label(inner)}?"
+  defp type_label({:result, ok_type, err_type}), do: "#{type_label(ok_type)}!#{type_label(err_type)}"
+  defp type_label(type) when is_atom(type), do: Atom.to_string(type)
 
   @spec case_clause_form(non_neg_integer(), BeamLang.AST.match_case(), map()) :: tuple()
   defp case_clause_form(line, %{pattern: pattern, guard: guard, body: body}, env) do
@@ -480,6 +632,9 @@ defmodule BeamLang.Codegen do
   defp guard_operand_form(line, {:string, %{value: value}}, _env),
     do: {:string, line, String.to_charlist(value)}
 
+  defp guard_operand_form(line, {:char, %{value: value}}, _env),
+    do: {:tuple, line, [{:atom, line, :char}, {:integer, line, value}]}
+
   defp guard_operand_form(line, {:bool, %{value: value}}, _env), do: {:atom, line, value}
 
   defp guard_operand_form(line, {:identifier, %{name: name}}, env),
@@ -492,8 +647,12 @@ defmodule BeamLang.Codegen do
   end
 
   defp pattern_form(line, {:pat_identifier, %{name: name}}, counter) do
-    {var, counter} = fresh_var(name, counter)
-    {{:var, line, var}, %{name => var}, counter}
+    if name == "_" do
+      {{:var, line, :_}, %{}, counter}
+    else
+      {var, counter} = fresh_var(name, counter)
+      {{:var, line, var}, %{name => var}, counter}
+    end
   end
 
   defp pattern_form(line, {:integer, %{value: value}}, counter) do
@@ -506,6 +665,10 @@ defmodule BeamLang.Codegen do
 
   defp pattern_form(line, {:string, %{value: value}}, counter) do
     {{:string, line, String.to_charlist(value)}, %{}, counter}
+  end
+
+  defp pattern_form(line, {:char, %{value: value}}, counter) do
+    {{:tuple, line, [{:atom, line, :char}, {:integer, line, value}]}, %{}, counter}
   end
 
   defp pattern_form(line, {:bool, %{value: value}}, counter) do
@@ -522,6 +685,46 @@ defmodule BeamLang.Codegen do
       end)
 
     {{:map, line, entries}, env, counter}
+  end
+
+  defp pattern_form(line, {:opt_some_pat, %{name: name}}, counter) do
+    {pat, env, counter} =
+      if name == "_" do
+        {{:var, line, :_}, %{}, counter}
+      else
+        {var, counter} = fresh_var(name, counter)
+        {{:var, line, var}, %{name => var}, counter}
+      end
+
+    {{:tuple, line, [{:atom, line, :some}, pat]}, env, counter}
+  end
+
+  defp pattern_form(line, {:opt_none_pat, %{}}, counter) do
+    {{:atom, line, :none}, %{}, counter}
+  end
+
+  defp pattern_form(line, {:res_ok_pat, %{name: name}}, counter) do
+    {pat, env, counter} =
+      if name == "_" do
+        {{:var, line, :_}, %{}, counter}
+      else
+        {var, counter} = fresh_var(name, counter)
+        {{:var, line, var}, %{name => var}, counter}
+      end
+
+    {{:tuple, line, [{:atom, line, :ok}, pat]}, env, counter}
+  end
+
+  defp pattern_form(line, {:res_err_pat, %{name: name}}, counter) do
+    {pat, env, counter} =
+      if name == "_" do
+        {{:var, line, :_}, %{}, counter}
+      else
+        {var, counter} = fresh_var(name, counter)
+        {{:var, line, var}, %{name => var}, counter}
+      end
+
+    {{:tuple, line, [{:atom, line, :err}, pat]}, env, counter}
   end
 
   @spec var_atom(binary()) :: atom()
