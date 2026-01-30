@@ -27,6 +27,7 @@ defmodule BeamLang.AST do
           literal()
           | {:call, %{name: binary(), args: [expr()], span: BeamLang.Span.t()}}
           | {:identifier, %{name: binary(), span: BeamLang.Span.t()}}
+          | {:lambda, %{params: [func_param()], return_type: type_name(), body: block(), span: BeamLang.Span.t()}}
           | {:struct, %{fields: [field_assign()], type: type_name() | nil, span: BeamLang.Span.t()}}
           | {:field, %{target: expr(), name: binary(), span: BeamLang.Span.t()}}
           | {:block_expr, %{block: block(), span: BeamLang.Span.t()}}

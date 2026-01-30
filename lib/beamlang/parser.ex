@@ -727,6 +727,10 @@ defmodule BeamLang.Parser do
     parse_if_expr(tokens)
   end
 
+  defp parse_primary([%Token{type: :fn} | _] = tokens) do
+    parse_lambda(tokens)
+  end
+
   defp parse_primary([%Token{type: :question} | rest]) do
     with {:ok, tag_tok, rest1} <- expect(rest, :identifier) do
       case tag_tok.value do
@@ -777,6 +781,24 @@ defmodule BeamLang.Parser do
               {:error, _} -> parse_identifier(tokens)
             end
         end
+    end
+  end
+
+  @spec parse_lambda([Token.t()]) ::
+          {:ok, BeamLang.AST.expr(), [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_lambda(tokens) do
+    with {:ok, fn_tok, rest1} <- expect(tokens, :fn),
+         {:ok, _lparen, rest2} <- expect(rest1, :lparen),
+         {:ok, params, rest3} <- parse_params(rest2, []),
+         {:ok, _rparen, rest4} <- expect(rest3, :rparen),
+         {:ok, _arrow, rest5} <- expect(rest4, :arrow),
+         {:ok, {return_type, return_span}, rest6} <- parse_type_name(rest5),
+         {:ok, _lbrace, rest7} <- expect(rest6, :lbrace),
+         {:ok, body, rest8} <- parse_block(rest7),
+         {:ok, rbrace, rest9} <- expect(rest8, :rbrace) do
+      span = BeamLang.Span.merge(fn_tok.span, return_span)
+      span = BeamLang.Span.merge(span, rbrace.span)
+      {:ok, {:lambda, %{params: params, return_type: return_type, body: body, span: span}}, rest9}
     end
   end
 
@@ -1198,6 +1220,7 @@ defmodule BeamLang.Parser do
   defp expr_span({:opt_none, %{span: span}}), do: span
   defp expr_span({:res_ok, %{span: span}}), do: span
   defp expr_span({:res_err, %{span: span}}), do: span
+  defp expr_span({:lambda, %{span: span}}), do: span
 
   @spec pattern_span(BeamLang.AST.pattern()) :: BeamLang.Span.t()
   defp pattern_span({:integer, %{span: span}}), do: span

@@ -249,6 +249,21 @@ defmodule BeamLang.ASTPrinter do
     ]
   end
 
+  defp format_node({:lambda, %{params: params, return_type: return_type, body: body}}, indent) do
+    params_text =
+      params
+      |> Enum.map(fn %{name: param_name, type: param_type} ->
+        "#{param_name}: #{format_type(param_type)}"
+      end)
+      |> Enum.join(", ")
+
+    [
+      indent_line(indent, "Lambda -> #{format_type(return_type)}"),
+      indent_line(indent + 2, "Params #{params_text}"),
+      format_node(body, indent + 2)
+    ]
+  end
+
   defp format_node({:struct, %{fields: fields}}, indent) do
     [
       indent_line(indent, "Struct"),

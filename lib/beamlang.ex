@@ -396,6 +396,10 @@ defmodule BeamLang do
   defp qualified_in_expr({:opt_some, %{expr: expr}}), do: qualified_in_expr(expr)
   defp qualified_in_expr({:res_ok, %{expr: expr}}), do: qualified_in_expr(expr)
   defp qualified_in_expr({:res_err, %{expr: expr}}), do: qualified_in_expr(expr)
+  defp qualified_in_expr({:lambda, %{params: params, return_type: return_type, body: body}}) do
+    param_types = Enum.flat_map(params, fn %{type: type} -> qualified_in_type(type) end)
+    param_types ++ qualified_in_type(return_type) ++ qualified_in_expr(body)
+  end
   defp qualified_in_expr(_), do: []
 
   defp qualified_in_stmt({:let, %{expr: expr, type: type}}) do
@@ -820,6 +824,17 @@ defmodule BeamLang do
     {:res_err, %{expr: qualify_expr(expr, func_map, type_map, local_types, local_funcs, alias_map), span: span}}
   end
 
+  defp qualify_expr({:lambda, %{params: params, return_type: return_type, body: body, span: span}}, func_map, type_map, local_types, local_funcs, alias_map) do
+    params =
+      Enum.map(params, fn %{name: name, type: type, span: pspan} ->
+        %{name: name, type: qualify_type(type, type_map, local_types, alias_map), span: pspan}
+      end)
+
+    return_type = qualify_type(return_type, type_map, local_types, alias_map)
+    body = qualify_expr(body, func_map, type_map, local_types, local_funcs, alias_map)
+    {:lambda, %{params: params, return_type: return_type, body: body, span: span}}
+  end
+
   defp qualify_expr(expr, _func_map, _type_map, _local_types, _local_funcs, _alias_map), do: expr
 
   defp qualify_match_case(%{pattern: pattern, guard: guard, body: body, span: span}, func_map, type_map, local_types, local_funcs, alias_map) do
@@ -966,6 +981,11 @@ defmodule BeamLang do
   defp collect_expr_refs({:opt_some, %{expr: expr}}), do: collect_expr_refs(expr)
   defp collect_expr_refs({:res_ok, %{expr: expr}}), do: collect_expr_refs(expr)
   defp collect_expr_refs({:res_err, %{expr: expr}}), do: collect_expr_refs(expr)
+  defp collect_expr_refs({:lambda, %{params: params, return_type: return_type, body: body, span: span}}) do
+    param_refs =
+      Enum.flat_map(params, fn %{type: type} -> collect_type_name_refs(type, span) end)
+    param_refs ++ collect_type_name_refs(return_type, span) ++ collect_expr_refs(body)
+  end
   defp collect_expr_refs(_), do: []
 
   defp collect_stmt_refs({:let, %{expr: expr, type: type, span: span}}) do

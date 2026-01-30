@@ -142,6 +142,29 @@ defmodule BeamLang.Semantic do
   defp type_of_expr({:char, %{value: _value}}, _func_table, _type_table, _env, _expected), do: {:ok, :char}
   defp type_of_expr({:bool, %{value: _value}}, _func_table, _type_table, _env, _expected), do: {:ok, :bool}
 
+  defp type_of_expr({:lambda, %{params: params, return_type: return_type, body: body}}, func_table, type_table, env, _expected) do
+    param_env =
+      Enum.reduce(params, %{}, fn %{name: param_name, type: param_type}, acc ->
+        Map.put(acc, param_name, %{type: normalize_type(param_type), mutable: false})
+      end)
+
+    return_type = normalize_type(return_type)
+    lambda_env = Map.merge(env, param_env)
+
+    {:ok, _env, stmt_errors} = validate_statements(body, func_table, type_table, lambda_env, return_type)
+    errors =
+      case typecheck_return(return_type, body, func_table, type_table, lambda_env) do
+        :ok -> stmt_errors
+        {:error, errs} -> stmt_errors ++ errs
+      end
+
+    if errors == [] do
+      {:ok, {:fn, Enum.map(params, &normalize_type(&1.type)), return_type}}
+    else
+      {:error, {:match, errors}}
+    end
+  end
+
   defp type_of_expr({:call, %{name: name, args: args}}, func_table, type_table, env, _expected) do
     case Map.fetch(func_table, name) do
       {:ok, {param_types, return_type}} ->
@@ -1438,6 +1461,7 @@ defmodule BeamLang.Semantic do
   defp expr_span({:opt_none, %{span: span}}), do: span
   defp expr_span({:res_ok, %{span: span}}), do: span
   defp expr_span({:res_err, %{span: span}}), do: span
+  defp expr_span({:lambda, %{span: span}}), do: span
 
   @spec type_compatible?(BeamLang.AST.type_name(), BeamLang.AST.type_name()) :: boolean()
   defp type_compatible?(expected, inferred) do

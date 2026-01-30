@@ -167,6 +167,22 @@ defmodule BeamLang.ParserTest do
     assert %{name: "fold", type: {:fn, [_, _, {:fn, [_, _], _}], _}} = Enum.at(fields, 1)
   end
 
+  test "parses lambda expression" do
+    source = """
+    fn main() -> number {
+        let add_one = fn(x: number) -> number { return x + 1; };
+        return add_one(1);
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{functions: [func]}} = ast
+    assert {:function, %{body: {:block, %{stmts: [s1, _s2]}}}} = func
+    assert {:let, %{expr: {:lambda, %{params: [_], return_type: :number}}}} = s1
+  end
+
   test "parses type definition and struct literal" do
     source = """
     type User {

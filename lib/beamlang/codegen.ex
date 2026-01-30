@@ -311,6 +311,15 @@ defmodule BeamLang.Codegen do
     end
   end
 
+  defp expr_form(line, {:lambda, %{params: params, body: body}}, env) do
+    {params_form, params_env} = lambda_params_form(params, line)
+    env = Map.merge(env, params_env)
+    {expr, _env, counter} = stmt_expr_tree(block_stmts(body), env, 0)
+    {expr, _counter} = unwrap_return(expr, counter)
+    clause = {:clause, line, params_form, [], [expr]}
+    {:fun, line, {:clauses, [clause]}}
+  end
+
   @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
   defp expr_form(line, {:binary, %{op: op, left: left, right: right}}, env) do
     {:op, line, op_atom(op), expr_form(line, left, env), expr_form(line, right, env)}
@@ -551,6 +560,15 @@ defmodule BeamLang.Codegen do
     {first, rest} = String.split_at(name, 1)
     String.to_atom(String.upcase(first) <> rest <> "_" <> Integer.to_string(id))
   end
+
+  defp lambda_params_form(params, line) do
+    Enum.reduce(params, {[], %{}}, fn %{name: name}, {forms, env} ->
+      var = var_atom(name)
+      {forms ++ [{:var, line, var}], Map.put(env, name, var)}
+    end)
+  end
+
+  defp block_stmts({:block, %{stmts: stmts}}), do: stmts
 
 
   @spec params_form([BeamLang.AST.func_param()], non_neg_integer(), map(), non_neg_integer()) ::
