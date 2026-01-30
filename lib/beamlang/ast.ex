@@ -35,10 +35,10 @@ defmodule BeamLang.AST do
           | {:match, %{expr: expr(), cases: [match_case()], span: BeamLang.Span.t()}}
           | {:binary, %{op: binary_op(), left: expr(), right: expr(), span: BeamLang.Span.t()}}
           | {:if_expr, %{cond: expr(), then_block: block(), else_branch: if_else_branch(), span: BeamLang.Span.t()}}
-          | {:opt_some, %{expr: expr(), span: BeamLang.Span.t()}}
-          | {:opt_none, %{span: BeamLang.Span.t()}}
-          | {:res_ok, %{expr: expr(), span: BeamLang.Span.t()}}
-          | {:res_err, %{expr: expr(), span: BeamLang.Span.t()}}
+          | {:opt_some, %{expr: expr(), span: BeamLang.Span.t(), type: type_name() | nil}}
+          | {:opt_none, %{span: BeamLang.Span.t(), type: type_name() | nil}}
+          | {:res_ok, %{expr: expr(), span: BeamLang.Span.t(), type: type_name() | nil}}
+          | {:res_err, %{expr: expr(), span: BeamLang.Span.t(), type: type_name() | nil}}
 
   @type binary_op :: :eq | :neq | :lt | :gt | :lte | :gte | :add | :sub | :mul | :div | :mod
 

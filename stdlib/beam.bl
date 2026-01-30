@@ -6,22 +6,27 @@ type Iterator<T> {
     fold: fn(Iterator<T>, any, fn(any, T) -> any) -> any
 }
 
-type StringOps {
-    length: fn(String) -> number,
-    chars: fn(String) -> Iterator<char>,
-    concat: fn(String, String) -> String
-}
-
 type Optional<T> {
+    tag: any,
+    value: any,
     unwrap: fn(Optional<T>, T) -> T,
     map: fn(Optional<T>, fn(T) -> any) -> Optional<any>,
     and_then: fn(Optional<T>, fn(T) -> Optional<any>) -> Optional<any>
 }
 
 type Result<Ok, Err> {
+    tag: any,
+    value: any,
     unwrap: fn(Result<Ok, Err>, Ok) -> Ok,
     map: fn(Result<Ok, Err>, fn(Ok) -> any) -> Result<any, Err>,
     and_then: fn(Result<Ok, Err>, fn(Ok) -> Result<any, Err>) -> Result<any, Err>
+}
+
+type String {
+    data: any,
+    length: fn(String) -> number,
+    chars: fn(String) -> Iterator<char>,
+    concat: fn(String, String) -> String
 }
 
 @external(elixir, "BeamLang.Runtime", "println")
@@ -30,8 +35,8 @@ fn println(value: String) -> void;
 @external(elixir, "BeamLang.Runtime", "print")
 fn print(value: String) -> void;
 
-@external(elixir, "BeamLang.Runtime", "typeof")
-fn typeof(value: any) -> String;
+@external(elixir, "BeamLang.Runtime", "typeof_data")
+fn typeof_data(value: any) -> any;
 
 @external(elixir, "BeamLang.Runtime", "string_length_data")
 fn string_length_data(value: String) -> number;
@@ -59,7 +64,11 @@ fn iterator_from_list(data: any) -> Iterator<any> {
 }
 
 fn iterator_next(it: Iterator<any>) -> Optional<any> {
-    return iterator_next_data(it->data);
+    let raw = iterator_next_data(it->data);
+    return match (raw) {
+        case?some inner => ?some inner,
+        case?none => ?none
+    };
 }
 
 fn iterator_map(it: Iterator<any>, mapper: fn(any) -> any) -> Iterator<any> {
@@ -76,16 +85,22 @@ fn iterator_fold(it: Iterator<any>, initial: any, folder: fn(any, any) -> any) -
     return iterator_fold_data(it->data, initial, folder);
 }
 
+fn typeof(value: any) -> String {
+    let data = typeof_data(value);
+    return { data = data, length = string_length, chars = string_chars, concat = string_concat };
+}
+
 internal fn string_length(value: String) -> number {
-    return string_length_data(value);
+    return string_length_data(value->data);
 }
 
 internal fn string_concat(left: String, right: String) -> String {
-    return string_concat_data(left, right);
+    let data = string_concat_data(left->data, right->data);
+    return { data = data, length = string_length, chars = string_chars, concat = string_concat };
 }
 
 internal fn string_chars(value: String) -> Iterator<char> {
-    let data = string_chars_data(value);
+    let data = string_chars_data(value->data);
     return iterator_from_list(data);
 }
 

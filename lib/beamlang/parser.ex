@@ -1358,7 +1358,7 @@ defmodule BeamLang.Parser do
           {:ok, BeamLang.AST.type_def(), [Token.t()]} | {:error, BeamLang.Error.t()}
   defp parse_type_def(tokens, exported) do
     with {:ok, type_tok, rest1} <- expect(tokens, :type_kw),
-         {:ok, name_tok, rest2} <- expect(rest1, :identifier),
+         {:ok, name_tok, rest2} <- parse_type_def_name(rest1),
          {:ok, {params, params_span}, rest3} <- parse_type_params(rest2),
          {:ok, _lbrace, rest4} <- expect(rest3, :lbrace),
          {:ok, fields, rest5} <- parse_type_fields(rest4, []),
@@ -1373,6 +1373,10 @@ defmodule BeamLang.Parser do
       {:ok, {:type_def, %{name: name_tok.value, params: params, fields: fields, exported: exported, span: span}}, rest6}
     end
   end
+
+  defp parse_type_def_name([%Token{type: :identifier} = tok | rest]), do: {:ok, tok, rest}
+  defp parse_type_def_name([%Token{type: :type, value: "String"} = tok | rest]), do: {:ok, tok, rest}
+  defp parse_type_def_name([%Token{} = tok | _]), do: {:error, error("Expected identifier.", tok)}
 
   @spec parse_type_params([Token.t()]) ::
           {:ok, {[binary()], BeamLang.Span.t() | nil}, [Token.t()]} | {:error, BeamLang.Error.t()}

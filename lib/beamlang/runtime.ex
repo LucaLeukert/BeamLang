@@ -42,21 +42,18 @@ defmodule BeamLang.Runtime do
     end
   end
 
-  @spec typeof(term()) :: binary()
-  def typeof(value) do
+  @spec typeof_data(term()) :: charlist()
+  def typeof_data(value) do
     cond do
-      is_integer(value) or is_float(value) -> "number"
-      is_binary(value) -> "String"
-      is_boolean(value) -> "bool"
-      value == :ok -> "void"
-      value == :none -> "Optional"
-      is_map(value) and Map.has_key?(value, :__beamlang_type__) -> Map.get(value, :__beamlang_type__)
-      is_tuple(value) and tuple_size(value) == 2 and elem(value, 0) == :char -> "char"
-      is_tuple(value) and tuple_size(value) == 2 and elem(value, 0) == :some -> "Optional"
-      is_tuple(value) and tuple_size(value) == 2 and elem(value, 0) in [:ok, :err] -> "Result"
-      is_list(value) -> "String"
-      is_map(value) -> "Map"
-      true -> "unknown"
+      is_integer(value) or is_float(value) -> ~c"number"
+      is_binary(value) -> ~c"String"
+      is_boolean(value) -> ~c"bool"
+      value == :ok -> ~c"void"
+      is_map(value) and Map.has_key?(value, :__beamlang_type__) -> ensure_charlist(Map.get(value, :__beamlang_type__))
+      is_tuple(value) and tuple_size(value) == 2 and elem(value, 0) == :char -> ~c"char"
+      is_list(value) -> ~c"List"
+      is_map(value) -> ~c"Map"
+      true -> ~c"unknown"
     end
   end
 
@@ -75,9 +72,9 @@ defmodule BeamLang.Runtime do
     Enum.map(value, fn ch -> {:char, ch} end)
   end
 
-  @spec iterator_next_data(list()) :: term()
-  def iterator_next_data([]), do: :none
-  def iterator_next_data([head | _]), do: {:some, head}
+  @spec iterator_next_data(list()) :: map()
+  def iterator_next_data([]), do: %{tag: :none}
+  def iterator_next_data([head | _]), do: %{tag: :some, value: head}
 
   @spec iterator_map_data(list(), function()) :: list()
   def iterator_map_data(list, mapper) do
@@ -96,13 +93,24 @@ defmodule BeamLang.Runtime do
 
   @spec println(term()) :: :ok
   def println(value) do
-    :io.format("~s~n", [value])
+    printable = string_data(value)
+    :io.format("~s~n", [printable])
     :ok
   end
 
   @spec print(term()) :: :ok
   def print(value) do
-    :io.format("~s", [value])
+    printable = string_data(value)
+    :io.format("~s", [printable])
     :ok
   end
+
+  defp string_data(%{__beamlang_type__: "String", data: data}), do: data
+  defp string_data(%{__beamlang_type__: ~c"String", data: data}), do: data
+  defp string_data(value) when is_list(value), do: value
+  defp string_data(value) when is_binary(value), do: value
+  defp string_data(value), do: inspect(value)
+
+  defp ensure_charlist(value) when is_binary(value), do: String.to_charlist(value)
+  defp ensure_charlist(value), do: value
 end

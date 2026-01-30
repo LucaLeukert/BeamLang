@@ -174,6 +174,7 @@ defmodule BeamLang.Semantic do
       {:ok, target_type} ->
         case method_call_type(normalize_type(target_type), name, args, func_table, type_table, env) do
           {:ok, type} -> {:ok, type}
+          {:error, {:match, errors}} -> {:error, {:match, errors}}
           {:error, err} -> {:error, {:match, [err]}}
         end
 
@@ -534,134 +535,76 @@ defmodule BeamLang.Semantic do
     end
   end
 
-  defp method_call_type({:optional, inner}, "unwrap", [fallback], func_table, type_table, env) do
-    case type_of_expr(fallback, func_table, type_table, env, inner) do
-      {:ok, inferred} ->
-        if type_compatible?(inner, inferred) do
-          {:ok, inner}
-        else
-          {:error, BeamLang.Error.new(:type, "Optional.unwrap type mismatch.", expr_span(fallback))}
+  defp method_call_type(target_type, name, args, func_table, type_table, env) do
+    error_span =
+      case args do
+        [first | _] -> expr_span(first)
+        _ -> BeamLang.Span.new("<source>", 0, 0)
+      end
+
+    case struct_type_info(target_type) do
+      {:ok, type_name, type_args} ->
+        case Map.fetch(type_table, type_name) do
+          {:ok, %{params: params, fields: field_map}} ->
+            case type_arg_map(params, type_args) do
+              {:ok, param_map} ->
+                type_fields = substitute_field_types(field_map, param_map)
+
+                case Map.fetch(type_fields, name) do
+                  {:ok, {:fn, [self_type | param_types], return_type}} ->
+                    if type_compatible?(self_type, target_type) do
+                      if length(param_types) != length(args) do
+                        {:error, BeamLang.Error.new(:type, "Method '#{name}' called with wrong number of arguments.", error_span)}
+                      else
+                        errors =
+                          Enum.zip(args, param_types)
+                          |> Enum.flat_map(fn {arg, expected_type} ->
+                            case type_of_expr(arg, func_table, type_table, env, expected_type) do
+                              {:ok, inferred} ->
+                                if type_compatible?(expected_type, inferred) do
+                                  []
+                                else
+                                  [
+                                    BeamLang.Error.new(
+                                      :type,
+                                      "Argument type mismatch. Expected #{type_label(expected_type)}, got #{type_label(inferred)}.",
+                                      expr_span(arg)
+                                    )
+                                  ]
+                                end
+
+                              {:error, reason} ->
+                                expr_error(reason, arg)
+                            end
+                          end)
+
+                        if errors == [], do: {:ok, return_type}, else: {:error, {:match, errors}}
+                      end
+                    else
+                      {:error, BeamLang.Error.new(:type, "Method '#{name}' does not match receiver type.", error_span)}
+                    end
+
+                  {:ok, _field_type} ->
+                    {:error, BeamLang.Error.new(:type, "Field '#{name}' is not callable.", BeamLang.Span.new("<source>", 0, 0))}
+
+                  :error ->
+                    {:error, BeamLang.Error.new(:type, "Unknown field '#{name}'.", BeamLang.Span.new("<source>", 0, 0))}
+                end
+
+              :error ->
+                {:error, BeamLang.Error.new(:type, "Unknown type in method call.", BeamLang.Span.new("<source>", 0, 0))}
+            end
+
+          :error ->
+            {:error, BeamLang.Error.new(:type, "Unknown type in method call.", BeamLang.Span.new("<source>", 0, 0))}
         end
 
-      {:error, _} ->
-        {:error, BeamLang.Error.new(:type, "Optional.unwrap type mismatch.", expr_span(fallback))}
+      :missing ->
+        {:error, BeamLang.Error.new(:type, "Method call requires a struct value.", BeamLang.Span.new("<source>", 0, 0))}
+
+      :error ->
+        {:error, BeamLang.Error.new(:type, "Method call requires a struct value.", BeamLang.Span.new("<source>", 0, 0))}
     end
-  end
-
-  defp method_call_type({:optional, inner}, "map", [mapper], func_table, type_table, env) do
-    case type_of_expr(mapper, func_table, type_table, env, nil) do
-      {:ok, {:fn, [param], ret}} ->
-        if type_compatible?(inner, param) do
-          {:ok, {:optional, ret}}
-        else
-          {:error, BeamLang.Error.new(:type, "Optional.map expects fn(T) -> U.", expr_span(mapper))}
-        end
-
-      {:ok, _} ->
-        {:error, BeamLang.Error.new(:type, "Optional.map expects function.", expr_span(mapper))}
-
-      {:error, _} ->
-        {:error, BeamLang.Error.new(:type, "Optional.map expects function.", expr_span(mapper))}
-    end
-  end
-
-  defp method_call_type({:optional, inner}, "and_then", [mapper], func_table, type_table, env) do
-    case type_of_expr(mapper, func_table, type_table, env, nil) do
-      {:ok, {:fn, [param], {:optional, ret}}} ->
-        if type_compatible?(inner, param) do
-          {:ok, {:optional, ret}}
-        else
-          {:error, BeamLang.Error.new(:type, "Optional.and_then expects fn(T) -> Optional<U>.", expr_span(mapper))}
-        end
-
-      {:ok, _} ->
-        {:error, BeamLang.Error.new(:type, "Optional.and_then expects function.", expr_span(mapper))}
-
-      {:error, _} ->
-        {:error, BeamLang.Error.new(:type, "Optional.and_then expects function.", expr_span(mapper))}
-    end
-  end
-
-  defp method_call_type({:result, ok_type, _err_type}, "unwrap", [fallback], func_table, type_table, env) do
-    case type_of_expr(fallback, func_table, type_table, env, ok_type) do
-      {:ok, inferred} ->
-        if type_compatible?(ok_type, inferred) do
-          {:ok, ok_type}
-        else
-          {:error, BeamLang.Error.new(:type, "Result.unwrap type mismatch.", expr_span(fallback))}
-        end
-
-      {:error, _} ->
-        {:error, BeamLang.Error.new(:type, "Result.unwrap type mismatch.", expr_span(fallback))}
-    end
-  end
-
-  defp method_call_type({:result, ok_type, err_type}, "map", [mapper], func_table, type_table, env) do
-    case type_of_expr(mapper, func_table, type_table, env, nil) do
-      {:ok, {:fn, [param], ret}} ->
-        if type_compatible?(ok_type, param) do
-          {:ok, {:result, ret, err_type}}
-        else
-          {:error, BeamLang.Error.new(:type, "Result.map expects fn(Ok) -> U.", expr_span(mapper))}
-        end
-
-      {:ok, _} ->
-        {:error, BeamLang.Error.new(:type, "Result.map expects function.", expr_span(mapper))}
-
-      {:error, _} ->
-        {:error, BeamLang.Error.new(:type, "Result.map expects function.", expr_span(mapper))}
-    end
-  end
-
-  defp method_call_type({:result, ok_type, err_type}, "and_then", [mapper], func_table, type_table, env) do
-    case type_of_expr(mapper, func_table, type_table, env, nil) do
-      {:ok, {:fn, [param], {:result, ret, ^err_type}}} ->
-        if type_compatible?(ok_type, param) do
-          {:ok, {:result, ret, err_type}}
-        else
-          {:error, BeamLang.Error.new(:type, "Result.and_then expects fn(Ok) -> Result<U, Err>.", expr_span(mapper))}
-        end
-
-      {:ok, _} ->
-        {:error, BeamLang.Error.new(:type, "Result.and_then expects function.", expr_span(mapper))}
-
-      {:error, _} ->
-        {:error, BeamLang.Error.new(:type, "Result.and_then expects function.", expr_span(mapper))}
-    end
-  end
-
-  defp method_call_type(:String, "length", args, _func_table, _type_table, _env) do
-    if length(args) == 0 do
-      {:ok, :number}
-    else
-      {:error, BeamLang.Error.new(:type, "String.length takes no arguments.", expr_span(hd(args)))}
-    end
-  end
-
-  defp method_call_type(:String, "chars", args, _func_table, _type_table, _env) do
-    if length(args) == 0 do
-      {:ok, {:generic, {:named, "Iterator"}, [:char]}}
-    else
-      {:error, BeamLang.Error.new(:type, "String.chars takes no arguments.", expr_span(hd(args)))}
-    end
-  end
-
-  defp method_call_type(:String, "concat", [arg], func_table, type_table, env) do
-    case type_of_expr(arg, func_table, type_table, env, :String) do
-      {:ok, inferred} ->
-        if type_compatible?(:String, inferred) do
-          {:ok, :String}
-        else
-          {:error, BeamLang.Error.new(:type, "String.concat expects String.", expr_span(arg))}
-        end
-
-      {:error, _} ->
-        {:error, BeamLang.Error.new(:type, "String.concat expects String.", expr_span(arg))}
-    end
-  end
-
-  defp method_call_type(_type, name, _args, _func_table, _type_table, _env) do
-    {:error, BeamLang.Error.new(:type, "Unknown method '#{name}'.", BeamLang.Span.new("<source>", 0, 0))}
   end
 
   @spec validate_function(BeamLang.AST.func(), map(), map()) :: [BeamLang.Error.t()]
@@ -1829,6 +1772,9 @@ defmodule BeamLang.Semantic do
   end
 
   defp struct_type_info(nil), do: :missing
+  defp struct_type_info(:String), do: {:ok, "String", []}
+  defp struct_type_info({:optional, inner}), do: {:ok, "Optional", [inner]}
+  defp struct_type_info({:result, ok_type, err_type}), do: {:ok, "Result", [ok_type, err_type]}
   defp struct_type_info({:named, name}) when is_binary(name), do: {:ok, name, []}
   defp struct_type_info({:generic, {:named, name}, args}), do: {:ok, name, args}
   defp struct_type_info(_type), do: :error
@@ -2071,7 +2017,23 @@ defmodule BeamLang.Semantic do
       end
 
     {expr, _} = annotate_expr(expr, inner, env, func_table, type_table)
-    {{:opt_some, %{expr: expr, span: span}}, expected}
+    inferred =
+      case type_of_expr({:opt_some, %{expr: expr, span: span}}, func_table, type_table, env, expected) do
+        {:ok, type} -> type
+        _ -> normalize_type(expected)
+      end
+
+    {{:opt_some, %{expr: expr, span: span, type: inferred}}, inferred}
+  end
+
+  defp annotate_expr({:opt_none, %{span: span}}, expected, env, func_table, type_table) do
+    inferred =
+      case type_of_expr({:opt_none, %{span: span}}, func_table, type_table, env, expected) do
+        {:ok, type} -> type
+        _ -> normalize_type(expected)
+      end
+
+    {{:opt_none, %{span: span, type: inferred}}, inferred}
   end
 
   defp annotate_expr({:res_ok, %{expr: expr, span: span}}, expected, env, func_table, type_table) do
@@ -2082,7 +2044,13 @@ defmodule BeamLang.Semantic do
       end
 
     {expr, _} = annotate_expr(expr, inner, env, func_table, type_table)
-    {{:res_ok, %{expr: expr, span: span}}, expected}
+    inferred =
+      case type_of_expr({:res_ok, %{expr: expr, span: span}}, func_table, type_table, env, expected) do
+        {:ok, type} -> type
+        _ -> normalize_type(expected)
+      end
+
+    {{:res_ok, %{expr: expr, span: span, type: inferred}}, inferred}
   end
 
   defp annotate_expr({:res_err, %{expr: expr, span: span}}, expected, env, func_table, type_table) do
@@ -2093,7 +2061,13 @@ defmodule BeamLang.Semantic do
       end
 
     {expr, _} = annotate_expr(expr, inner, env, func_table, type_table)
-    {{:res_err, %{expr: expr, span: span}}, expected}
+    inferred =
+      case type_of_expr({:res_err, %{expr: expr, span: span}}, func_table, type_table, env, expected) do
+        {:ok, type} -> type
+        _ -> normalize_type(expected)
+      end
+
+    {{:res_err, %{expr: expr, span: span, type: inferred}}, inferred}
   end
 
   defp annotate_expr({:method_call, %{target: target, name: name, args: args, span: span}}, _expected, env, func_table, type_table) do

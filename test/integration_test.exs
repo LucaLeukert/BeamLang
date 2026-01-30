@@ -202,4 +202,15 @@ defmodule BeamLang.IntegrationTest do
 
     assert {:ok, 0} == BeamLang.run_source(source)
   end
+
+  test "typeof returns String struct" do
+    source = """
+    fn main() -> number {
+        let t = typeof(10);
+        return t->length();
+    }
+    """
+
+    assert {:ok, 6} == BeamLang.run_source(source)
+  end
 end

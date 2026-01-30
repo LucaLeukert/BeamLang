@@ -4,12 +4,9 @@ fn always_one(value: any) -> number {
 
 fn main() -> number {
     let iter = "hi"->chars();
-    for (ch in iter) {
-        println(typeof(ch));
-    }
     let next_fn = iter->next;
     let first = next_fn(iter);
-    let mapped = optional_map(first, always_one);
+    let mapped = first->map(always_one);
     return match (mapped) {
         case?some value => value,
         case?none => 0
