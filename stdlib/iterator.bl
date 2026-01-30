@@ -1,0 +1,45 @@
+type Iterator<T> {
+    data: any,
+    next: fn(Iterator<T>) -> Optional<T>,
+    map: fn(Iterator<T>, fn(T) -> any) -> Iterator<any>,
+    filter: fn(Iterator<T>, fn(T) -> bool) -> Iterator<T>,
+    fold: fn(Iterator<T>, any, fn(any, T) -> any) -> any
+}
+
+@external(elixir, "BeamLang.Runtime", "iterator_next_data")
+fn iterator_next_data(data: any) -> Optional<any>;
+
+@external(elixir, "BeamLang.Runtime", "iterator_map_data")
+fn iterator_map_data(data: any, mapper: fn(any) -> any) -> any;
+
+@external(elixir, "BeamLang.Runtime", "iterator_filter_data")
+fn iterator_filter_data(data: any, predicate: fn(any) -> bool) -> any;
+
+@external(elixir, "BeamLang.Runtime", "iterator_fold_data")
+fn iterator_fold_data(data: any, initial: any, folder: fn(any, any) -> any) -> any;
+
+fn iterator_from_list(data: any) -> Iterator<any> {
+    return { data = data, next = iterator_next, map = iterator_map, filter = iterator_filter, fold = iterator_fold };
+}
+
+fn iterator_next(it: Iterator<any>) -> Optional<any> {
+    let raw = iterator_next_data(it->data);
+    return match (raw) {
+        case?some inner => ?some inner,
+        case?none => ?none
+    };
+}
+
+fn iterator_map(it: Iterator<any>, mapper: fn(any) -> any) -> Iterator<any> {
+    let mapped = iterator_map_data(it->data, mapper);
+    return iterator_from_list(mapped);
+}
+
+fn iterator_filter(it: Iterator<any>, predicate: fn(any) -> bool) -> Iterator<any> {
+    let filtered = iterator_filter_data(it->data, predicate);
+    return iterator_from_list(filtered);
+}
+
+fn iterator_fold(it: Iterator<any>, initial: any, folder: fn(any, any) -> any) -> any {
+    return iterator_fold_data(it->data, initial, folder);
+}

@@ -1,0 +1,47 @@
+type String {
+    data: any,
+    length: fn(String) -> number,
+    chars: fn(String) -> Iterator<char>,
+    concat: fn(String, String) -> String
+}
+
+@external(elixir, "BeamLang.Runtime", "typeof_data")
+fn typeof_data(value: any) -> any;
+
+@external(elixir, "BeamLang.Runtime", "string_length_data")
+fn string_length_data(value: any) -> number;
+
+@external(elixir, "BeamLang.Runtime", "string_concat_data")
+fn string_concat_data(left: any, right: any) -> any;
+
+@external(elixir, "BeamLang.Runtime", "string_chars_data")
+fn string_chars_data(value: any) -> any;
+
+@external(elixir, "BeamLang.Runtime", "println")
+fn println(value: String) -> void;
+
+@external(elixir, "BeamLang.Runtime", "print")
+fn print(value: String) -> void;
+
+fn typeof(value: any) -> String {
+    let data = typeof_data(value);
+    return string_new(data);
+}
+
+internal fn string_new(data: any) -> String {
+    return { data = data, length = string_length, chars = string_chars, concat = string_concat };
+}
+
+internal fn string_length(value: String) -> number {
+    return string_length_data(value->data);
+}
+
+internal fn string_concat(left: String, right: String) -> String {
+    let data = string_concat_data(left->data, right->data);
+    return string_new(data);
+}
+
+internal fn string_chars(value: String) -> Iterator<char> {
+    let data = string_chars_data(value->data);
+    return iterator_from_list(data);
+}
