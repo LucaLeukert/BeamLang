@@ -10,6 +10,7 @@ defmodule BeamLang.Lexer do
     "type" => :type_kw,
     "import" => :import_kw,
     "export" => :export_kw,
+    "internal" => :internal_kw,
     "as" => :as_kw,
     "return" => :return,
     "let" => :let,

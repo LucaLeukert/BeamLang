@@ -236,7 +236,7 @@ defmodule BeamLang do
 
       func_defs =
         functions
-        |> Enum.filter(fn {:function, %{exported: exported, body: body}} -> exported and body != nil end)
+        |> Enum.filter(fn {:function, %{exported: exported, body: body, internal: internal}} -> exported and body != nil and not internal end)
         |> Enum.map(fn {:function, %{name: name, params: params, return_type: return_type}} ->
           param_types = Enum.map(params, & &1.type)
           {name, {param_types, return_type}}
@@ -574,7 +574,17 @@ defmodule BeamLang do
     func_stubs =
       Enum.map(func_map, fn {name, module} ->
         {_param_types, _ret_type} = export_signature(exports, module, name)
-        {:function, %{name: qualified_name(module, name), params: export_params(exports, module, name), return_type: export_return(exports, module, name), body: nil, external: nil, exported: false, span: BeamLang.Span.new("<import>", 0, 0)}}
+        {:function,
+         %{
+           name: qualified_name(module, name),
+           params: export_params(exports, module, name),
+           return_type: export_return(exports, module, name),
+           body: nil,
+           external: nil,
+           exported: false,
+           internal: false,
+           span: BeamLang.Span.new("<import>", 0, 0)
+         }}
       end)
 
     {type_stubs, func_stubs}

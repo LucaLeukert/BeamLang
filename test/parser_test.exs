@@ -200,6 +200,24 @@ defmodule BeamLang.ParserTest do
     assert {:let, %{expr: {:method_call, %{name: "unwrap"}}}} = s2
   end
 
+  test "parses internal function" do
+    source = """
+    internal fn helper(value: number) -> number {
+        return value;
+    }
+
+    fn main() -> number {
+        return helper(1);
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{functions: [helper, _main]}} = ast
+    assert {:function, %{name: "helper", internal: true}} = helper
+  end
+
   test "parses type definition and struct literal" do
     source = """
     type User {

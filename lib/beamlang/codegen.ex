@@ -28,7 +28,7 @@ defmodule BeamLang.Codegen do
   defp exports(functions) do
     functions
     |> Enum.filter(&function_has_body?/1)
-    |> Enum.filter(fn {:function, %{name: name, exported: exported}} -> exported or name == "main" end)
+    |> Enum.filter(fn {:function, %{name: name, exported: exported, internal: internal}} -> name == "main" or (exported and not internal) end)
     |> Enum.map(fn {:function, %{name: name, params: params}} ->
       {String.to_atom(name), length(params)}
     end)

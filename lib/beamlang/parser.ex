@@ -43,6 +43,9 @@ defmodule BeamLang.Parser do
 
   defp parse_decls([%Token{type: :export_kw} | rest] = tokens, imports, types, functions) do
     case rest do
+      [%Token{type: :internal_kw} | _] ->
+        {:error, error("Internal functions cannot be exported.", hd(rest))}
+
       [%Token{type: :type_kw} | _] ->
         with {:ok, _export_tok, rest1} <- expect(tokens, :export_kw),
              {:ok, type_def, rest2} <- parse_type_def(rest1, true) do
@@ -52,18 +55,44 @@ defmodule BeamLang.Parser do
       [%Token{type: :at} | _] ->
         with {:ok, _export_tok, rest1} <- expect(tokens, :export_kw),
              {:ok, external, rest2} <- parse_external_attr(rest1),
-             {:ok, func, rest3} <- parse_function(rest2, external, true) do
+             {:ok, func, rest3} <- parse_function(rest2, external, true, false) do
           parse_decls(rest3, imports, types, [func | functions])
         end
 
       [%Token{type: :fn} | _] ->
         with {:ok, _export_tok, rest1} <- expect(tokens, :export_kw),
-             {:ok, func, rest2} <- parse_function(rest1, nil, true) do
+             {:ok, func, rest2} <- parse_function(rest1, nil, true, false) do
           parse_decls(rest2, imports, types, [func | functions])
         end
 
       _ ->
         {:error, error("Expected type or fn after export.", hd(tokens))}
+    end
+  end
+
+  defp parse_decls([%Token{type: :internal_kw} | rest] = tokens, imports, types, functions) do
+    case rest do
+      [%Token{type: :type_kw} | _] ->
+        {:error, error("Expected fn after internal.", hd(rest))}
+
+      [%Token{type: :export_kw} | _] ->
+        {:error, error("Internal functions cannot be exported.", hd(rest))}
+
+      [%Token{type: :at} | _] ->
+        with {:ok, _internal_tok, rest1} <- expect(tokens, :internal_kw),
+             {:ok, external, rest2} <- parse_external_attr(rest1),
+             {:ok, func, rest3} <- parse_function(rest2, external, false, true) do
+          parse_decls(rest3, imports, types, [func | functions])
+        end
+
+      [%Token{type: :fn} | _] ->
+        with {:ok, _internal_tok, rest1} <- expect(tokens, :internal_kw),
+             {:ok, func, rest2} <- parse_function(rest1, nil, false, true) do
+          parse_decls(rest2, imports, types, [func | functions])
+        end
+
+      _ ->
+        {:error, error("Expected fn after internal.", hd(tokens))}
     end
   end
 
@@ -75,20 +104,20 @@ defmodule BeamLang.Parser do
 
   defp parse_decls([%Token{type: :at} | _] = tokens, imports, types, functions) do
     with {:ok, external, rest1} <- parse_external_attr(tokens),
-         {:ok, func, rest2} <- parse_function(rest1, external, false) do
+         {:ok, func, rest2} <- parse_function(rest1, external, false, false) do
       parse_decls(rest2, imports, types, [func | functions])
     end
   end
 
   defp parse_decls(tokens, imports, types, functions) do
-    with {:ok, func, rest} <- parse_function(tokens, nil, false) do
+    with {:ok, func, rest} <- parse_function(tokens, nil, false, false) do
       parse_decls(rest, imports, types, [func | functions])
     end
   end
 
-  @spec parse_function([Token.t()], map() | nil, boolean()) ::
+  @spec parse_function([Token.t()], map() | nil, boolean(), boolean()) ::
           {:ok, BeamLang.AST.func(), [Token.t()]} | {:error, BeamLang.Error.t()}
-  defp parse_function(tokens, external, exported) do
+  defp parse_function(tokens, external, exported, internal) do
     with {:ok, _fn_tok, rest1} <- expect(tokens, :fn),
          {:ok, name_tok, rest2} <- expect(rest1, :identifier),
          {:ok, _lparen, rest3} <- expect(rest2, :lparen),
@@ -113,6 +142,7 @@ defmodule BeamLang.Parser do
                  body: body,
                  external: nil,
                  exported: exported,
+                 internal: internal,
                  span: span
                }}
 
@@ -133,6 +163,7 @@ defmodule BeamLang.Parser do
                  body: nil,
                  external: external,
                  exported: exported,
+                 internal: internal,
                  span: span
                }}
 

@@ -43,7 +43,7 @@ defmodule BeamLang.ASTPrinter do
     ]
   end
 
-  defp format_node({:function, %{name: name, params: params, return_type: type, body: body, exported: exported}}, indent) do
+  defp format_node({:function, %{name: name, params: params, return_type: type, body: body, exported: exported, internal: internal}}, indent) do
     params_text =
       params
       |> Enum.map(fn %{name: param_name, type: param_type} ->
@@ -59,7 +59,7 @@ defmodule BeamLang.ASTPrinter do
       end
 
     [
-      indent_line(indent, "Fn #{name} -> #{format_type(type)}#{exported_suffix(exported)}"),
+      indent_line(indent, "Fn #{name} -> #{format_type(type)}#{func_suffix(exported, internal)}"),
       params_line,
       format_node(body, indent + 2)
     ]
@@ -407,6 +407,13 @@ defmodule BeamLang.ASTPrinter do
 
   defp exported_suffix(true), do: " [export]"
   defp exported_suffix(_), do: ""
+
+  defp internal_suffix(true), do: " [internal]"
+  defp internal_suffix(_), do: ""
+
+  defp func_suffix(exported, internal) do
+    exported_suffix(exported) <> internal_suffix(internal)
+  end
 
   defp format_type({:generic, base, args}),
     do: "#{format_type(base)}<#{Enum.map_join(args, ", ", &format_type/1)}>"

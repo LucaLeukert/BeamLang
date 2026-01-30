@@ -76,55 +76,55 @@ fn iterator_fold(it: Iterator<any>, initial: any, folder: fn(any, any) -> any) -
     return iterator_fold_data(it->data, initial, folder);
 }
 
-fn string_length(value: String) -> number {
+internal fn string_length(value: String) -> number {
     return string_length_data(value);
 }
 
-fn string_concat(left: String, right: String) -> String {
+internal fn string_concat(left: String, right: String) -> String {
     return string_concat_data(left, right);
 }
 
-fn string_chars(value: String) -> Iterator<char> {
+internal fn string_chars(value: String) -> Iterator<char> {
     let data = string_chars_data(value);
     return iterator_from_list(data);
 }
 
-fn optional_unwrap(value: Optional<any>, fallback: any) -> any {
+internal fn optional_unwrap(value: Optional<any>, fallback: any) -> any {
     return match (value) {
         case?some inner => inner,
         case?none => fallback
     };
 }
 
-fn optional_map(value: Optional<any>, mapper: fn(any) -> any) -> Optional<any> {
+internal fn optional_map(value: Optional<any>, mapper: fn(any) -> any) -> Optional<any> {
     return match (value) {
         case?some inner => ?some mapper(inner),
         case?none => ?none
     };
 }
 
-fn optional_and_then(value: Optional<any>, mapper: fn(any) -> Optional<any>) -> Optional<any> {
+internal fn optional_and_then(value: Optional<any>, mapper: fn(any) -> Optional<any>) -> Optional<any> {
     return match (value) {
         case?some inner => mapper(inner),
         case?none => ?none
     };
 }
 
-fn result_unwrap(value: Result<any, any>, fallback: any) -> any {
+internal fn result_unwrap(value: Result<any, any>, fallback: any) -> any {
     return match (value) {
         case!ok inner => inner,
         case!err _ => fallback
     };
 }
 
-fn result_map(value: Result<any, any>, mapper: fn(any) -> any) -> Result<any, any> {
+internal fn result_map(value: Result<any, any>, mapper: fn(any) -> any) -> Result<any, any> {
     return match (value) {
         case!ok inner => !ok mapper(inner),
         case!err err => !err err
     };
 }
 
-fn result_and_then(value: Result<any, any>, mapper: fn(any) -> Result<any, any>) -> Result<any, any> {
+internal fn result_and_then(value: Result<any, any>, mapper: fn(any) -> Result<any, any>) -> Result<any, any> {
     return match (value) {
         case!ok inner => mapper(inner),
         case!err err => !err err

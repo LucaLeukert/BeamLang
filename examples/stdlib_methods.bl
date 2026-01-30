@@ -1,6 +1,6 @@
 fn main() -> number {
-    let opt = ?some 4;
+    let opt = ?none;
     let _value = opt->unwrap(0);
     let len = "hi"->length();
-    return len;
+    return _value;
 }

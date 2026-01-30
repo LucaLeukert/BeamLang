@@ -97,6 +97,7 @@ defmodule BeamLang.AST do
              body: block() | nil,
              external: map() | nil,
              exported: boolean(),
+             internal: boolean(),
              span: BeamLang.Span.t()
            }}
 

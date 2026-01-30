@@ -1,0 +1,7 @@
+internal fn add(a: number, b: number) -> number {
+    return a + b;
+}
+
+fn main() -> number {
+    return add(1, 2);
+}
