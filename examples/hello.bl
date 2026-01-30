@@ -1,6 +1,7 @@
 type User {
     age: number,
-    name: String
+    name: String,
+    login: fn() -> void
 }
 
 fn main() -> number {
@@ -25,7 +26,12 @@ fn main() -> number {
 fn test_user() -> User {
     let user: User = { 
         age = 0, 
-        name = "Peter" 
+        name = "Peter",
+        login = login_noop
     };
     return user;
+}
+
+fn login_noop() -> void {
+    return;
 }
