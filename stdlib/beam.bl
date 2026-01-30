@@ -13,18 +13,12 @@ type StringOps {
 }
 
 type Optional<T> {
-}
-
-type Result<Ok, Err> {
-}
-
-type OptionalOps<T> {
     unwrap: fn(Optional<T>, T) -> T,
     map: fn(Optional<T>, fn(T) -> any) -> Optional<any>,
     and_then: fn(Optional<T>, fn(T) -> Optional<any>) -> Optional<any>
 }
 
-type ResultOps<Ok, Err> {
+type Result<Ok, Err> {
     unwrap: fn(Result<Ok, Err>, Ok) -> Ok,
     map: fn(Result<Ok, Err>, fn(Ok) -> any) -> Result<any, Err>,
     and_then: fn(Result<Ok, Err>, fn(Ok) -> Result<any, Err>) -> Result<any, Err>
@@ -95,10 +89,6 @@ fn string_chars(value: String) -> Iterator<char> {
     return iterator_from_list(data);
 }
 
-fn string() -> StringOps {
-    return { length = string_length, chars = string_chars, concat = string_concat };
-}
-
 fn optional_unwrap(value: Optional<any>, fallback: any) -> any {
     return match (value) {
         case?some inner => inner,
@@ -120,10 +110,6 @@ fn optional_and_then(value: Optional<any>, mapper: fn(any) -> Optional<any>) -> 
     };
 }
 
-fn optional() -> OptionalOps<any> {
-    return { unwrap = optional_unwrap, map = optional_map, and_then = optional_and_then };
-}
-
 fn result_unwrap(value: Result<any, any>, fallback: any) -> any {
     return match (value) {
         case!ok inner => inner,
@@ -143,8 +129,4 @@ fn result_and_then(value: Result<any, any>, mapper: fn(any) -> Result<any, any>)
         case!ok inner => mapper(inner),
         case!err err => !err err
     };
-}
-
-fn result() -> ResultOps<any, any> {
-    return { unwrap = result_unwrap, map = result_map, and_then = result_and_then };
 }

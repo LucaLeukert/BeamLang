@@ -183,6 +183,23 @@ defmodule BeamLang.ParserTest do
     assert {:let, %{expr: {:lambda, %{params: [_], return_type: :number}}}} = s1
   end
 
+  test "parses method call" do
+    source = """
+    fn main() -> number {
+        let name = find_name(1);
+        let un = name->unwrap("Unknown");
+        return 1;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{functions: [func]}} = ast
+    assert {:function, %{body: {:block, %{stmts: [_s1, s2, _s3]}}}} = func
+    assert {:let, %{expr: {:method_call, %{name: "unwrap"}}}} = s2
+  end
+
   test "parses type definition and struct literal" do
     source = """
     type User {

@@ -320,6 +320,13 @@ defmodule BeamLang.Codegen do
     {:fun, line, {:clauses, [clause]}}
   end
 
+  defp expr_form(line, {:method_call, %{target: target, name: name, args: args} = info}, env) do
+    target_type = Map.get(info, :target_type)
+    fun_name = method_function_name(name, target_type)
+    args = [expr_form(line, target, env) | Enum.map(args, &expr_form(line, &1, env))]
+    {:call, line, {:atom, line, String.to_atom(fun_name)}, args}
+  end
+
   @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
   defp expr_form(line, {:binary, %{op: op, left: left, right: right}}, env) do
     {:op, line, op_atom(op), expr_form(line, left, env), expr_form(line, right, env)}
@@ -570,6 +577,17 @@ defmodule BeamLang.Codegen do
 
   defp block_stmts({:block, %{stmts: stmts}}), do: stmts
 
+  defp method_function_name("length", :String), do: "string_length"
+  defp method_function_name("chars", :String), do: "string_chars"
+  defp method_function_name("concat", :String), do: "string_concat"
+  defp method_function_name("unwrap", {:optional, _}), do: "optional_unwrap"
+  defp method_function_name("map", {:optional, _}), do: "optional_map"
+  defp method_function_name("and_then", {:optional, _}), do: "optional_and_then"
+  defp method_function_name("unwrap", {:result, _, _}), do: "result_unwrap"
+  defp method_function_name("map", {:result, _, _}), do: "result_map"
+  defp method_function_name("and_then", {:result, _, _}), do: "result_and_then"
+  defp method_function_name(name, _), do: name
+
 
   @spec params_form([BeamLang.AST.func_param()], non_neg_integer(), map(), non_neg_integer()) ::
           {[tuple()], map(), non_neg_integer()}
@@ -700,7 +718,7 @@ defmodule BeamLang.Codegen do
     if name == "_" do
       {{:var, line, :_}, %{}, counter}
     else
-      {var, counter} = fresh_var(name, counter)
+      var = internal_var(name)
       {{:var, line, var}, %{name => var}, counter}
     end
   end
@@ -742,7 +760,7 @@ defmodule BeamLang.Codegen do
       if name == "_" do
         {{:var, line, :_}, %{}, counter}
       else
-        {var, counter} = fresh_var(name, counter)
+        var = internal_var(name)
         {{:var, line, var}, %{name => var}, counter}
       end
 
@@ -758,7 +776,7 @@ defmodule BeamLang.Codegen do
       if name == "_" do
         {{:var, line, :_}, %{}, counter}
       else
-        {var, counter} = fresh_var(name, counter)
+        var = internal_var(name)
         {{:var, line, var}, %{name => var}, counter}
       end
 
@@ -770,7 +788,7 @@ defmodule BeamLang.Codegen do
       if name == "_" do
         {{:var, line, :_}, %{}, counter}
       else
-        {var, counter} = fresh_var(name, counter)
+        var = internal_var(name)
         {{:var, line, var}, %{name => var}, counter}
       end
 

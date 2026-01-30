@@ -249,6 +249,16 @@ defmodule BeamLang.ASTPrinter do
     ]
   end
 
+  defp format_node({:method_call, %{target: target, name: name, args: args}}, indent) do
+    [
+      indent_line(indent, "MethodCall #{name}"),
+      indent_line(indent + 2, "Target"),
+      format_node(target, indent + 4),
+      indent_line(indent + 2, "Args"),
+      args |> Enum.flat_map(&format_node(&1, indent + 4))
+    ]
+  end
+
   defp format_node({:lambda, %{params: params, return_type: return_type, body: body}}, indent) do
     params_text =
       params

@@ -713,7 +713,9 @@ defmodule BeamLang.Parser do
           {:ok, BeamLang.AST.expr(), [Token.t()]} | {:error, BeamLang.Error.t()}
   defp parse_term(tokens) do
     with {:ok, expr, rest} <- parse_primary(tokens) do
-      parse_field_access(expr, rest)
+      with {:ok, expr, rest1} <- parse_field_access(expr, rest) do
+        parse_method_call(expr, rest1)
+      end
     end
   end
 
@@ -811,6 +813,18 @@ defmodule BeamLang.Parser do
   end
 
   defp parse_field_access(expr, rest), do: {:ok, expr, rest}
+
+  @spec parse_method_call(BeamLang.AST.expr(), [Token.t()]) ::
+          {:ok, BeamLang.AST.expr(), [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_method_call({:field, %{target: target, name: name, span: span}}, [%Token{type: :lparen} | rest]) do
+    with {:ok, args, rest1} <- parse_args(rest, []),
+         {:ok, rparen, rest2} <- expect(rest1, :rparen) do
+      call_span = BeamLang.Span.merge(span, rparen.span)
+      {:ok, {:method_call, %{target: target, name: name, args: args, span: call_span}}, rest2}
+    end
+  end
+
+  defp parse_method_call(expr, rest), do: {:ok, expr, rest}
 
   @spec parse_call([Token.t()]) ::
           {:ok, BeamLang.AST.expr(), [Token.t()]} | {:error, BeamLang.Error.t()}
@@ -1221,6 +1235,7 @@ defmodule BeamLang.Parser do
   defp expr_span({:res_ok, %{span: span}}), do: span
   defp expr_span({:res_err, %{span: span}}), do: span
   defp expr_span({:lambda, %{span: span}}), do: span
+  defp expr_span({:method_call, %{span: span}}), do: span
 
   @spec pattern_span(BeamLang.AST.pattern()) :: BeamLang.Span.t()
   defp pattern_span({:integer, %{span: span}}), do: span

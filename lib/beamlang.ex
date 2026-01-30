@@ -400,6 +400,9 @@ defmodule BeamLang do
     param_types = Enum.flat_map(params, fn %{type: type} -> qualified_in_type(type) end)
     param_types ++ qualified_in_type(return_type) ++ qualified_in_expr(body)
   end
+  defp qualified_in_expr({:method_call, %{target: target, args: args}}) do
+    qualified_in_expr(target) ++ Enum.flat_map(args, &qualified_in_expr/1)
+  end
   defp qualified_in_expr(_), do: []
 
   defp qualified_in_stmt({:let, %{expr: expr, type: type}}) do
@@ -833,6 +836,12 @@ defmodule BeamLang do
     return_type = qualify_type(return_type, type_map, local_types, alias_map)
     body = qualify_expr(body, func_map, type_map, local_types, local_funcs, alias_map)
     {:lambda, %{params: params, return_type: return_type, body: body, span: span}}
+  end
+
+  defp qualify_expr({:method_call, %{target: target, name: name, args: args, span: span, target_type: target_type}}, func_map, type_map, local_types, local_funcs, alias_map) do
+    target = qualify_expr(target, func_map, type_map, local_types, local_funcs, alias_map)
+    args = Enum.map(args, &qualify_expr(&1, func_map, type_map, local_types, local_funcs, alias_map))
+    {:method_call, %{target: target, name: name, args: args, span: span, target_type: target_type}}
   end
 
   defp qualify_expr(expr, _func_map, _type_map, _local_types, _local_funcs, _alias_map), do: expr
