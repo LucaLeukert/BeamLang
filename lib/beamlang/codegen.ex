@@ -207,15 +207,7 @@ defmodule BeamLang.Codegen do
   @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
   defp expr_form(line, {:string, %{value: value}}, _env) do
     data = {:string, line, String.to_charlist(value)}
-
-    {:map, line,
-     [
-       {:map_field_assoc, line, {:atom, line, :__beamlang_type__}, {:string, line, ~c"String"}},
-       {:map_field_assoc, line, {:atom, line, :data}, data},
-       {:map_field_assoc, line, {:atom, line, :length}, {:fun, line, {:function, :string_length, 1}}},
-       {:map_field_assoc, line, {:atom, line, :chars}, {:fun, line, {:function, :string_chars, 1}}},
-       {:map_field_assoc, line, {:atom, line, :concat}, {:fun, line, {:function, :string_concat, 2}}}
-     ]}
+    {:call, line, {:atom, line, :string_new}, [data]}
   end
 
   @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
@@ -342,65 +334,29 @@ defmodule BeamLang.Codegen do
 
   @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
   defp expr_form(line, {:opt_some, %{expr: expr, type: type}}, env) do
+    _type = type
     value = expr_form(line, expr, env)
-    type_label = if type == nil, do: "Optional", else: type_label(type)
-
-    {:map, line,
-     [
-       {:map_field_assoc, line, {:atom, line, :__beamlang_type__}, {:string, line, String.to_charlist(type_label)}},
-       {:map_field_assoc, line, {:atom, line, :tag}, {:atom, line, :some}},
-       {:map_field_assoc, line, {:atom, line, :value}, value},
-       {:map_field_assoc, line, {:atom, line, :unwrap}, {:fun, line, {:function, :optional_unwrap, 2}}},
-       {:map_field_assoc, line, {:atom, line, :map}, {:fun, line, {:function, :optional_map, 2}}},
-       {:map_field_assoc, line, {:atom, line, :and_then}, {:fun, line, {:function, :optional_and_then, 2}}}
-     ]}
+    {:call, line, {:atom, line, :optional_some}, [value]}
   end
 
   @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
   defp expr_form(line, {:opt_none, %{type: type}}, _env) do
-    type_label = if type == nil, do: "Optional", else: type_label(type)
-
-    {:map, line,
-     [
-       {:map_field_assoc, line, {:atom, line, :__beamlang_type__}, {:string, line, String.to_charlist(type_label)}},
-       {:map_field_assoc, line, {:atom, line, :tag}, {:atom, line, :none}},
-       {:map_field_assoc, line, {:atom, line, :value}, {:atom, line, :none}},
-       {:map_field_assoc, line, {:atom, line, :unwrap}, {:fun, line, {:function, :optional_unwrap, 2}}},
-       {:map_field_assoc, line, {:atom, line, :map}, {:fun, line, {:function, :optional_map, 2}}},
-       {:map_field_assoc, line, {:atom, line, :and_then}, {:fun, line, {:function, :optional_and_then, 2}}}
-     ]}
+    _type = type
+    {:call, line, {:atom, line, :optional_none}, []}
   end
 
   @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
   defp expr_form(line, {:res_ok, %{expr: expr, type: type}}, env) do
+    _type = type
     value = expr_form(line, expr, env)
-    type_label = if type == nil, do: "Result", else: type_label(type)
-
-    {:map, line,
-     [
-       {:map_field_assoc, line, {:atom, line, :__beamlang_type__}, {:string, line, String.to_charlist(type_label)}},
-       {:map_field_assoc, line, {:atom, line, :tag}, {:atom, line, :ok}},
-       {:map_field_assoc, line, {:atom, line, :value}, value},
-       {:map_field_assoc, line, {:atom, line, :unwrap}, {:fun, line, {:function, :result_unwrap, 2}}},
-       {:map_field_assoc, line, {:atom, line, :map}, {:fun, line, {:function, :result_map, 2}}},
-       {:map_field_assoc, line, {:atom, line, :and_then}, {:fun, line, {:function, :result_and_then, 2}}}
-     ]}
+    {:call, line, {:atom, line, :result_ok}, [value]}
   end
 
   @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
   defp expr_form(line, {:res_err, %{expr: expr, type: type}}, env) do
+    _type = type
     value = expr_form(line, expr, env)
-    type_label = if type == nil, do: "Result", else: type_label(type)
-
-    {:map, line,
-     [
-       {:map_field_assoc, line, {:atom, line, :__beamlang_type__}, {:string, line, String.to_charlist(type_label)}},
-       {:map_field_assoc, line, {:atom, line, :tag}, {:atom, line, :err}},
-       {:map_field_assoc, line, {:atom, line, :value}, value},
-       {:map_field_assoc, line, {:atom, line, :unwrap}, {:fun, line, {:function, :result_unwrap, 2}}},
-       {:map_field_assoc, line, {:atom, line, :map}, {:fun, line, {:function, :result_map, 2}}},
-       {:map_field_assoc, line, {:atom, line, :and_then}, {:fun, line, {:function, :result_and_then, 2}}}
-     ]}
+    {:call, line, {:atom, line, :result_err}, [value]}
   end
 
   @spec assignment_form(
@@ -820,7 +776,7 @@ defmodule BeamLang.Codegen do
       end
 
     entries = [
-      {:map_field_exact, line, {:atom, line, :tag}, {:atom, line, :some}},
+      {:map_field_exact, line, {:atom, line, :tag}, {:integer, line, 1}},
       {:map_field_exact, line, {:atom, line, :value}, pat}
     ]
 
@@ -829,7 +785,7 @@ defmodule BeamLang.Codegen do
 
   defp pattern_form(line, {:opt_none_pat, %{}}, counter) do
     entries = [
-      {:map_field_exact, line, {:atom, line, :tag}, {:atom, line, :none}}
+      {:map_field_exact, line, {:atom, line, :tag}, {:integer, line, 0}}
     ]
 
     {{:map, line, entries}, %{}, counter}
@@ -845,7 +801,7 @@ defmodule BeamLang.Codegen do
       end
 
     entries = [
-      {:map_field_exact, line, {:atom, line, :tag}, {:atom, line, :ok}},
+      {:map_field_exact, line, {:atom, line, :tag}, {:integer, line, 1}},
       {:map_field_exact, line, {:atom, line, :value}, pat}
     ]
 
@@ -862,7 +818,7 @@ defmodule BeamLang.Codegen do
       end
 
     entries = [
-      {:map_field_exact, line, {:atom, line, :tag}, {:atom, line, :err}},
+      {:map_field_exact, line, {:atom, line, :tag}, {:integer, line, 0}},
       {:map_field_exact, line, {:atom, line, :value}, pat}
     ]
 

@@ -49,7 +49,11 @@ defmodule BeamLang.Runtime do
       is_binary(value) -> ~c"String"
       is_boolean(value) -> ~c"bool"
       value == :ok -> ~c"void"
-      is_map(value) and Map.has_key?(value, :__beamlang_type__) -> ensure_charlist(Map.get(value, :__beamlang_type__))
+      is_map(value) and Map.has_key?(value, :__beamlang_type__) ->
+        ensure_charlist(Map.get(value, :__beamlang_type__))
+      is_map(value) and Map.get(value, :kind) == 1 -> ~c"Optional"
+      is_map(value) and Map.get(value, :kind) == 2 -> ~c"Result"
+      is_map(value) and string_map?(value) -> ~c"String"
       is_tuple(value) and tuple_size(value) == 2 and elem(value, 0) == :char -> ~c"char"
       is_list(value) -> ~c"List"
       is_map(value) -> ~c"Map"
@@ -73,8 +77,8 @@ defmodule BeamLang.Runtime do
   end
 
   @spec iterator_next_data(list()) :: map()
-  def iterator_next_data([]), do: %{tag: :none}
-  def iterator_next_data([head | _]), do: %{tag: :some, value: head}
+  def iterator_next_data([]), do: %{tag: 0}
+  def iterator_next_data([head | _]), do: %{tag: 1, value: head}
 
   @spec iterator_map_data(list(), function()) :: list()
   def iterator_map_data(list, mapper) do
@@ -107,10 +111,20 @@ defmodule BeamLang.Runtime do
 
   defp string_data(%{__beamlang_type__: "String", data: data}), do: data
   defp string_data(%{__beamlang_type__: ~c"String", data: data}), do: data
+  defp string_data(value) when is_map(value) do
+    if string_map?(value), do: Map.get(value, :data), else: inspect(value)
+  end
   defp string_data(value) when is_list(value), do: value
   defp string_data(value) when is_binary(value), do: value
   defp string_data(value), do: inspect(value)
 
   defp ensure_charlist(value) when is_binary(value), do: String.to_charlist(value)
+  defp ensure_charlist(value) when is_map(value) do
+    if string_map?(value), do: Map.get(value, :data), else: value
+  end
   defp ensure_charlist(value), do: value
+
+  defp string_map?(value) do
+    is_map(value) and Map.has_key?(value, :data) and Map.has_key?(value, :length) and Map.has_key?(value, :chars)
+  end
 end

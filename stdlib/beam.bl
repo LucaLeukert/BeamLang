@@ -7,7 +7,8 @@ type Iterator<T> {
 }
 
 type Optional<T> {
-    tag: any,
+    kind: number,
+    tag: number,
     value: any,
     unwrap: fn(Optional<T>, T) -> T,
     map: fn(Optional<T>, fn(T) -> any) -> Optional<any>,
@@ -15,7 +16,8 @@ type Optional<T> {
 }
 
 type Result<Ok, Err> {
-    tag: any,
+    kind: number,
+    tag: number,
     value: any,
     unwrap: fn(Result<Ok, Err>, Ok) -> Ok,
     map: fn(Result<Ok, Err>, fn(Ok) -> any) -> Result<any, Err>,
@@ -39,13 +41,13 @@ fn print(value: String) -> void;
 fn typeof_data(value: any) -> any;
 
 @external(elixir, "BeamLang.Runtime", "string_length_data")
-fn string_length_data(value: String) -> number;
+fn string_length_data(value: any) -> number;
 
 @external(elixir, "BeamLang.Runtime", "string_concat_data")
-fn string_concat_data(left: String, right: String) -> String;
+fn string_concat_data(left: any, right: any) -> any;
 
 @external(elixir, "BeamLang.Runtime", "string_chars_data")
-fn string_chars_data(value: String) -> any;
+fn string_chars_data(value: any) -> any;
 
 @external(elixir, "BeamLang.Runtime", "iterator_next_data")
 fn iterator_next_data(data: any) -> Optional<any>;
@@ -58,6 +60,9 @@ fn iterator_filter_data(data: any, predicate: fn(any) -> bool) -> any;
 
 @external(elixir, "BeamLang.Runtime", "iterator_fold_data")
 fn iterator_fold_data(data: any, initial: any, folder: fn(any, any) -> any) -> any;
+
+@external(elixir, "System", "halt")
+fn halt_system(status: number) -> void;
 
 fn iterator_from_list(data: any) -> Iterator<any> {
     return { data = data, next = iterator_next, map = iterator_map, filter = iterator_filter, fold = iterator_fold };
@@ -87,6 +92,10 @@ fn iterator_fold(it: Iterator<any>, initial: any, folder: fn(any, any) -> any) -
 
 fn typeof(value: any) -> String {
     let data = typeof_data(value);
+    return string_new(data);
+}
+
+internal fn string_new(data: any) -> String {
     return { data = data, length = string_length, chars = string_chars, concat = string_concat };
 }
 
@@ -96,12 +105,28 @@ internal fn string_length(value: String) -> number {
 
 internal fn string_concat(left: String, right: String) -> String {
     let data = string_concat_data(left->data, right->data);
-    return { data = data, length = string_length, chars = string_chars, concat = string_concat };
+    return string_new(data);
 }
 
 internal fn string_chars(value: String) -> Iterator<char> {
     let data = string_chars_data(value->data);
     return iterator_from_list(data);
+}
+
+internal fn optional_some(value: any) -> Optional<any> {
+    return { kind = 1, tag = 1, value = value, unwrap = optional_unwrap, map = optional_map, and_then = optional_and_then };
+}
+
+internal fn optional_none() -> Optional<any> {
+    return { kind = 1, tag = 0, value = 0, unwrap = optional_unwrap, map = optional_map, and_then = optional_and_then };
+}
+
+internal fn result_ok(value: any) -> Result<any, any> {
+    return { kind = 2, tag = 1, value = value, unwrap = result_unwrap, map = result_map, and_then = result_and_then };
+}
+
+internal fn result_err(value: any) -> Result<any, any> {
+    return { kind = 2, tag = 0, value = value, unwrap = result_unwrap, map = result_map, and_then = result_and_then };
 }
 
 internal fn optional_unwrap(value: Optional<any>, fallback: any) -> any {
@@ -113,15 +138,15 @@ internal fn optional_unwrap(value: Optional<any>, fallback: any) -> any {
 
 internal fn optional_map(value: Optional<any>, mapper: fn(any) -> any) -> Optional<any> {
     return match (value) {
-        case?some inner => ?some mapper(inner),
-        case?none => ?none
+        case?some inner => optional_some(mapper(inner)),
+        case?none => optional_none()
     };
 }
 
 internal fn optional_and_then(value: Optional<any>, mapper: fn(any) -> Optional<any>) -> Optional<any> {
     return match (value) {
         case?some inner => mapper(inner),
-        case?none => ?none
+        case?none => optional_none()
     };
 }
 
@@ -134,14 +159,14 @@ internal fn result_unwrap(value: Result<any, any>, fallback: any) -> any {
 
 internal fn result_map(value: Result<any, any>, mapper: fn(any) -> any) -> Result<any, any> {
     return match (value) {
-        case!ok inner => !ok mapper(inner),
-        case!err err => !err err
+        case!ok inner => result_ok(mapper(inner)),
+        case!err err => result_err(err)
     };
 }
 
 internal fn result_and_then(value: Result<any, any>, mapper: fn(any) -> Result<any, any>) -> Result<any, any> {
     return match (value) {
         case!ok inner => mapper(inner),
-        case!err err => !err err
+        case!err err => result_err(err)
     };
 }
