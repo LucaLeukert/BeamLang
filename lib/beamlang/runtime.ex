@@ -60,13 +60,13 @@ defmodule BeamLang.Runtime do
     end
   end
 
-  @spec string_length(term()) :: number()
-  def string_length(value) do
+  @spec string_length_data(term()) :: number()
+  def string_length_data(value) do
     length(value)
   end
 
-  @spec string_concat(term(), term()) :: term()
-  def string_concat(left, right) do
+  @spec string_concat_data(term(), term()) :: term()
+  def string_concat_data(left, right) do
     left ++ right
   end
 

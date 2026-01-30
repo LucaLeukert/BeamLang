@@ -1,0 +1,9 @@
+fn main() -> number {
+    let ops = string();
+    let opt_ops = optional();
+    let unwrap = opt_ops->unwrap;
+    let length = ops->length;
+    let _value = unwrap(?some 4, 0);
+    let len = length("hi");
+    return len;
+}
