@@ -388,6 +388,9 @@ defmodule BeamLang.ASTPrinter do
   defp format_type({:named, name}), do: name
   defp format_type({:optional, inner}), do: "#{format_type(inner)}?"
   defp format_type({:result, ok_type, err_type}), do: "#{format_type(ok_type)}!#{format_type(err_type)}"
+  defp format_type({:fn, params, return_type}) do
+    "fn(#{Enum.map_join(params, ", ", &format_type/1)}) -> #{format_type(return_type)}"
+  end
   defp format_type(type) when is_atom(type), do: Atom.to_string(type)
 
   defp indent_line(indent, text) do

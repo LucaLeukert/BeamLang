@@ -14,6 +14,7 @@ defmodule BeamLang.AST do
           | {:generic, type_name(), [type_name()]}
           | {:optional, type_name()}
           | {:result, type_name(), type_name()}
+          | {:fn, [type_name()], type_name()}
 
   @type literal ::
           {:integer, %{value: integer(), span: BeamLang.Span.t()}}

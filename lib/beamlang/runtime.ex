@@ -60,6 +60,40 @@ defmodule BeamLang.Runtime do
     end
   end
 
+  @spec string_length(term()) :: number()
+  def string_length(value) do
+    length(value)
+  end
+
+  @spec string_concat(term(), term()) :: term()
+  def string_concat(left, right) do
+    left ++ right
+  end
+
+  @spec string_chars_data(term()) :: list()
+  def string_chars_data(value) do
+    Enum.map(value, fn ch -> {:char, ch} end)
+  end
+
+  @spec iterator_next_data(list()) :: term()
+  def iterator_next_data([]), do: :none
+  def iterator_next_data([head | _]), do: {:some, head}
+
+  @spec iterator_map_data(list(), function()) :: list()
+  def iterator_map_data(list, mapper) do
+    Enum.map(list, mapper)
+  end
+
+  @spec iterator_filter_data(list(), function()) :: list()
+  def iterator_filter_data(list, predicate) do
+    Enum.filter(list, predicate)
+  end
+
+  @spec iterator_fold_data(list(), term(), function()) :: term()
+  def iterator_fold_data(list, initial, folder) do
+    Enum.reduce(list, initial, folder)
+  end
+
   @spec println(term()) :: :ok
   def println(value) do
     :io.format("~s~n", [value])

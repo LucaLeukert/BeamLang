@@ -1,0 +1,14 @@
+fn always_one(value: any) -> number {
+    return 1;
+}
+
+fn main() -> number {
+    let iter = string_chars("hi");
+    let next_fn = iter->next;
+    let first = next_fn(iter);
+    let mapped = optional_map(first, always_one);
+    return match (mapped) {
+        case?some value => value,
+        case?none => 0
+    };
+}

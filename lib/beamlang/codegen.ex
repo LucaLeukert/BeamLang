@@ -10,7 +10,11 @@ defmodule BeamLang.Codegen do
     line = 1
 
     externals = externals_map(functions)
-    function_forms = functions |> Enum.filter(&function_has_body?/1) |> Enum.map(&function_form(&1, externals))
+    functions_map = functions_map(functions)
+    function_forms =
+      functions
+      |> Enum.filter(&function_has_body?/1)
+      |> Enum.map(&function_form(&1, externals, functions_map))
     module_atom = module_atom(module)
 
     [
@@ -30,11 +34,12 @@ defmodule BeamLang.Codegen do
     end)
   end
 
-  @spec function_form(BeamLang.AST.func(), map()) :: tuple()
-  defp function_form({:function, %{name: name, params: params, body: {:block, %{stmts: stmts}}}}, externals) do
+  @spec function_form(BeamLang.AST.func(), map(), map()) :: tuple()
+  defp function_form({:function, %{name: name, params: params, body: {:block, %{stmts: stmts}}}}, externals, functions_map) do
     line = 1
     {params_form, env, counter} = params_form(params, line, %{}, 0)
     env = Map.put(env, :__externals__, externals)
+    env = Map.put(env, :__functions__, functions_map)
     {expr, _env, counter} = stmt_expr_tree(stmts, env, counter)
     {expr, _counter} = unwrap_return(expr, counter)
 
@@ -58,6 +63,14 @@ defmodule BeamLang.Codegen do
         MapSet.member?(names_with_body, name) -> acc
         true -> Map.put(acc, name, external)
       end
+    end)
+  end
+
+  defp functions_map(functions) do
+    functions
+    |> Enum.filter(&function_has_body?/1)
+    |> Enum.reduce(%{}, fn {:function, %{name: name, params: params}}, acc ->
+      Map.put(acc, name, length(params))
     end)
   end
 
@@ -265,21 +278,37 @@ defmodule BeamLang.Codegen do
         form
 
       :error ->
-        case qualified_name(name) do
-          {:ok, mod, fun} ->
-            {:call, line, {:remote, line, {:atom, line, String.to_atom(mod)}, {:atom, line, String.to_atom(fun)}},
-             Enum.map(args, &expr_form(line, &1, env))}
+        if Map.has_key?(env, name) do
+          {:call, line, {:var, line, Map.get(env, name)}, Enum.map(args, &expr_form(line, &1, env))}
+        else
+          case qualified_name(name) do
+            {:ok, mod, fun} ->
+              {:call, line, {:remote, line, {:atom, line, String.to_atom(mod)}, {:atom, line, String.to_atom(fun)}},
+               Enum.map(args, &expr_form(line, &1, env))}
 
-          :error ->
-            {:call, line, {:atom, line, String.to_atom(name)},
-             Enum.map(args, &expr_form(line, &1, env))}
+            :error ->
+              {:call, line, {:atom, line, String.to_atom(name)},
+               Enum.map(args, &expr_form(line, &1, env))}
+          end
         end
     end
   end
 
   @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
   defp expr_form(line, {:identifier, %{name: name}}, env) do
-    {:var, line, Map.get(env, name, var_atom(name))}
+    functions_map = Map.get(env, :__functions__, %{})
+
+    cond do
+      Map.has_key?(env, name) ->
+        {:var, line, Map.get(env, name)}
+
+      Map.has_key?(functions_map, name) ->
+        arity = Map.fetch!(functions_map, name)
+        {:fun, line, {:function, String.to_atom(name), arity}}
+
+      true ->
+        {:var, line, var_atom(name)}
+    end
   end
 
   @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
@@ -589,6 +618,9 @@ defmodule BeamLang.Codegen do
   defp type_label({:named, name}) when is_binary(name), do: name
   defp type_label({:optional, inner}), do: "#{type_label(inner)}?"
   defp type_label({:result, ok_type, err_type}), do: "#{type_label(ok_type)}!#{type_label(err_type)}"
+  defp type_label({:fn, params, return_type}) do
+    "fn(#{Enum.map_join(params, ", ", &type_label/1)}) -> #{type_label(return_type)}"
+  end
   defp type_label(type) when is_atom(type), do: Atom.to_string(type)
 
   @spec case_clause_form(non_neg_integer(), BeamLang.AST.match_case(), map()) :: tuple()

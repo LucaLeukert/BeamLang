@@ -373,6 +373,8 @@ defmodule BeamLang do
     do: qualified_in_type(base) ++ Enum.flat_map(args, &qualified_in_type/1)
   defp qualified_in_type({:optional, inner}), do: qualified_in_type(inner)
   defp qualified_in_type({:result, ok_t, err_t}), do: qualified_in_type(ok_t) ++ qualified_in_type(err_t)
+  defp qualified_in_type({:fn, params, return_type}),
+    do: Enum.flat_map(params, &qualified_in_type/1) ++ qualified_in_type(return_type)
   defp qualified_in_type(_), do: []
 
   defp qualified_in_expr({:block, %{stmts: stmts}}),
@@ -894,6 +896,11 @@ defmodule BeamLang do
       {:result, ok_t, err_t} ->
         {:result, qualify_type(ok_t, type_map, local_types, alias_map), qualify_type(err_t, type_map, local_types, alias_map)}
 
+      {:fn, params, return_type} ->
+        params = Enum.map(params, &qualify_type(&1, type_map, local_types, alias_map))
+        return_type = qualify_type(return_type, type_map, local_types, alias_map)
+        {:fn, params, return_type}
+
       _ ->
         type
     end
@@ -938,6 +945,8 @@ defmodule BeamLang do
   defp collect_type_name_refs({:optional, inner}, span), do: collect_type_name_refs(inner, span)
   defp collect_type_name_refs({:result, ok_t, err_t}, span),
     do: collect_type_name_refs(ok_t, span) ++ collect_type_name_refs(err_t, span)
+  defp collect_type_name_refs({:fn, params, return_type}, span),
+    do: Enum.flat_map(params, &collect_type_name_refs(&1, span)) ++ collect_type_name_refs(return_type, span)
   defp collect_type_name_refs(_type, _span), do: []
 
   defp collect_expr_refs({:block, %{stmts: stmts}}), do: Enum.flat_map(stmts, &collect_stmt_refs/1)

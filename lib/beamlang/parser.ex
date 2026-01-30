@@ -727,6 +727,37 @@ defmodule BeamLang.Parser do
     parse_if_expr(tokens)
   end
 
+  defp parse_primary([%Token{type: :question} | rest]) do
+    with {:ok, tag_tok, rest1} <- expect(rest, :identifier) do
+      case tag_tok.value do
+        "none" ->
+          {:ok, {:opt_none, %{span: tag_tok.span}}, rest1}
+
+        "some" ->
+          with {:ok, expr, rest2} <- parse_expression(rest1) do
+            span = BeamLang.Span.merge(tag_tok.span, expr_span(expr))
+            {:ok, {:opt_some, %{expr: expr, span: span}}, rest2}
+          end
+
+        _ ->
+          {:error, error("Invalid optional literal.", tag_tok)}
+      end
+    end
+  end
+
+  defp parse_primary([%Token{type: :bang} | rest]) do
+    with {:ok, tag_tok, rest1} <- expect(rest, :identifier),
+         {:ok, expr, rest2} <- parse_expression(rest1) do
+      span = BeamLang.Span.merge(tag_tok.span, expr_span(expr))
+
+      case tag_tok.value do
+        "ok" -> {:ok, {:res_ok, %{expr: expr, span: span}}, rest2}
+        "err" -> {:ok, {:res_err, %{expr: expr, span: span}}, rest2}
+        _ -> {:error, error("Invalid result literal.", tag_tok)}
+      end
+    end
+  end
+
   defp parse_primary([%Token{type: :lparen} | rest]) do
     with {:ok, expr, rest1} <- parse_expression(rest),
          {:ok, _rparen, rest2} <- expect(rest1, :rparen) do
@@ -1333,6 +1364,17 @@ defmodule BeamLang.Parser do
     {:ok, {String.to_atom(tok.value), tok.span}, rest}
   end
 
+  defp parse_base_type([%Token{type: :fn} = fn_tok | rest]) do
+    with {:ok, _lparen, rest1} <- expect(rest, :lparen),
+         {:ok, params, rest2} <- parse_type_params(rest1, []),
+         {:ok, _rparen, rest3} <- expect(rest2, :rparen),
+         {:ok, _arrow, rest4} <- expect(rest3, :arrow),
+         {:ok, {return_type, return_span}, rest5} <- parse_type_name(rest4) do
+      span = BeamLang.Span.merge(fn_tok.span, return_span)
+      {:ok, {{:fn, params, return_type}, span}, rest5}
+    end
+  end
+
   defp parse_base_type(tokens) do
     case parse_qualified_identifier(tokens) do
       {:ok, {name, span}, rest} -> {:ok, {{:named, name}, span}, rest}
@@ -1389,6 +1431,21 @@ defmodule BeamLang.Parser do
     with {:ok, {type_name, _span}, rest1} <- parse_type_name(tokens) do
       case rest1 do
         [%Token{type: :comma} | rest2] -> parse_type_args(rest2, [type_name | acc])
+        _ -> {:ok, Enum.reverse([type_name | acc]), rest1}
+      end
+    end
+  end
+
+  @spec parse_type_params([Token.t()], [BeamLang.AST.type_name()]) ::
+          {:ok, [BeamLang.AST.type_name()], [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_type_params([%Token{type: :rparen} | _] = rest, acc) do
+    {:ok, Enum.reverse(acc), rest}
+  end
+
+  defp parse_type_params(tokens, acc) do
+    with {:ok, {type_name, _span}, rest1} <- parse_type_name(tokens) do
+      case rest1 do
+        [%Token{type: :comma} | rest2] -> parse_type_params(rest2, [type_name | acc])
         _ -> {:ok, Enum.reverse([type_name | acc]), rest1}
       end
     end

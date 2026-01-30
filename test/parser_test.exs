@@ -150,6 +150,23 @@ defmodule BeamLang.ParserTest do
     assert {:import, %{module: "math", alias: "m", items: :none}} = imp2
   end
 
+  test "parses function type in struct fields" do
+    source = """
+    type Iterator<T> {
+        next: fn(Iterator<T>) -> Optional<T>,
+        fold: fn(Iterator<T>, any, fn(any, T) -> any) -> any
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{types: [type_def]}} = ast
+    assert {:type_def, %{name: "Iterator", fields: fields}} = type_def
+    assert %{name: "next", type: {:fn, [_], _}} = Enum.at(fields, 0)
+    assert %{name: "fold", type: {:fn, [_, _, {:fn, [_, _], _}], _}} = Enum.at(fields, 1)
+  end
+
   test "parses type definition and struct literal" do
     source = """
     type User {

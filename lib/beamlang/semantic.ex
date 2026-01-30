@@ -174,14 +174,52 @@ defmodule BeamLang.Semantic do
         end
 
       :error ->
-        {:error, :unknown_function}
+        case Map.fetch(env, name) do
+          {:ok, %{type: {:fn, param_types, return_type}}} ->
+            if length(param_types) != length(args) do
+              {:error, :wrong_arity}
+            else
+              errors =
+                Enum.zip(args, param_types)
+                |> Enum.flat_map(fn {arg, expected_type} ->
+                  case type_of_expr(arg, func_table, type_table, env, expected_type) do
+                    {:ok, inferred} ->
+                      if type_compatible?(expected_type, inferred) do
+                        []
+                      else
+                        [
+                          BeamLang.Error.new(
+                            :type,
+                            "Argument type mismatch. Expected #{type_label(expected_type)}, got #{type_label(inferred)}.",
+                            expr_span(arg)
+                          )
+                        ]
+                      end
+
+                    {:error, reason} ->
+                      expr_error(reason, arg)
+                  end
+                end)
+
+              if errors == [], do: {:ok, return_type}, else: {:error, {:call, errors}}
+            end
+
+          _ ->
+            {:error, :unknown_function}
+        end
     end
   end
 
-  defp type_of_expr({:identifier, %{name: name}}, _func_table, _type_table, env, _expected) do
+  defp type_of_expr({:identifier, %{name: name}}, func_table, _type_table, env, _expected) do
     case Map.fetch(env, name) do
-      {:ok, %{type: type}} -> {:ok, type}
-      :error -> {:error, :unknown_variable}
+      {:ok, %{type: type}} ->
+        {:ok, type}
+
+      :error ->
+        case Map.fetch(func_table, name) do
+          {:ok, {param_types, return_type}} -> {:ok, {:fn, param_types, return_type}}
+          :error -> {:error, :unknown_variable}
+        end
     end
   end
 
@@ -235,6 +273,12 @@ defmodule BeamLang.Semantic do
             {:error, reason}
         end
 
+      nil ->
+        case type_of_expr(expr, func_table, type_table, env, nil) do
+          {:ok, inferred} -> {:ok, {:optional, inferred}}
+          {:error, reason} -> {:error, reason}
+        end
+
       _ ->
         {:error, :missing_optional_context}
     end
@@ -243,6 +287,7 @@ defmodule BeamLang.Semantic do
   defp type_of_expr({:opt_none, %{span: _span}}, _func_table, _type_table, _env, expected) do
     case expected do
       {:optional, inner} -> {:ok, {:optional, inner}}
+      nil -> {:ok, {:optional, :any}}
       _ -> {:error, :missing_optional_context}
     end
   end
@@ -268,6 +313,12 @@ defmodule BeamLang.Semantic do
 
           {:error, reason} ->
             {:error, reason}
+        end
+
+      nil ->
+        case type_of_expr(expr, func_table, type_table, env, nil) do
+          {:ok, inferred} -> {:ok, {:result, inferred, :any}}
+          {:error, reason} -> {:error, reason}
         end
 
       _ ->
@@ -296,6 +347,12 @@ defmodule BeamLang.Semantic do
 
           {:error, reason} ->
             {:error, reason}
+        end
+
+      nil ->
+        case type_of_expr(expr, func_table, type_table, env, nil) do
+          {:ok, inferred} -> {:ok, {:result, :any, inferred}}
+          {:error, reason} -> {:error, reason}
         end
 
       _ ->
@@ -1390,11 +1447,24 @@ defmodule BeamLang.Semantic do
   end
 
   defp do_type_compatible?(:any, _inferred), do: true
+  defp do_type_compatible?(_expected, :any), do: true
   defp do_type_compatible?(expected, inferred) when expected == inferred, do: true
   defp do_type_compatible?({:optional, expected_inner}, {:optional, inferred_inner}),
     do: type_compatible?(expected_inner, inferred_inner)
   defp do_type_compatible?({:result, expected_ok, expected_err}, {:result, inferred_ok, inferred_err}),
     do: type_compatible?(expected_ok, inferred_ok) and type_compatible?(expected_err, inferred_err)
+  defp do_type_compatible?({:generic, expected_base, expected_args}, {:generic, inferred_base, inferred_args}) do
+    length(expected_args) == length(inferred_args) and
+      type_compatible?(expected_base, inferred_base) and
+      Enum.zip(expected_args, inferred_args)
+      |> Enum.all?(fn {exp, inf} -> type_compatible?(exp, inf) end)
+  end
+  defp do_type_compatible?({:fn, expected_params, expected_ret}, {:fn, inferred_params, inferred_ret}) do
+    length(expected_params) == length(inferred_params) and
+      Enum.zip(expected_params, inferred_params)
+      |> Enum.all?(fn {exp, inf} -> type_compatible?(exp, inf) end) and
+      type_compatible?(expected_ret, inferred_ret)
+  end
   defp do_type_compatible?(_expected, _inferred), do: false
 
   @spec comparable_types?(BeamLang.AST.type_name(), BeamLang.AST.type_name()) :: boolean()
@@ -1834,6 +1904,9 @@ defmodule BeamLang.Semantic do
   defp normalize_type({:result, ok_type, err_type}),
     do: {:result, normalize_type(ok_type), normalize_type(err_type)}
 
+  defp normalize_type({:fn, params, return_type}),
+    do: {:fn, Enum.map(params, &normalize_type/1), normalize_type(return_type)}
+
   defp normalize_type(:any), do: :any
 
   defp normalize_type(type), do: type
@@ -1871,6 +1944,10 @@ defmodule BeamLang.Semantic do
     {:result, substitute_type(ok_type, param_map), substitute_type(err_type, param_map)}
   end
 
+  defp substitute_type({:fn, params, return_type}, param_map) do
+    {:fn, Enum.map(params, &substitute_type(&1, param_map)), substitute_type(return_type, param_map)}
+  end
+
   defp substitute_type(type, _param_map), do: type
 
   @spec type_label(BeamLang.AST.type_name()) :: binary()
@@ -1885,5 +1962,8 @@ defmodule BeamLang.Semantic do
   defp type_label(:float), do: "number"
   defp type_label({:optional, inner}), do: "#{type_label(inner)}?"
   defp type_label({:result, ok_type, err_type}), do: "#{type_label(ok_type)}!#{type_label(err_type)}"
+  defp type_label({:fn, params, return_type}) do
+    "fn(#{Enum.map_join(params, ", ", &type_label/1)}) -> #{type_label(return_type)}"
+  end
   defp type_label(type) when is_atom(type), do: Atom.to_string(type)
 end
