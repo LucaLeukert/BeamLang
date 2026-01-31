@@ -1,0 +1,5 @@
+fn main() -> number {
+    println(42);
+    println("text");
+    return 0;
+}

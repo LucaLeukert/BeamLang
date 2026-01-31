@@ -230,6 +230,23 @@ defmodule BeamLang.ParserTest do
     assert {:for, %{collection: {:method_call, %{name: "chars"}}}} = stmt
   end
 
+  test "parses println with number" do
+    source = """
+    fn main() -> number {
+        println(1);
+        return 0;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{functions: [func]}} = ast
+    assert {:function, %{body: {:block, %{stmts: [stmt | _]}}}} = func
+    assert {:expr, %{expr: {:call, %{name: "println", args: [arg]}}}} = stmt
+    assert {:integer, %{value: 1}} = arg
+  end
+
   test "parses internal function" do
     source = """
     internal fn helper(value: number) -> number {
