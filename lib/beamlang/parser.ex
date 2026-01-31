@@ -120,23 +120,30 @@ defmodule BeamLang.Parser do
   defp parse_function(tokens, external, exported, internal) do
     with {:ok, _fn_tok, rest1} <- expect(tokens, :fn),
          {:ok, name_tok, rest2} <- expect(rest1, :identifier),
-         {:ok, _lparen, rest3} <- expect(rest2, :lparen),
-         {:ok, params, rest4} <- parse_params(rest3, []),
-         {:ok, _rparen, rest5} <- expect(rest4, :rparen),
-         {:ok, _arrow, rest6} <- expect(rest5, :arrow),
-         {:ok, {return_type, return_span}, rest7} <- parse_type_name(rest6) do
+         {:ok, {type_params, params_span}, rest3} <- parse_type_params(rest2),
+         {:ok, _lparen, rest4} <- expect(rest3, :lparen),
+         {:ok, params, rest5} <- parse_params(rest4, []),
+         {:ok, _rparen, rest6} <- expect(rest5, :rparen),
+         {:ok, _arrow, rest7} <- expect(rest6, :arrow),
+         {:ok, {return_type, return_span}, rest8} <- parse_type_name(rest7) do
       case external do
         nil ->
-          with {:ok, _lbrace, rest8} <- expect(rest7, :lbrace),
-               {:ok, body, rest9} <- parse_block(rest8),
-               {:ok, _rbrace, rest10} <- expect(rest9, :rbrace) do
+          with {:ok, _lbrace, rest9} <- expect(rest8, :lbrace),
+               {:ok, body, rest10} <- parse_block(rest9),
+               {:ok, _rbrace, rest11} <- expect(rest10, :rbrace) do
             span = BeamLang.Span.merge(name_tok.span, return_span)
-            span = BeamLang.Span.merge(span, rbrace_span(rest9, rest10))
+            span =
+              case params_span do
+                nil -> span
+                _ -> BeamLang.Span.merge(span, params_span)
+              end
+            span = BeamLang.Span.merge(span, rbrace_span(rest10, rest11))
 
             ast =
               {:function,
                %{
                  name: name_tok.value,
+                 type_params: type_params,
                  params: params,
                  return_type: return_type,
                  body: body,
@@ -146,18 +153,24 @@ defmodule BeamLang.Parser do
                  span: span
                }}
 
-            {:ok, ast, rest10}
+            {:ok, ast, rest11}
           end
 
         _ ->
-          with {:ok, semi_tok, rest8} <- expect(rest7, :semicolon) do
+          with {:ok, semi_tok, rest9} <- expect(rest8, :semicolon) do
             span = BeamLang.Span.merge(name_tok.span, return_span)
+            span =
+              case params_span do
+                nil -> span
+                _ -> BeamLang.Span.merge(span, params_span)
+              end
             span = BeamLang.Span.merge(span, semi_tok.span)
 
             ast =
               {:function,
                %{
                  name: name_tok.value,
+                 type_params: type_params,
                  params: params,
                  return_type: return_type,
                  body: nil,
@@ -167,7 +180,7 @@ defmodule BeamLang.Parser do
                  span: span
                }}
 
-            {:ok, ast, rest8}
+            {:ok, ast, rest9}
           end
       end
     end

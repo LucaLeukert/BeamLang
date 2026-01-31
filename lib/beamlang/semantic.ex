@@ -186,36 +186,47 @@ defmodule BeamLang.Semantic do
 
   defp type_of_expr({:call, %{name: name, args: args, span: call_span}}, func_table, type_table, env, _expected) do
     case Map.fetch(func_table, name) do
-      {:ok, %{params: param_types, return: return_type, internal: internal, span: func_span}} ->
+      {:ok, %{params: param_types, return: return_type, internal: internal, span: func_span, type_params: type_params}} ->
         if internal_call?(internal, func_span, call_span) do
           {:error, :internal_function}
         else
           if length(param_types) != length(args) do
             {:error, :wrong_arity}
           else
-            errors =
-              Enum.zip(args, param_types)
-              |> Enum.flat_map(fn {arg, expected_type} ->
-                case type_of_expr(arg, func_table, type_table, env, expected_type) do
-                  {:ok, inferred} ->
-                    if type_compatible?(expected_type, inferred) do
-                      []
-                    else
-                      [
-                        BeamLang.Error.new(
-                          :type,
-                          "Argument type mismatch. Expected #{type_label(expected_type)}, got #{type_label(inferred)}.",
-                          expr_span(arg)
-                        )
-                      ]
-                    end
+            if type_params != [] do
+              case infer_type_params(param_types, args, func_table, type_table, env) do
+                {:ok, mapping} ->
+                  {:ok, resolved} = substitute_type_vars(return_type, mapping, call_span)
+                  {:ok, resolved}
 
-                  {:error, reason} ->
-                    expr_error(reason, arg)
-                end
-              end)
+                {:error, errors} ->
+                  {:error, {:call, errors}}
+              end
+            else
+              errors =
+                Enum.zip(args, param_types)
+                |> Enum.flat_map(fn {arg, expected_type} ->
+                  case type_of_expr(arg, func_table, type_table, env, expected_type) do
+                    {:ok, inferred} ->
+                      if type_compatible?(expected_type, inferred) do
+                        []
+                      else
+                        [
+                          BeamLang.Error.new(
+                            :type,
+                            "Argument type mismatch. Expected #{type_label(expected_type)}, got #{type_label(inferred)}.",
+                            expr_span(arg)
+                          )
+                        ]
+                      end
 
-            if errors == [], do: {:ok, return_type}, else: {:error, {:call, errors}}
+                    {:error, reason} ->
+                      expr_error(reason, arg)
+                  end
+                end)
+
+              if errors == [], do: {:ok, return_type}, else: {:error, {:call, errors}}
+            end
           end
         end
 
@@ -609,15 +620,16 @@ defmodule BeamLang.Semantic do
   end
 
   @spec validate_function(BeamLang.AST.func(), map(), map()) :: [BeamLang.Error.t()]
-  defp validate_function({:function, %{name: name, params: params, return_type: return_type, body: body}}, func_table, type_table) do
+  defp validate_function({:function, %{name: name, type_params: type_params, params: params, return_type: return_type, body: body}}, func_table, type_table) do
     errors = validate_param_names(params)
 
     param_env =
       Enum.reduce(params, %{}, fn %{name: param_name, type: param_type}, acc ->
-        Map.put(acc, param_name, %{type: normalize_type(param_type), mutable: false})
+        param_type = param_type |> normalize_type() |> replace_type_params(type_params)
+        Map.put(acc, param_name, %{type: param_type, mutable: false})
       end)
 
-    return_type = normalize_type(return_type)
+    return_type = return_type |> normalize_type() |> replace_type_params(type_params)
 
     {env, stmt_errors} =
       case body do
@@ -1067,10 +1079,15 @@ defmodule BeamLang.Semantic do
   @spec build_function_table([BeamLang.AST.func()]) :: {:ok, map()}
   defp build_function_table(functions) do
     table =
-      Enum.reduce(functions, %{}, fn {:function, %{name: name, params: params, return_type: return_type, internal: internal, span: span}}, acc ->
-        param_types = Enum.map(params, &normalize_type(&1.type))
+      Enum.reduce(functions, %{}, fn {:function, %{name: name, type_params: type_params, params: params, return_type: return_type, internal: internal, span: span}}, acc ->
+        param_types =
+          params
+          |> Enum.map(&normalize_type(&1.type))
+          |> Enum.map(&replace_type_params(&1, type_params))
+
         param_names = Enum.map(params, & &1.name)
-        Map.put(acc, name, %{params: param_types, param_names: param_names, return: normalize_type(return_type), internal: internal, span: span})
+        return_type = return_type |> normalize_type() |> replace_type_params(type_params)
+        Map.put(acc, name, %{params: param_types, param_names: param_names, return: return_type, type_params: type_params, internal: internal, span: span})
       end)
 
     {:ok, table}
@@ -1674,6 +1691,8 @@ defmodule BeamLang.Semantic do
 
   defp do_type_compatible?(:any, _inferred), do: true
   defp do_type_compatible?(_expected, :any), do: true
+  defp do_type_compatible?({:type_var, _name}, _inferred), do: true
+  defp do_type_compatible?(_expected, {:type_var, _name}), do: true
   defp do_type_compatible?(expected, inferred) when expected == inferred, do: true
   defp do_type_compatible?({:optional, expected_inner}, {:optional, inferred_inner}),
     do: type_compatible?(expected_inner, inferred_inner)
@@ -1863,13 +1882,15 @@ defmodule BeamLang.Semantic do
 
   defp annotate_function({:function, %{body: nil}} = func, _func_table, _type_table), do: func
 
-  defp annotate_function({:function, %{params: params, return_type: return_type, body: body} = info}, func_table, type_table) do
+  defp annotate_function({:function, %{params: params, return_type: return_type, type_params: type_params, body: body} = info}, func_table, type_table) do
     env =
       Enum.reduce(params, %{}, fn %{name: name, type: type}, acc ->
-        Map.put(acc, name, %{type: normalize_type(type), mutable: false})
+        type = type |> normalize_type() |> replace_type_params(type_params)
+        Map.put(acc, name, %{type: type, mutable: false})
       end)
 
-    {body, _env} = annotate_block(body, env, func_table, type_table, normalize_type(return_type))
+    return_type = return_type |> normalize_type() |> replace_type_params(type_params)
+    {body, _env} = annotate_block(body, env, func_table, type_table, return_type)
     {:function, %{info | body: body}}
   end
 
@@ -2189,9 +2210,149 @@ defmodule BeamLang.Semantic do
   defp normalize_type({:fn, params, return_type}),
     do: {:fn, Enum.map(params, &normalize_type/1), normalize_type(return_type)}
 
+  defp normalize_type({:type_var, name}), do: {:type_var, name}
+
   defp normalize_type(:any), do: :any
 
   defp normalize_type(type), do: type
+
+  defp replace_type_params(type, type_params) do
+    case type do
+      {:named, name} ->
+        if Enum.member?(type_params, name) do
+          {:type_var, name}
+        else
+          {:named, name}
+        end
+
+      {:generic, base, args} ->
+        {:generic, replace_type_params(base, type_params), Enum.map(args, &replace_type_params(&1, type_params))}
+
+      {:optional, inner} ->
+        {:optional, replace_type_params(inner, type_params)}
+
+      {:result, ok_type, err_type} ->
+        {:result, replace_type_params(ok_type, type_params), replace_type_params(err_type, type_params)}
+
+      {:fn, params, return_type} ->
+        {:fn, Enum.map(params, &replace_type_params(&1, type_params)), replace_type_params(return_type, type_params)}
+
+      _ ->
+        type
+    end
+  end
+
+  defp infer_type_params(param_types, args, func_table, type_table, env) do
+    Enum.reduce_while(Enum.zip(param_types, args), {:ok, %{}}, fn {param_type, arg}, {:ok, mapping} ->
+      case type_of_expr(arg, func_table, type_table, env, nil) do
+        {:ok, inferred} ->
+          case unify_types(param_type, inferred, mapping) do
+            {:ok, next} -> {:cont, {:ok, next}}
+            {:error, reason} -> {:halt, {:error, [type_param_error(reason, arg)]}}
+          end
+
+        {:error, reason} ->
+          {:halt, {:error, expr_error(reason, arg)}}
+      end
+    end)
+  end
+
+  defp type_param_error({:type_mismatch, expected, inferred}, arg) do
+    BeamLang.Error.new(
+      :type,
+      "Argument type mismatch. Expected #{type_label(expected)}, got #{type_label(inferred)}.",
+      expr_span(arg)
+    )
+  end
+
+  defp type_param_error({:cannot_infer, name}, arg) do
+    BeamLang.Error.new(:type, "Cannot infer type parameter #{name}.", expr_span(arg))
+  end
+
+  defp unify_types(expected, inferred, mapping) do
+    expected = normalize_type(expected)
+    inferred = normalize_type(inferred)
+
+    case expected do
+      :any ->
+        {:ok, mapping}
+
+      {:type_var, name} ->
+        case Map.fetch(mapping, name) do
+          :error -> {:ok, Map.put(mapping, name, inferred)}
+          {:ok, bound} ->
+            if type_compatible?(bound, inferred) do
+              {:ok, mapping}
+            else
+              {:error, {:type_mismatch, bound, inferred}}
+            end
+        end
+
+      {:optional, exp_inner} ->
+        case inferred do
+          {:optional, inf_inner} -> unify_types(exp_inner, inf_inner, mapping)
+          _ -> {:error, {:type_mismatch, expected, inferred}}
+        end
+
+      {:result, exp_ok, exp_err} ->
+        case inferred do
+          {:result, inf_ok, inf_err} ->
+            with {:ok, mapping} <- unify_types(exp_ok, inf_ok, mapping),
+                 {:ok, mapping} <- unify_types(exp_err, inf_err, mapping) do
+              {:ok, mapping}
+            end
+
+          _ ->
+            {:error, {:type_mismatch, expected, inferred}}
+        end
+
+      {:generic, exp_base, exp_args} ->
+        case inferred do
+          {:generic, inf_base, inf_args} when length(exp_args) == length(inf_args) ->
+            with {:ok, mapping} <- unify_types(exp_base, inf_base, mapping) do
+              Enum.zip(exp_args, inf_args)
+              |> Enum.reduce_while({:ok, mapping}, fn {exp_arg, inf_arg}, {:ok, acc} ->
+                case unify_types(exp_arg, inf_arg, acc) do
+                  {:ok, next} -> {:cont, {:ok, next}}
+                  {:error, reason} -> {:halt, {:error, reason}}
+                end
+              end)
+            end
+
+          _ ->
+            {:error, {:type_mismatch, expected, inferred}}
+        end
+
+      {:fn, exp_params, exp_ret} ->
+        case inferred do
+          {:fn, inf_params, inf_ret} when length(exp_params) == length(inf_params) ->
+            with {:ok, mapping} <-
+                   Enum.zip(exp_params, inf_params)
+                   |> Enum.reduce_while({:ok, mapping}, fn {exp_param, inf_param}, {:ok, acc} ->
+                     case unify_types(exp_param, inf_param, acc) do
+                       {:ok, next} -> {:cont, {:ok, next}}
+                       {:error, reason} -> {:halt, {:error, reason}}
+                     end
+                   end) do
+              unify_types(exp_ret, inf_ret, mapping)
+            end
+
+          _ ->
+            {:error, {:type_mismatch, expected, inferred}}
+        end
+
+      _ ->
+        if type_compatible?(expected, inferred) do
+          {:ok, mapping}
+        else
+          {:error, {:type_mismatch, expected, inferred}}
+        end
+    end
+  end
+
+  defp substitute_type_vars(type, mapping, _span) do
+    {:ok, substitute_type(type, mapping)}
+  end
 
   defp type_arg_map(params, args) do
     if length(params) == length(args) do
@@ -2211,6 +2372,13 @@ defmodule BeamLang.Semantic do
     case Map.fetch(param_map, name) do
       {:ok, type} -> type
       :error -> {:named, name}
+    end
+  end
+
+  defp substitute_type({:type_var, name}, param_map) do
+    case Map.fetch(param_map, name) do
+      {:ok, type} -> type
+      :error -> {:type_var, name}
     end
   end
 
@@ -2236,6 +2404,7 @@ defmodule BeamLang.Semantic do
   defp type_label({:generic, base, args}) do
     "#{type_label(base)}<#{Enum.map_join(args, ", ", &type_label/1)}>"
   end
+  defp type_label({:type_var, name}), do: name
   defp type_label({:named, name}) when is_binary(name), do: name
   defp type_label(:any), do: "any"
   defp type_label(:number), do: "number"

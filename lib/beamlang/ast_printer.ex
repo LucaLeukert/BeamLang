@@ -43,13 +43,19 @@ defmodule BeamLang.ASTPrinter do
     ]
   end
 
-  defp format_node({:function, %{name: name, params: params, return_type: type, body: body, exported: exported, internal: internal}}, indent) do
+  defp format_node({:function, %{name: name, type_params: type_params, params: params, return_type: type, body: body, exported: exported, internal: internal}}, indent) do
     params_text =
       params
       |> Enum.map(fn %{name: param_name, type: param_type} ->
         "#{param_name}: #{format_type(param_type)}"
       end)
       |> Enum.join(", ")
+
+    type_params_text =
+      case type_params do
+        [] -> ""
+        _ -> "<#{Enum.join(type_params, ", ")}>"
+      end
 
     params_line =
       if params_text == "" do
@@ -59,7 +65,7 @@ defmodule BeamLang.ASTPrinter do
       end
 
     [
-      indent_line(indent, "Fn #{name} -> #{format_type(type)}#{func_suffix(exported, internal)}"),
+      indent_line(indent, "Fn #{name}#{type_params_text} -> #{format_type(type)}#{func_suffix(exported, internal)}"),
       params_line,
       format_node(body, indent + 2)
     ]

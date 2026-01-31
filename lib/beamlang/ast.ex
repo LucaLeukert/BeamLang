@@ -92,6 +92,7 @@ defmodule BeamLang.AST do
           {:function,
            %{
              name: binary(),
+             type_params: [binary()],
              params: [func_param()],
              return_type: type_name(),
              body: block() | nil,

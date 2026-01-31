@@ -167,6 +167,21 @@ defmodule BeamLang.ParserTest do
     assert %{name: "fold", type: {:fn, [_, _, {:fn, [_, _], _}], _}} = Enum.at(fields, 1)
   end
 
+  test "parses generic function definition" do
+    source = """
+    fn test<T>(opt: Optional<T>) -> T {
+        return opt->unwrap(0);
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{functions: [func]}} = ast
+    assert {:function, %{name: "test", type_params: ["T"], params: [param], return_type: {:named, "T"}}} = func
+    assert %{name: "opt", type: {:generic, {:named, "Optional"}, [{:named, "T"}]}} = param
+  end
+
   test "parses type definition named String" do
     source = """
     type String {
