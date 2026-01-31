@@ -1,9 +1,9 @@
-fn test<T>(opt: Optional<T>) -> Optional<T> {
-    return opt;
+fn test<T>(opt: Optional<T>) -> T {
+    return opt->unwrap(0);
 }
 
 fn main() -> number {
     let value = test(?some 42);
-    println(value->unwrap(0));
-    return value->unwrap(0);
+    println(value);
+    return value;
 }
