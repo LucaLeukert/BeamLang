@@ -147,6 +147,7 @@ defmodule BeamLang.Semantic do
   defp type_of_expr({:bool, %{value: _value}}, _func_table, _type_table, _env, _expected), do: {:ok, :bool}
 
   defp type_of_expr({:lambda, %{params: params, return_type: return_type, body: body}}, func_table, type_table, env, _expected) do
+    lambda_errors = validate_param_names(params)
     param_env =
       Enum.reduce(params, %{}, fn %{name: param_name, type: param_type}, acc ->
         Map.put(acc, param_name, %{type: normalize_type(param_type), mutable: false})
@@ -158,8 +159,8 @@ defmodule BeamLang.Semantic do
     {:ok, _env, stmt_errors} = validate_statements(body, func_table, type_table, lambda_env, return_type)
     errors =
       case typecheck_return(return_type, body, func_table, type_table, lambda_env) do
-        :ok -> stmt_errors
-        {:error, errs} -> stmt_errors ++ errs
+        :ok -> stmt_errors ++ lambda_errors
+        {:error, errs} -> stmt_errors ++ errs ++ lambda_errors
       end
 
     if errors == [] do
@@ -609,7 +610,7 @@ defmodule BeamLang.Semantic do
 
   @spec validate_function(BeamLang.AST.func(), map(), map()) :: [BeamLang.Error.t()]
   defp validate_function({:function, %{name: name, params: params, return_type: return_type, body: body}}, func_table, type_table) do
-    errors = []
+    errors = validate_param_names(params)
 
     param_env =
       Enum.reduce(params, %{}, fn %{name: param_name, type: param_type}, acc ->
@@ -695,6 +696,13 @@ defmodule BeamLang.Semantic do
           {:cont, {:ok, acc_env, body_errors ++ errors}}
 
         {:for, %{name: name, collection: collection, body: body, span: span}} ->
+          errors =
+            if name == "self" do
+              [BeamLang.Error.new(:type, "self is reserved for method receivers.", span) | errors]
+            else
+              errors
+            end
+
           errors = errors ++ iterator_errors(collection, func_table, type_table, acc_env, span)
           item_type = iterator_item_type(collection, func_table, type_table, acc_env)
           loop_env = Map.put(acc_env, name, %{type: item_type, mutable: false})
@@ -737,6 +745,13 @@ defmodule BeamLang.Semantic do
 
         {:let, %{name: name, expr: expr, mutable: mutable, type: declared_type}} ->
           declared_type = normalize_type(declared_type)
+
+          errors =
+            if name == "self" do
+              [BeamLang.Error.new(:type, "self is reserved for method receivers.", stmt_span(stmt)) | errors]
+            else
+              errors
+            end
 
           case type_of_expr(expr, func_table, type_table, acc_env, declared_type) do
             {:error, :unknown_function} ->
@@ -1054,7 +1069,8 @@ defmodule BeamLang.Semantic do
     table =
       Enum.reduce(functions, %{}, fn {:function, %{name: name, params: params, return_type: return_type, internal: internal, span: span}}, acc ->
         param_types = Enum.map(params, &normalize_type(&1.type))
-        Map.put(acc, name, %{params: param_types, return: normalize_type(return_type), internal: internal, span: span})
+        param_names = Enum.map(params, & &1.name)
+        Map.put(acc, name, %{params: param_types, param_names: param_names, return: normalize_type(return_type), internal: internal, span: span})
       end)
 
     {:ok, table}
@@ -1121,10 +1137,39 @@ defmodule BeamLang.Semantic do
             [BeamLang.Error.new(:type, "Unknown field '#{name}' in struct literal.", span)]
 
           {:ok, field_type} ->
+            method_errors =
+              case {field_type, expr} do
+                {{:fn, [_ | _], _return_type}, {:identifier, %{name: func_name, span: expr_span}}} ->
+                  case Map.fetch(func_table, func_name) do
+                    {:ok, %{param_names: [first | _]}} ->
+                      if first == "self" do
+                        []
+                      else
+                        [BeamLang.Error.new(:type, "Method function must have first parameter named self.", expr_span)]
+                      end
+
+                    {:ok, %{param_names: []}} ->
+                      [BeamLang.Error.new(:type, "Method function must take self as first parameter.", expr_span)]
+
+                    _ ->
+                      []
+                  end
+
+                {{:fn, [_ | _], _return_type}, {:lambda, %{params: params, span: expr_span}}} ->
+                  case params do
+                    [%{name: "self"} | _] -> []
+                    [] -> [BeamLang.Error.new(:type, "Method function must take self as first parameter.", expr_span)]
+                    _ -> [BeamLang.Error.new(:type, "Method function must have first parameter named self.", expr_span)]
+                  end
+
+                _ ->
+                  []
+              end
+
             case type_of_expr(expr, func_table, type_table, env, field_type) do
               {:ok, inferred} ->
                 if type_compatible?(field_type, inferred) do
-                  []
+                  method_errors
                 else
                   [
                     BeamLang.Error.new(
@@ -1132,20 +1177,21 @@ defmodule BeamLang.Semantic do
                       "Field '#{name}' expected #{type_label(field_type)}, got #{type_label(inferred)}.",
                       expr_span(expr)
                     )
+                    | method_errors
                   ]
                 end
 
               {:error, :unknown_variable} ->
-                [BeamLang.Error.new(:type, "Unknown variable in field '#{name}'.", expr_span(expr))]
+                [BeamLang.Error.new(:type, "Unknown variable in field '#{name}'.", expr_span(expr)) | method_errors]
 
               {:error, :unknown_function} ->
-                [BeamLang.Error.new(:type, "Unknown function in field '#{name}'.", expr_span(expr))]
+                [BeamLang.Error.new(:type, "Unknown function in field '#{name}'.", expr_span(expr)) | method_errors]
 
               {:error, :internal_function} ->
-                [BeamLang.Error.new(:type, "Internal function cannot be called outside its module.", expr_span(expr))]
+                [BeamLang.Error.new(:type, "Internal function cannot be called outside its module.", expr_span(expr)) | method_errors]
 
               {:error, _} ->
-                [BeamLang.Error.new(:type, "Invalid value for field '#{name}'.", expr_span(expr))]
+                [BeamLang.Error.new(:type, "Invalid value for field '#{name}'.", expr_span(expr)) | method_errors]
             end
         end
       end)
@@ -1198,21 +1244,29 @@ defmodule BeamLang.Semantic do
           {map(), [BeamLang.Error.t()]}
   defp pattern_bindings({:wildcard, %{}}, _match_type, _type_table), do: {%{}, []}
 
-  defp pattern_bindings({:pat_identifier, %{name: name}}, match_type, _type_table) do
-    {%{name => %{type: match_type, mutable: false}}, []}
+  defp pattern_bindings({:pat_identifier, %{name: name, span: span}}, match_type, _type_table) do
+    if name == "self" do
+      {%{}, [BeamLang.Error.new(:type, "self is reserved for method receivers.", span)]}
+    else
+      {%{name => %{type: match_type, mutable: false}}, []}
+    end
   end
 
-  defp pattern_bindings({:opt_some_pat, %{name: name}}, match_type, _type_table) do
+  defp pattern_bindings({:opt_some_pat, %{name: name, span: span}}, match_type, _type_table) do
     case match_type do
       {:optional, inner} ->
         if name == "_" do
           {%{}, []}
         else
-          {%{name => %{type: inner, mutable: false}}, []}
+          if name == "self" do
+            {%{}, [BeamLang.Error.new(:type, "self is reserved for method receivers.", span)]}
+          else
+            {%{name => %{type: inner, mutable: false}}, []}
+          end
         end
 
       _ ->
-        {%{}, [BeamLang.Error.new(:type, "Optional pattern requires an optional value.", BeamLang.Span.new("<source>", 0, 0))]}
+        {%{}, [BeamLang.Error.new(:type, "Optional pattern requires an optional value.", span)]}
     end
   end
 
@@ -1229,7 +1283,11 @@ defmodule BeamLang.Semantic do
         if name == "_" do
           {%{}, []}
         else
-          {%{name => %{type: ok_type, mutable: false}}, []}
+          if name == "self" do
+            {%{}, [BeamLang.Error.new(:type, "self is reserved for method receivers.", span)]}
+          else
+            {%{name => %{type: ok_type, mutable: false}}, []}
+          end
         end
 
       _ ->
@@ -1243,7 +1301,11 @@ defmodule BeamLang.Semantic do
         if name == "_" do
           {%{}, []}
         else
-          {%{name => %{type: err_type, mutable: false}}, []}
+          if name == "self" do
+            {%{}, [BeamLang.Error.new(:type, "self is reserved for method receivers.", span)]}
+          else
+            {%{name => %{type: err_type, mutable: false}}, []}
+          end
         end
 
       _ ->
@@ -1436,6 +1498,18 @@ defmodule BeamLang.Semantic do
     else
       [BeamLang.Error.new(:type, "Match guard only supports comparison operators.", expr_span(expr))]
     end
+  end
+
+  defp validate_param_names(params) do
+    params
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {%{name: name, span: span}, idx} ->
+      if name == "self" and idx != 0 do
+        [BeamLang.Error.new(:type, "self must be the first parameter.", span)]
+      else
+        []
+      end
+    end)
   end
 
   @spec guard_allowed?(BeamLang.AST.expr()) :: boolean()
@@ -1653,9 +1727,13 @@ defmodule BeamLang.Semantic do
           {:ok, %{name: binary(), type: BeamLang.AST.type_name(), mutable: boolean(), field: binary() | nil}}
           | {:error, BeamLang.Error.t()}
   defp assignment_target({:identifier, %{name: name, span: span}}, env) do
-    case Map.fetch(env, name) do
-      {:ok, %{type: type, mutable: mutable}} -> {:ok, %{name: name, type: type, mutable: mutable, field: nil}}
-      :error -> {:error, BeamLang.Error.new(:type, "Unknown variable in assignment.", span)}
+    if name == "self" do
+      {:error, BeamLang.Error.new(:type, "self is reserved for method receivers.", span)}
+    else
+      case Map.fetch(env, name) do
+        {:ok, %{type: type, mutable: mutable}} -> {:ok, %{name: name, type: type, mutable: mutable, field: nil}}
+        :error -> {:error, BeamLang.Error.new(:type, "Unknown variable in assignment.", span)}
+      end
     end
   end
 

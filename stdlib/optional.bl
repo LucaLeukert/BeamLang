@@ -4,33 +4,54 @@ type Optional<T> {
     value: any,
     unwrap: fn(Optional<T>, T) -> T,
     map: fn(Optional<T>, fn(T) -> any) -> Optional<any>,
-    and_then: fn(Optional<T>, fn(T) -> Optional<any>) -> Optional<any>
+    and_then: fn(Optional<T>, fn(T) -> Optional<any>) -> Optional<any>,
+    is_present: fn(Optional<T>) -> bool
 }
 
 internal fn optional_some(value: any) -> Optional<any> {
-    return { kind = 1, tag = 1, value = value, unwrap = optional_unwrap, map = optional_map, and_then = optional_and_then };
+    return { 
+        kind = 1, 
+        tag = 1, 
+        value = value, 
+        unwrap = optional_unwrap, 
+        map = optional_map, 
+        and_then = optional_and_then, 
+        is_present = optional_is_present
+    };
 }
 
 internal fn optional_none() -> Optional<any> {
-    return { kind = 1, tag = 0, value = 0, unwrap = optional_unwrap, map = optional_map, and_then = optional_and_then };
+    return { 
+        kind = 1, 
+        tag = 0, 
+        value = 0, 
+        unwrap = optional_unwrap, 
+        map = optional_map, 
+        and_then = optional_and_then,
+        is_present = optional_is_present
+    };
 }
 
-internal fn optional_unwrap(value: Optional<any>, fallback: any) -> any {
-    return match (value) {
+internal fn optional_is_present(self: Optional<T>) -> bool {
+    return self->tag == 1;
+}
+
+internal fn optional_unwrap(self: Optional<any>, fallback: any) -> any {
+    return match (self) {
         case?some inner => inner,
         case?none => fallback
     };
 }
 
-internal fn optional_map(value: Optional<any>, mapper: fn(any) -> any) -> Optional<any> {
-    return match (value) {
+internal fn optional_map(self: Optional<any>, mapper: fn(any) -> any) -> Optional<any> {
+    return match (self) {
         case?some inner => optional_some(mapper(inner)),
         case?none => optional_none()
     };
 }
 
-internal fn optional_and_then(value: Optional<any>, mapper: fn(any) -> Optional<any>) -> Optional<any> {
-    return match (value) {
+internal fn optional_and_then(self: Optional<any>, mapper: fn(any) -> Optional<any>) -> Optional<any> {
+    return match (self) {
         case?some inner => mapper(inner),
         case?none => optional_none()
     };

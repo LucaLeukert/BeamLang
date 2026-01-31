@@ -32,16 +32,16 @@ internal fn string_new(data: any) -> String {
     return { data = data, length = string_length, chars = string_chars, concat = string_concat };
 }
 
-internal fn string_length(value: String) -> number {
-    return string_length_data(value->data);
+internal fn string_length(self: String) -> number {
+    return string_length_data(self->data);
 }
 
-internal fn string_concat(left: String, right: String) -> String {
-    let data = string_concat_data(left->data, right->data);
+internal fn string_concat(self: String, right: String) -> String {
+    let data = string_concat_data(self->data, right->data);
     return string_new(data);
 }
 
-internal fn string_chars(value: String) -> Iterator<char> {
-    let data = string_chars_data(value->data);
+internal fn string_chars(self: String) -> Iterator<char> {
+    let data = string_chars_data(self->data);
     return iterator_from_list(data);
 }

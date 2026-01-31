@@ -197,6 +197,23 @@ defmodule BeamLang.ParserTest do
     assert {:let, %{expr: {:lambda, %{params: [_], return_type: :number}}}} = s1
   end
 
+  test "parses lambda with self parameter" do
+    source = """
+    fn main() -> number {
+        let identity = fn(self: number) -> number { return self; };
+        return identity(1);
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{functions: [func]}} = ast
+    assert {:function, %{body: {:block, %{stmts: [s1, _s2]}}}} = func
+    assert {:let, %{expr: {:lambda, %{params: [param], return_type: :number}}}} = s1
+    assert %{name: "self"} = param
+  end
+
   test "parses method call" do
     source = """
     fn main() -> number {

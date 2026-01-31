@@ -10,9 +10,16 @@ fn main() -> number {
         break;
     }
 
+    let none = ?none;
+    println(none->is_present());
+
     for (ch in "hi"->chars()) {
-        println(typeof(ch));
+        println(ch);
     }
 
     return count;
+}
+
+fn test(self: String) -> void {
+    return;
 }

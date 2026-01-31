@@ -1,0 +1,14 @@
+type Box {
+    value: number,
+    get: fn(Box) -> number
+}
+
+fn box_get(self: Box) -> number {
+    return self->value;
+}
+
+fn main() -> number {
+    let box: Box = { value = 7, get = box_get };
+    println(box->get());
+    return box->get();
+}
