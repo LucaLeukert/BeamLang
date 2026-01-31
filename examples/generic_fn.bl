@@ -3,7 +3,7 @@ fn test<T>(opt: Optional<T>) -> T {
 }
 
 fn main() -> number {
-    let value = test(?some 42);
+    let value = test(?some 1);
     println(value);
     return value;
 }
