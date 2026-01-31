@@ -333,28 +333,24 @@ defmodule BeamLang.Codegen do
   end
 
   @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
-  defp expr_form(line, {:opt_some, %{expr: expr, type: type}}, env) do
-    _type = type
+  defp expr_form(line, {:opt_some, %{expr: expr}}, env) do
     value = expr_form(line, expr, env)
     {:call, line, {:atom, line, :optional_some}, [value]}
   end
 
   @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
-  defp expr_form(line, {:opt_none, %{type: type}}, _env) do
-    _type = type
+  defp expr_form(line, {:opt_none, %{}}, _env) do
     {:call, line, {:atom, line, :optional_none}, []}
   end
 
   @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
-  defp expr_form(line, {:res_ok, %{expr: expr, type: type}}, env) do
-    _type = type
+  defp expr_form(line, {:res_ok, %{expr: expr}}, env) do
     value = expr_form(line, expr, env)
     {:call, line, {:atom, line, :result_ok}, [value]}
   end
 
   @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
-  defp expr_form(line, {:res_err, %{expr: expr, type: type}}, env) do
-    _type = type
+  defp expr_form(line, {:res_err, %{expr: expr}}, env) do
     value = expr_form(line, expr, env)
     {:call, line, {:atom, line, :result_err}, [value]}
   end
