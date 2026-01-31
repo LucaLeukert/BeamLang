@@ -439,26 +439,10 @@ defmodule BeamLang.Codegen do
     fun_name = fun_var
     {item_var, counter} = fresh_var(name, counter)
     {rest_var, counter} = fresh_var("rest", counter)
-    wrap_char? = collection_type == :String
-    {head_var, counter} =
-      if wrap_char? do
-        fresh_var("#{name}_head", counter)
-      else
-        {item_var, counter}
-      end
+    {head_var, counter} = {item_var, counter}
 
     body_env = Map.put(env, name, item_var)
     {body_expr, _env_body, counter} = stmt_expr_tree(body_stmts, body_env, counter)
-    {body_expr, counter} =
-      if wrap_char? do
-        wrap_match =
-          {:match, line, {:var, line, item_var},
-           {:tuple, line, [{:atom, line, :char}, {:var, line, head_var}]}}
-
-        sequence_expr(wrap_match, body_expr, counter)
-      else
-        {body_expr, counter}
-      end
     continue_call = {:call, line, {:var, line, fun_name}, [{:var, line, rest_var}]}
     {body_case, counter} = break_case(body_expr, continue_call, counter)
 
@@ -468,7 +452,7 @@ defmodule BeamLang.Codegen do
     fun_expr = {:named_fun, line, fun_name, [clause_nil, clause_cons]}
     match_fun = {:match, line, {:var, line, fun_var}, fun_expr}
     collection_form =
-      if wrap_char? or iterator_type?(collection_type) do
+      if iterator_type?(collection_type) do
         expr_form(line, {:field, %{target: collection, name: "data"}}, env)
       else
         expr_form(line, collection, env)

@@ -70,16 +70,27 @@ defmodule BeamLang.CLI do
     case BeamLang.compile_file(path) do
       {:ok, %{entry: entry_module, modules: modules}} ->
         if opts[:print_tokens] || opts[:print_ast] || opts[:print_ast_pretty] || opts[:print_forms] do
-          case BeamLang.compile_source(source, path) do
-            {:ok, %{tokens: tokens, ast: ast, forms: forms}} ->
-              if opts[:print_tokens], do: IO.inspect(tokens, label: "TOKENS")
-              if opts[:print_ast], do: IO.inspect(ast, label: "AST")
-              if opts[:print_ast_pretty] do
-                IO.puts("AST (pretty):")
-                IO.puts(BeamLang.ASTPrinter.format(ast))
+          case BeamLang.Lexer.tokenize(source, path) do
+            {:ok, tokens} ->
+              case BeamLang.Parser.parse(tokens) do
+                {:ok, ast} ->
+                  if opts[:print_tokens], do: IO.inspect(tokens, label: "TOKENS")
+                  if opts[:print_ast], do: IO.inspect(ast, label: "AST")
+                  if opts[:print_ast_pretty] do
+                    IO.puts("AST (pretty):")
+                    IO.puts(BeamLang.ASTPrinter.format(ast))
+                  end
+                  if opts[:print_forms] do
+                    forms = BeamLang.Codegen.to_erlang_forms(ast)
+                    IO.inspect(forms, label: "ERLANG_FORMS", limit: :infinity)
+                  end
+
+                _ ->
+                  :ok
               end
-              if opts[:print_forms], do: IO.inspect(forms, label: "ERLANG_FORMS", limit: :infinity)
-            _ -> :ok
+
+            _ ->
+              :ok
           end
         end
 

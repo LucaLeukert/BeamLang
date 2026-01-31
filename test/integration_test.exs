@@ -192,10 +192,10 @@ defmodule BeamLang.IntegrationTest do
     assert {:ok, 0} == BeamLang.run_source(source)
   end
 
-  test "runs for over string" do
+  test "runs for over iterator" do
     source = """
     fn main() -> number {
-        for (item in "hi") { break; }
+        for (item in "hi"->chars()) { break; }
         return 0;
     }
     """

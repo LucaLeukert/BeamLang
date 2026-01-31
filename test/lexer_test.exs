@@ -124,7 +124,7 @@ defmodule BeamLang.LexerTest do
         if (true) { return 1; } else { return 2; }
         while (false) { break; }
         loop { break; }
-        for (item in "hi") { break; }
+        for (item in "hi"->chars()) { break; }
         return 0;
     }
     """

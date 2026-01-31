@@ -10,7 +10,7 @@ fn main() -> number {
         break;
     }
 
-    for (ch in "hi") {
+    for (ch in "hi"->chars()) {
         println(typeof(ch));
     }
 

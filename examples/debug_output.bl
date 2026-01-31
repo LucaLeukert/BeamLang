@@ -1,0 +1,4 @@
+fn main() -> number {
+    println("debug");
+    return 0;
+}

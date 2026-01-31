@@ -1541,7 +1541,7 @@ defmodule BeamLang.Semantic do
       {:ok, type} ->
         case iterator_item_type_from_type(type) do
           {:ok, _item_type} -> []
-          :error -> [BeamLang.Error.new(:type, "For loop requires Iterator<T> or String, got #{type_label(type)}.", span)]
+          :error -> [BeamLang.Error.new(:type, "For loop requires Iterator<T>, got #{type_label(type)}.", span)]
         end
 
       {:error, reason} ->
@@ -1565,7 +1565,6 @@ defmodule BeamLang.Semantic do
 
   defp iterator_item_type_from_type(type) do
     case normalize_type(type) do
-      :String -> {:ok, :char}
       {:generic, {:named, "Iterator"}, [item_type]} -> {:ok, item_type}
       _ -> :error
     end

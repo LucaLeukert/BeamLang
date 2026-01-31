@@ -1379,6 +1379,7 @@ defmodule BeamLang do
          local_funcs,
          alias_map
        ) do
+    # add debug info
     target = qualify_expr(target, func_map, type_map, local_types, local_funcs, alias_map)
 
     args =

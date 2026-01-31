@@ -1,6 +1,5 @@
 fn main() -> number {
-    let opt = ?none;
-    let _value = opt->unwrap(0);
-    let len = "hi"->length();
-    return _value;
+    let st = "hallo";
+    let len = st->length();
+    return len;
 }
