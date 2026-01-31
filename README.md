@@ -1,12 +1,16 @@
-# BeamLang MVP Compiler (Elixir)
+# BeamLang Compiler (Elixir)
 
-This project implements a minimal BeamLang compiler in Elixir. It supports a single function:
+This repo contains the BeamLang compiler and standard library. BeamLang is a statically typed language that compiles to BEAM.
 
-```rust
-fn main() -> i32 {
-    return 42;
-}
-```
+## Highlights
+
+- Functions, lambdas, and expression-based blocks
+- Struct types with function-valued fields (method syntax via `->`)
+- Generics for types and functions
+- Optional (`T?`, `?some`, `?none`) and Result (`Ok!Err`, `!ok`, `!err`)
+- Modules with `export`/`import` and namespace access (`math::add`)
+- Iterators for `for` loops (`Iterator<T>`)
+- Standard library implemented in `.bl` files under `stdlib/`
 
 ## Run
 
@@ -17,10 +21,10 @@ mix beamlang examples/hello.bl
 With debug output:
 
 ```sh
-mix beamlang -- examples/hello.bl --print-ast --no-run
+mix beamlang examples/hello.bl --print-ast --no-run
 ```
 
-Or use the helper script (preferred for flags):
+Or use the helper script:
 
 ```sh
 bin/beamlang examples/hello.bl --print-ast --no-run
@@ -32,13 +36,17 @@ bin/beamlang examples/hello.bl --print-ast --no-run
 mix test
 ```
 
-## Limitations
+## Examples
 
-- Only `fn main() -> i32 { return <int>; }` is supported.
-- No variables, expressions, or additional types.
+See `examples/` for runnable programs, including:
 
-## Roadmap
+- `examples/hello.bl`
+- `examples/generic_fn.bl`
+- `examples/optional.bl`
+- `examples/result.bl`
+- `examples/iterator_methods.bl`
 
-- Add `let` bindings and arithmetic expressions.
-- Add multiple functions and parameters.
-- Add `Result`/`Option` per BeamLang design.
+## Design Docs
+
+- `beamlang_design.md` (original design)
+- `beamlang_design_current.md` (current, implemented language)
