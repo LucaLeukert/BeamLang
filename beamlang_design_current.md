@@ -102,6 +102,62 @@ Struct literals require a type annotation unless the expected type is clear from
 let user: User = { name = "Ada", age = 30 };
 ```
 
+### Operator Overloading
+
+Types can define custom behavior for operators using the `operator` keyword. Each operator definition specifies a function type that takes two arguments (the left and right operands) and returns a result.
+
+```beamlang
+type Path {
+    path: String,
+    operator /: fn(Path, Path) -> Path,
+    operator /: fn(Path, String) -> Path,
+    op_div: fn(Path, Path) -> Path,
+    op_div_str: fn(Path, String) -> Path
+}
+```
+
+The operator function must be provided as a field on the type (e.g., `op_div` for `/`). The naming convention for operator fields is:
+
+| Operator | Field Name |
+|----------|------------|
+| `+`      | `op_add`   |
+| `-`      | `op_sub`   |
+| `*`      | `op_mul`   |
+| `/`      | `op_div`   |
+| `%`      | `op_mod`   |
+| `==`     | `op_eq`    |
+| `!=`     | `op_neq`   |
+| `<`      | `op_lt`    |
+| `>`      | `op_gt`    |
+| `<=`     | `op_lte`   |
+| `>=`     | `op_gte`   |
+
+Example with Path type:
+
+```beamlang
+export type Path {
+    path: String,
+    operator /: fn(Path, String) -> Path,
+    op_div: fn(Path, String) -> Path
+}
+
+internal fn path_join(self: Path, other: String) -> Path {
+    let new_path = self->path + "/" + other;
+    return path_new(new_path);
+}
+
+export fn path_new(p: String) -> Path {
+    return { path = p, op_div = path_join };
+}
+
+fn main(args: [String]) -> number {
+    let base = path_new("/home");
+    let full = base / "user" / "documents";
+    println(full->path);  // /home/user/documents
+    return 0;
+}
+```
+
 ### Internal Fields
 
 Fields can be marked as `internal` to prevent direct access from outside the type's methods. Internal fields can only be accessed within method functions of the same type:

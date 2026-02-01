@@ -34,7 +34,7 @@
         },
         {
           "name": "keyword.other.beamlang",
-          "match": "\\b(fn|type|error|let|mut|import|export|internal|as)\\b"
+          "match": "\\b(fn|type|error|let|mut|import|export|internal|operator|as)\\b"
         },
         {
           "name": "keyword.operator.beamlang",

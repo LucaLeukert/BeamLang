@@ -398,63 +398,82 @@ defmodule BeamLang.Codegen do
     {:call, line, fun_expr, all_args}
   end
 
-  @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
-  defp expr_form(line, {:binary, %{op: op, left: left, right: right}}, env) do
-    case op do
-      :add ->
-        left_type = get_expr_type(left)
-        right_type = get_expr_type(right)
-
-        if is_string_type?(left_type) or is_string_type?(right_type) do
-          # String concatenation: convert both to strings and concat
-          left_form = ensure_string_form(line, left, left_type, env)
-          right_form = ensure_string_form(line, right, right_type, env)
-
-          fun_expr =
-            {:call, line, {:remote, line, {:atom, line, :maps}, {:atom, line, :get}},
-             [{:atom, line, :concat}, left_form]}
-
-          {:call, line, fun_expr, [left_form, right_form]}
-        else
-          # Numeric addition
-          {:op, line, :+, expr_form(line, left, env), expr_form(line, right, env)}
-        end
+  defp expr_form(line, {:binary, %{op: op, left: left, right: right} = info}, env) do
+    # Check if this is an overloaded operator
+    case Map.get(info, :operator_info) do
+      %{overloaded: true, left_type: _left_type} ->
+        # Call the operator function: get the operator field from left operand and call it
+        op_name = operator_field_name(op)
+        fun_expr = expr_form(line, {:field, %{target: left, name: op_name}}, env)
+        all_args = [expr_form(line, left, env), expr_form(line, right, env)]
+        {:call, line, fun_expr, all_args}
 
       _ ->
-        {:op, line, op_atom(op), expr_form(line, left, env), expr_form(line, right, env)}
+        # Standard operator handling
+        case op do
+          :add ->
+            left_type = get_expr_type(left)
+            right_type = get_expr_type(right)
+
+            if is_string_type?(left_type) or is_string_type?(right_type) do
+              # String concatenation: convert both to strings and concat
+              left_form = ensure_string_form(line, left, left_type, env)
+              right_form = ensure_string_form(line, right, right_type, env)
+
+              fun_expr =
+                {:call, line, {:remote, line, {:atom, line, :maps}, {:atom, line, :get}},
+                 [{:atom, line, :concat}, left_form]}
+
+              {:call, line, fun_expr, [left_form, right_form]}
+            else
+              # Numeric addition
+              {:op, line, :+, expr_form(line, left, env), expr_form(line, right, env)}
+            end
+
+          _ ->
+            {:op, line, op_atom(op), expr_form(line, left, env), expr_form(line, right, env)}
+        end
     end
   end
 
-  @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
   defp expr_form(line, {:opt_some, %{expr: expr}}, env) do
     value = expr_form(line, expr, env)
     {:call, line, {:atom, line, :optional_some}, [value]}
   end
 
-  @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
   defp expr_form(line, {:opt_none, %{}}, _env) do
     {:call, line, {:atom, line, :optional_none}, []}
   end
 
-  @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
   defp expr_form(line, {:res_ok, %{expr: expr}}, env) do
     value = expr_form(line, expr, env)
     {:call, line, {:atom, line, :result_ok}, [value]}
   end
 
-  @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
   defp expr_form(line, {:res_err, %{expr: expr}}, env) do
     value = expr_form(line, expr, env)
     {:call, line, {:atom, line, :result_err}, [value]}
   end
 
-  @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
   defp expr_form(line, {:list_literal, %{elements: elements}}, env) do
     elem_forms = Enum.map(elements, fn elem -> expr_form(line, elem, env) end)
     list_form = build_list_form(line, elem_forms)
 
     {:call, line, {:atom, line, :list_of}, [list_form]}
   end
+
+  @spec operator_field_name(atom()) :: binary()
+  defp operator_field_name(:add), do: "op_add"
+  defp operator_field_name(:sub), do: "op_sub"
+  defp operator_field_name(:mul), do: "op_mul"
+  defp operator_field_name(:div), do: "op_div"
+  defp operator_field_name(:mod), do: "op_mod"
+  defp operator_field_name(:eq), do: "op_eq"
+  defp operator_field_name(:neq), do: "op_neq"
+  defp operator_field_name(:lt), do: "op_lt"
+  defp operator_field_name(:gt), do: "op_gt"
+  defp operator_field_name(:lte), do: "op_lte"
+  defp operator_field_name(:gte), do: "op_gte"
 
   defp build_list_form(line, []), do: {:nil, line}
 

@@ -1,0 +1,31 @@
+// Example: Operator overloading with Path type
+// The / operator can be used to join path segments
+
+type Path {
+    path: String,
+    operator /: fn(Path, String) -> Path,
+    op_div: fn(Path, String) -> Path
+}
+
+fn path_join(self: Path, segment: String) -> Path {
+    let sep = "/";
+    let with_sep = self->path->concat(sep);
+    let new_path = with_sep->concat(segment);
+    return path_new(new_path);
+}
+
+fn path_new(p: String) -> Path {
+    return { path = p, op_div = path_join };
+}
+
+fn main(args: [String]) -> number {
+    let base = path_new("/home");
+    let user_path = base / "user";
+    let full_path = user_path / "documents" / "file.txt";
+    
+    println("Base path: ${base->path}");
+    println("User path: ${user_path->path}");
+    println("Full path: ${full_path->path}");
+    
+    return 0;
+}

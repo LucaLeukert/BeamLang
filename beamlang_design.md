@@ -96,6 +96,20 @@ fn get_value(container: Container<T>) -> T {
 }
 ```
 
+#### Operator Overloading
+
+Types can define custom operators using the `operator` keyword:
+
+```beamlang
+type Path {
+    path: String,
+    operator /: fn(Path, String) -> Path,
+    op_div: fn(Path, String) -> Path
+}
+```
+
+The operator implementation is provided through a field with the naming convention `op_<name>` (e.g., `op_div` for `/`, `op_add` for `+`).
+
 ### Struct Literals (JavaScript-like Objects)
 
 BeamLang supports JavaScript-like object literals to construct struct-like types:

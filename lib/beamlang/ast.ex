@@ -49,6 +49,9 @@ defmodule BeamLang.AST do
 
   @type binary_op :: :eq | :neq | :lt | :gt | :lte | :gte | :add | :sub | :mul | :div | :mod
 
+  @type operator_def ::
+          %{op: binary_op(), type: type_name(), span: BeamLang.Span.t()}
+
   @type pattern ::
           literal()
           | {:wildcard, %{span: BeamLang.Span.t()}}
@@ -115,6 +118,7 @@ defmodule BeamLang.AST do
              name: binary(),
              params: [binary()],
              fields: [field_def()],
+             operators: [operator_def()],
              exported: boolean(),
              span: BeamLang.Span.t()
            }}

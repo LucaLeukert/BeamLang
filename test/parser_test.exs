@@ -661,4 +661,60 @@ defmodule BeamLang.ParserTest do
     assert %{name: "y", mutable: true} = p2
     assert %{name: "z", mutable: false} = p3
   end
+
+  test "parses type with operator overloading" do
+    source = """
+    type Path {
+        path: String,
+        operator /: fn(Path, String) -> Path,
+        op_div: fn(Path, String) -> Path
+    }
+
+    fn main(args: [String]) -> number {
+        return 0;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{types: [type_def], functions: _}} = ast
+    assert {:type_def, %{name: "Path", fields: fields, operators: operators}} = type_def
+    assert length(fields) == 2
+    assert length(operators) == 1
+    [op] = operators
+    assert op.op == :div
+    assert {:fn, [{:named, "Path"}, :String], {:named, "Path"}} = op.type
+  end
+
+  test "parses type with multiple operator overloads" do
+    source = """
+    type Vec2 {
+        x: number,
+        y: number,
+        operator +: fn(Vec2, Vec2) -> Vec2,
+        operator -: fn(Vec2, Vec2) -> Vec2,
+        operator *: fn(Vec2, number) -> Vec2,
+        op_add: fn(Vec2, Vec2) -> Vec2,
+        op_sub: fn(Vec2, Vec2) -> Vec2,
+        op_mul: fn(Vec2, number) -> Vec2
+    }
+
+    fn main(args: [String]) -> number {
+        return 0;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{types: [type_def], functions: _}} = ast
+    assert {:type_def, %{name: "Vec2", fields: fields, operators: operators}} = type_def
+    assert length(fields) == 5  # x, y, op_add, op_sub, op_mul
+    assert length(operators) == 3
+    ops_by_name = Enum.map(operators, & &1.op)
+    assert :add in ops_by_name
+    assert :sub in ops_by_name
+    assert :mul in ops_by_name
+  end
 end

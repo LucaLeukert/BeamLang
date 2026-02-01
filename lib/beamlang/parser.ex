@@ -1632,7 +1632,7 @@ defmodule BeamLang.Parser do
          {:ok, name_tok, rest2} <- parse_type_def_name(rest1),
          {:ok, {params, params_span}, rest3} <- parse_type_params(rest2),
          {:ok, _lbrace, rest4} <- expect(rest3, :lbrace),
-         {:ok, fields, rest5} <- parse_type_fields(rest4, []),
+         {:ok, {fields, operators}, rest5} <- parse_type_fields_and_operators(rest4, [], []),
          {:ok, _rbrace, rest6} <- expect(rest5, :rbrace) do
       span = BeamLang.Span.merge(type_tok.span, name_tok.span)
       span =
@@ -1641,7 +1641,7 @@ defmodule BeamLang.Parser do
           _ -> BeamLang.Span.merge(span, params_span)
         end
       span = BeamLang.Span.merge(span, rbrace_span(rest5, rest6))
-      {:ok, {:type_def, %{name: name_tok.value, params: params, fields: fields, exported: exported, span: span}}, rest6}
+      {:ok, {:type_def, %{name: name_tok.value, params: params, fields: fields, operators: operators, exported: exported, span: span}}, rest6}
     end
   end
 
@@ -1710,13 +1710,27 @@ defmodule BeamLang.Parser do
     {:error, error("Expected type parameter.", tok)}
   end
 
-  @spec parse_type_fields([Token.t()], [BeamLang.AST.field_def()]) ::
-          {:ok, [BeamLang.AST.field_def()], [Token.t()]} | {:error, BeamLang.Error.t()}
-  defp parse_type_fields([%Token{type: :rbrace} | _] = rest, acc) do
-    {:ok, Enum.reverse(acc), rest}
+  @spec parse_type_fields_and_operators([Token.t()], [BeamLang.AST.field_def()], [BeamLang.AST.operator_def()]) ::
+          {:ok, {[BeamLang.AST.field_def()], [BeamLang.AST.operator_def()]}, [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_type_fields_and_operators([%Token{type: :rbrace} | _] = rest, fields_acc, ops_acc) do
+    {:ok, {Enum.reverse(fields_acc), Enum.reverse(ops_acc)}, rest}
   end
 
-  defp parse_type_fields([%Token{type: :internal_kw} | rest], acc) do
+  defp parse_type_fields_and_operators([%Token{type: :operator_kw} = op_tok | rest], fields_acc, ops_acc) do
+    with {:ok, op_symbol, rest1} <- parse_operator_symbol(rest),
+         {:ok, _colon, rest2} <- expect(rest1, :colon),
+         {:ok, {type_name, type_span}, rest3} <- parse_type_name(rest2) do
+      span = BeamLang.Span.merge(op_tok.span, type_span)
+      op_def = %{op: op_symbol, type: type_name, span: span}
+
+      case rest3 do
+        [%Token{type: :comma} | rest4] -> parse_type_fields_and_operators(rest4, fields_acc, [op_def | ops_acc])
+        _ -> parse_type_fields_and_operators(rest3, fields_acc, [op_def | ops_acc])
+      end
+    end
+  end
+
+  defp parse_type_fields_and_operators([%Token{type: :internal_kw} | rest], fields_acc, ops_acc) do
     with {:ok, name_tok, rest1} <- expect(rest, :identifier),
          {:ok, _colon, rest2} <- expect(rest1, :colon),
          {:ok, {type_name, type_span}, rest3} <- parse_type_name(rest2) do
@@ -1724,13 +1738,13 @@ defmodule BeamLang.Parser do
       field = %{name: name_tok.value, type: type_name, internal: true, span: span}
 
       case rest3 do
-        [%Token{type: :comma} | rest4] -> parse_type_fields(rest4, [field | acc])
-        _ -> parse_type_fields(rest3, [field | acc])
+        [%Token{type: :comma} | rest4] -> parse_type_fields_and_operators(rest4, [field | fields_acc], ops_acc)
+        _ -> parse_type_fields_and_operators(rest3, [field | fields_acc], ops_acc)
       end
     end
   end
 
-  defp parse_type_fields(tokens, acc) do
+  defp parse_type_fields_and_operators(tokens, fields_acc, ops_acc) do
     with {:ok, name_tok, rest1} <- expect(tokens, :identifier),
          {:ok, _colon, rest2} <- expect(rest1, :colon),
          {:ok, {type_name, type_span}, rest3} <- parse_type_name(rest2) do
@@ -1738,11 +1752,26 @@ defmodule BeamLang.Parser do
       field = %{name: name_tok.value, type: type_name, internal: false, span: span}
 
       case rest3 do
-        [%Token{type: :comma} | rest4] -> parse_type_fields(rest4, [field | acc])
-        _ -> parse_type_fields(rest3, [field | acc])
+        [%Token{type: :comma} | rest4] -> parse_type_fields_and_operators(rest4, [field | fields_acc], ops_acc)
+        _ -> parse_type_fields_and_operators(rest3, [field | fields_acc], ops_acc)
       end
     end
   end
+
+  @spec parse_operator_symbol([Token.t()]) ::
+          {:ok, BeamLang.AST.binary_op(), [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_operator_symbol([%Token{type: :plus} | rest]), do: {:ok, :add, rest}
+  defp parse_operator_symbol([%Token{type: :minus} | rest]), do: {:ok, :sub, rest}
+  defp parse_operator_symbol([%Token{type: :star} | rest]), do: {:ok, :mul, rest}
+  defp parse_operator_symbol([%Token{type: :slash} | rest]), do: {:ok, :div, rest}
+  defp parse_operator_symbol([%Token{type: :percent} | rest]), do: {:ok, :mod, rest}
+  defp parse_operator_symbol([%Token{type: :eq_eq} | rest]), do: {:ok, :eq, rest}
+  defp parse_operator_symbol([%Token{type: :neq} | rest]), do: {:ok, :neq, rest}
+  defp parse_operator_symbol([%Token{type: :lt} | rest]), do: {:ok, :lt, rest}
+  defp parse_operator_symbol([%Token{type: :gt} | rest]), do: {:ok, :gt, rest}
+  defp parse_operator_symbol([%Token{type: :lte} | rest]), do: {:ok, :lte, rest}
+  defp parse_operator_symbol([%Token{type: :gte} | rest]), do: {:ok, :gte, rest}
+  defp parse_operator_symbol([%Token{} = tok | _]), do: {:error, error("Expected operator symbol (+, -, *, /, %, ==, !=, <, >, <=, >=).", tok)}
 
   @spec parse_type_name([Token.t()]) ::
           {:ok, BeamLang.AST.type_name(), [Token.t()]} | {:error, BeamLang.Error.t()}
