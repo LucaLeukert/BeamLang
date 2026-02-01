@@ -1,0 +1,20 @@
+// This example should fail to compile because it tries to access internal field directly
+
+type Counter {
+    internal count: number,
+    get: fn(Counter) -> number
+}
+
+fn counter_get(self: Counter) -> number {
+    return self->count;
+}
+
+fn counter_new(initial: number) -> Counter {
+    return { count = initial, get = counter_get };
+}
+
+fn main(args: [String]) -> number {
+    let c = counter_new(5);
+    // This line should cause a compile error:
+    return c->count;  // ERROR: Field 'count' is internal
+}

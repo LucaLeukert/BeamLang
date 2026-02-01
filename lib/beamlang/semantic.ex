@@ -173,6 +173,9 @@ defmodule BeamLang.Semantic do
             {:error,
              [BeamLang.Error.new(:type, "Field access requires a struct value.", expr_span(expr))]}
 
+          {:error, {:internal_field, name}} ->
+            {:error, [BeamLang.Error.new(:type, "Field '#{name}' is internal and cannot be accessed directly.", expr_span(expr))]}
+
           {:error, {:unknown_field, name}} ->
             {:error, [BeamLang.Error.new(:type, "Unknown field '#{name}'.", expr_span(expr))]}
 
@@ -679,6 +682,9 @@ defmodule BeamLang.Semantic do
          env,
          _expected
        ) do
+    # Allow access to internal fields when accessing via 'self' (inside method functions)
+    is_self_access = match?({:identifier, %{name: "self"}}, target)
+
     case type_of_expr(target, func_table, type_table, env, nil) do
       {:ok, type} ->
         case struct_type_info(type) do
@@ -690,8 +696,14 @@ defmodule BeamLang.Semantic do
                     type_fields = substitute_field_types(field_map, param_map)
 
                     case Map.fetch(type_fields, name) do
-                      {:ok, field_type} -> {:ok, field_type}
-                      :error -> {:error, {:unknown_field, name}}
+                      {:ok, %{type: _field_type, internal: true}} when not is_self_access ->
+                        {:error, {:internal_field, name}}
+
+                      {:ok, %{type: field_type, internal: _}} ->
+                        {:ok, field_type}
+
+                      :error ->
+                        {:error, {:unknown_field, name}}
                     end
 
                   :error ->
@@ -839,7 +851,7 @@ defmodule BeamLang.Semantic do
                 type_fields = substitute_field_types(field_map, param_map)
 
                 case Map.fetch(type_fields, name) do
-                  {:ok, {:fn, [self_type | param_types], return_type}} ->
+                  {:ok, %{type: {:fn, [self_type | param_types], return_type}}} ->
                     if type_compatible?(self_type, target_type) do
                       if length(param_types) != length(args) do
                         {:error,
@@ -882,7 +894,7 @@ defmodule BeamLang.Semantic do
                        )}
                     end
 
-                  {:ok, _field_type} ->
+                  {:ok, %{type: _field_type}} ->
                     {:error,
                      BeamLang.Error.new(
                        :type,
@@ -1264,6 +1276,11 @@ defmodule BeamLang.Semantic do
                   | errors
                 ]}}
 
+            {:error, {:internal_field, field}} ->
+              {:cont,
+               {:ok, acc_env,
+                [BeamLang.Error.new(:type, "Field '#{field}' is internal and cannot be accessed directly.", expr_span(expr)) | errors]}}
+
             {:error, {:unknown_field, field}} ->
               {:cont,
                {:ok, acc_env,
@@ -1409,8 +1426,9 @@ defmodule BeamLang.Semantic do
                   end
               end
 
-            {:ok, %{name: _name, type: declared, mutable: true, field: field}} ->
-              case resolve_field_type(declared, field, type_table) do
+            {:ok, %{name: var_name, type: declared, mutable: true, field: field}} ->
+              is_self_access = var_name == "self"
+              case resolve_field_type(declared, field, type_table, is_self_access) do
                 {:error, err} ->
                   {:cont, {:ok, acc_env, [err | errors]}}
 
@@ -1587,6 +1605,11 @@ defmodule BeamLang.Semantic do
                   | errors
                 ]}}
 
+            {:error, {:internal_field, field}} ->
+              {:cont,
+               {:ok, acc_env,
+                [BeamLang.Error.new(:type, "Field '#{field}' is internal and cannot be accessed directly.", expr_span(expr)) | errors]}}
+
             {:error, {:unknown_field, field}} ->
               {:cont,
                {:ok, acc_env,
@@ -1693,6 +1716,11 @@ defmodule BeamLang.Semantic do
                   | errors
                 ]}}
 
+            {:error, {:internal_field, field}} ->
+              {:cont,
+               {:ok, acc_env,
+                [BeamLang.Error.new(:type, "Field '#{field}' is internal and cannot be accessed directly.", expr_span(expr)) | errors]}}
+
             {:error, {:unknown_field, field}} ->
               {:cont,
                {:ok, acc_env,
@@ -1761,8 +1789,9 @@ defmodule BeamLang.Semantic do
       types
       |> Enum.reduce(%{}, fn {:type_def, %{name: name, params: params, fields: fields}}, acc ->
         field_map =
-          Enum.reduce(fields, %{}, fn %{name: fname, type: ftype}, f_acc ->
-            Map.put(f_acc, fname, normalize_type(ftype))
+          Enum.reduce(fields, %{}, fn %{name: fname, type: ftype} = field, f_acc ->
+            internal = Map.get(field, :internal, false)
+            Map.put(f_acc, fname, %{type: normalize_type(ftype), internal: internal})
           end)
 
         Map.put(acc, name, %{params: params, fields: field_map})
@@ -1820,7 +1849,7 @@ defmodule BeamLang.Semantic do
           :error ->
             [BeamLang.Error.new(:type, "Unknown field '#{name}' in struct literal.", span)]
 
-          {:ok, field_type} ->
+          {:ok, %{type: field_type}} ->
             method_errors =
               case {field_type, expr} do
                 {{:fn, [_ | _], _return_type}, {:identifier, %{name: func_name, span: expr_span}}} ->
@@ -2100,7 +2129,7 @@ defmodule BeamLang.Semantic do
                          | errors
                        ]}
 
-                    {:ok, field_type} ->
+                    {:ok, %{type: field_type}} ->
                       {bindings, field_errors} = pattern_bindings(pattern, field_type, type_table)
                       {Map.merge(env, bindings), errors ++ field_errors}
                   end
@@ -2221,6 +2250,9 @@ defmodule BeamLang.Semantic do
 
       :not_a_struct ->
         [BeamLang.Error.new(:type, "Field access requires a struct value.", expr_span(expr))]
+
+      {:internal_field, field} ->
+        [BeamLang.Error.new(:type, "Field '#{field}' is internal and cannot be accessed directly.", expr_span(expr))]
 
       {:unknown_field, field} ->
         [BeamLang.Error.new(:type, "Unknown field '#{field}'.", expr_span(expr))]
@@ -2634,9 +2666,9 @@ defmodule BeamLang.Semantic do
      BeamLang.Error.new(:type, "Invalid assignment target.", BeamLang.Span.new("<source>", 0, 0))}
   end
 
-  @spec resolve_field_type(BeamLang.AST.type_name(), binary(), map()) ::
+  @spec resolve_field_type(BeamLang.AST.type_name(), binary(), map(), boolean()) ::
           {:ok, BeamLang.AST.type_name()} | {:error, BeamLang.Error.t()}
-  defp resolve_field_type(type, field, type_table) do
+  defp resolve_field_type(type, field, type_table, is_self_access) do
     case struct_type_info(type) do
       {:ok, type_name, args} ->
         case Map.fetch(type_table, type_name) do
@@ -2646,7 +2678,15 @@ defmodule BeamLang.Semantic do
                 type_fields = substitute_field_types(field_map, param_map)
 
                 case Map.fetch(type_fields, field) do
-                  {:ok, field_type} ->
+                  {:ok, %{type: _field_type, internal: true}} when not is_self_access ->
+                    {:error,
+                     BeamLang.Error.new(
+                       :type,
+                       "Field '#{field}' is internal and cannot be accessed directly.",
+                       BeamLang.Span.new("<source>", 0, 0)
+                     )}
+
+                  {:ok, %{type: field_type, internal: _}} ->
                     {:ok, field_type}
 
                   :error ->
@@ -3451,8 +3491,8 @@ defmodule BeamLang.Semantic do
   end
 
   defp substitute_field_types(field_map, param_map) do
-    Enum.reduce(field_map, %{}, fn {name, type}, acc ->
-      Map.put(acc, name, substitute_type(type, param_map))
+    Enum.reduce(field_map, %{}, fn {name, %{type: type, internal: internal}}, acc ->
+      Map.put(acc, name, %{type: substitute_type(type, param_map), internal: internal})
     end)
   end
 

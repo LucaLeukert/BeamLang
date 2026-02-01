@@ -297,6 +297,23 @@ defmodule BeamLang.ParserTest do
     assert {:function, %{name: "helper", internal: true}} = helper
   end
 
+  test "parses internal fields in type definition" do
+    source = """
+    type Container<T> {
+        internal data: any,
+        get: fn(Container<T>) -> T
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{types: [type_def]}} = ast
+    assert {:type_def, %{name: "Container", fields: [data_field, get_field]}} = type_def
+    assert %{name: "data", type: :any, internal: true} = data_field
+    assert %{name: "get", type: {:fn, _, _}, internal: false} = get_field
+  end
+
   test "parses type definition and struct literal" do
     source = """
     type User {

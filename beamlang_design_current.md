@@ -97,6 +97,22 @@ Struct literals require a type annotation unless the expected type is clear from
 let user: User = { name = "Ada", age = 30 };
 ```
 
+### Internal Fields
+
+Fields can be marked as `internal` to prevent direct access from outside the type's methods. Internal fields can only be accessed through the type's method functions:
+
+```beamlang
+type List<T> {
+    internal data: any,
+    get: fn(List<T>, number) -> T
+}
+```
+
+When a field is marked `internal`:
+- Direct field access (`list.data`) will result in a compile error
+- Methods defined on the type can access internal fields through the `self` parameter
+- This enables encapsulation of implementation details in stdlib types
+
 ## Functions
 
 ```beamlang

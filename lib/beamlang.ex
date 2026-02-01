@@ -846,11 +846,12 @@ defmodule BeamLang do
         case Map.fetch(type_defs, name) do
           {:ok, %{params: params, fields: fields}} ->
             fields =
-              Enum.map(fields, fn %{name: field_name, type: type, span: span} ->
+              Enum.map(fields, fn %{name: field_name, type: type, span: span} = field ->
                 %{
                   name: field_name,
                   type: qualify_type_in_module(type, module, exports),
-                  span: span
+                  span: span,
+                  internal: Map.get(field, :internal, false)
                 }
               end)
 
@@ -944,11 +945,12 @@ defmodule BeamLang do
 
   defp qualify_type_def({:type_def, %{fields: fields} = info}, type_map, local_types, alias_map) do
     fields =
-      Enum.map(fields, fn %{name: field_name, type: field_type, span: span} ->
+      Enum.map(fields, fn %{name: field_name, type: field_type, span: span} = field ->
         %{
           name: field_name,
           type: qualify_type(field_type, type_map, local_types, alias_map),
-          span: span
+          span: span,
+          internal: Map.get(field, :internal, false)
         }
       end)
 

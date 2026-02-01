@@ -1554,12 +1554,26 @@ defmodule BeamLang.Parser do
     {:ok, Enum.reverse(acc), rest}
   end
 
+  defp parse_type_fields([%Token{type: :internal_kw} | rest], acc) do
+    with {:ok, name_tok, rest1} <- expect(rest, :identifier),
+         {:ok, _colon, rest2} <- expect(rest1, :colon),
+         {:ok, {type_name, type_span}, rest3} <- parse_type_name(rest2) do
+      span = BeamLang.Span.merge(name_tok.span, type_span)
+      field = %{name: name_tok.value, type: type_name, internal: true, span: span}
+
+      case rest3 do
+        [%Token{type: :comma} | rest4] -> parse_type_fields(rest4, [field | acc])
+        _ -> parse_type_fields(rest3, [field | acc])
+      end
+    end
+  end
+
   defp parse_type_fields(tokens, acc) do
     with {:ok, name_tok, rest1} <- expect(tokens, :identifier),
          {:ok, _colon, rest2} <- expect(rest1, :colon),
          {:ok, {type_name, type_span}, rest3} <- parse_type_name(rest2) do
       span = BeamLang.Span.merge(name_tok.span, type_span)
-      field = %{name: name_tok.value, type: type_name, span: span}
+      field = %{name: name_tok.value, type: type_name, internal: false, span: span}
 
       case rest3 do
         [%Token{type: :comma} | rest4] -> parse_type_fields(rest4, [field | acc])

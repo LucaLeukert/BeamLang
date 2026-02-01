@@ -1,0 +1,39 @@
+// Example demonstrating internal fields in type definitions
+// Internal fields can only be accessed via 'self' in method functions
+
+type Counter {
+    internal count: number,
+    get: fn(Counter) -> number,
+    increment: fn(Counter) -> Counter
+}
+
+// Method function that accesses internal field via self
+fn counter_get(self: Counter) -> number {
+    // This works because we access via 'self'
+    return self->count;
+}
+
+// Method function that creates a new Counter with updated internal field
+fn counter_increment(self: Counter) -> Counter {
+    let new_count = self->count + 1;
+    return { count = new_count, get = counter_get, increment = counter_increment };
+}
+
+fn counter_new(initial: number) -> Counter {
+    return { count = initial, get = counter_get, increment = counter_increment };
+}
+
+fn main(args: [String]) -> number {
+    let c = counter_new(0);
+    let c1 = c->increment();
+    let c2 = c1->increment();
+    let c3 = c2->increment();
+    
+    // Access the count through the get method (allowed)
+    let value = c3->get();
+    
+    // Direct access like c3->count would be a compile error:
+    // "Field 'count' is internal and cannot be accessed directly."
+    
+    return value; // Returns 3
+}
