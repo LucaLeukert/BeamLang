@@ -6,6 +6,11 @@ This document reflects the current, implemented BeamLang language features and s
 
 BeamLang is a statically-typed language that compiles to BEAM. It emphasizes explicit control flow, typed data, and lightweight interop with the runtime through externals. The standard library is written in BeamLang (.bl) files and is loaded automatically.
 
+## Tooling
+
+- The CLI can run as a Language Server Protocol (LSP) server using `beamlang --lsp`.
+- The BeamLang VS Code extension launches the CLI LSP server for diagnostics, hover, go-to definition, and completion.
+
 ## Files, Modules, Imports
 
 - Each `.bl` file is a module. The module name is the file name without `.bl`.

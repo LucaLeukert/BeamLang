@@ -60,6 +60,32 @@ defmodule BeamLang do
     end
   end
 
+  @spec analyze_source(binary(), binary()) ::
+          {:ok,
+           %{
+             tokens: [BeamLang.Token.t()],
+             ast: BeamLang.AST.t(),
+             errors: [BeamLang.Error.t()]
+           }}
+          | {:error, [BeamLang.Error.t()]}
+  def analyze_source(source, filename) when is_binary(source) and is_binary(filename) do
+    with {:ok, tokens} <- Lexer.tokenize(source, filename),
+         {:ok, ast} <- Parser.parse(tokens),
+         {:ok, stdlib_ast} <- load_stdlib_ast(),
+         {:ok, merged} <- merge_programs(stdlib_ast, ast) do
+      case Semantic.validate(merged, require_main: false) do
+        {:ok, _checked} -> {:ok, %{tokens: tokens, ast: ast, errors: []}}
+        {:error, errors} when is_list(errors) -> {:ok, %{tokens: tokens, ast: ast, errors: errors}}
+      end
+    else
+      {:error, %BeamLang.Error{} = error} ->
+        {:error, [error]}
+
+      {:error, errors} when is_list(errors) ->
+        {:error, errors}
+    end
+  end
+
   @spec compile_file(binary()) ::
           {:ok,
            %{

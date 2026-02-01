@@ -5,6 +5,28 @@ defmodule BeamLang.CLI do
 
   @spec main([binary()]) :: :ok
   def main(args) when is_list(args) do
+    {opts, rest} = parse_args(args)
+
+    if opts[:lsp] do
+      BeamLang.LSP.Server.start()
+      :ok
+    else
+      case rest do
+        [path | program_args] when is_binary(path) ->
+          if String.ends_with?(path, ".bl") do
+            run_file(path, opts, program_args)
+          else
+            :ok
+          end
+
+        _ ->
+          :ok
+      end
+    end
+  end
+
+  @spec parse_args([binary()]) :: {keyword(), [binary()]}
+  def parse_args(args) when is_list(args) do
     {opt_args, rest} = normalize_args(args)
 
     {opts, _rest_opts, _invalid} =
@@ -15,21 +37,12 @@ defmodule BeamLang.CLI do
           print_ast_pretty: :boolean,
           print_forms: :boolean,
           emit_beam: :string,
-          no_run: :boolean
+          no_run: :boolean,
+          lsp: :boolean
         ]
       )
 
-    case rest do
-      [path | program_args] when is_binary(path) ->
-        if String.ends_with?(path, ".bl") do
-          run_file(path, opts, program_args)
-        else
-          :ok
-        end
-
-      _ ->
-        :ok
-    end
+    {opts, rest}
   end
 
   @spec normalize_args([binary()]) :: {[binary()], [binary()]}
@@ -107,9 +120,9 @@ defmodule BeamLang.CLI do
           case BeamLang.Runtime.load_modules(modules) do
             :ok ->
               case BeamLang.Runtime.load_and_run(entry_module, elem(List.keyfind(modules, entry_module, 0), 1), beamlang_args) do
-                {:ok, exit_code} when is_integer(exit_code) -> 
+                {:ok, exit_code} when is_integer(exit_code) ->
                   System.halt(exit_code)
-                {:ok, _value} -> 
+                {:ok, _value} ->
                   System.halt(0)
                 {:error, %{message: message}} ->
                   IO.puts(:stderr, "Error: #{message}")

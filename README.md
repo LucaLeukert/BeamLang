@@ -30,6 +30,12 @@ Or use the helper script:
 bin/beamlang examples/hello.bl --print-ast --no-run
 ```
 
+Start the language server:
+
+```sh
+mix beamlang --lsp
+```
+
 ## Tests
 
 ```sh
@@ -45,6 +51,7 @@ See `examples/` for runnable programs, including:
 - `examples/optional.bl`
 - `examples/result.bl`
 - `examples/iterator_methods.bl`
+- `examples/lsp/lsp_features.bl`
 
 ## Design Docs
 

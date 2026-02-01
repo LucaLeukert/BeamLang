@@ -1,6 +1,6 @@
-# BeamLang Syntax Highlighter for VS Code
+# BeamLang VS Code Extension
 
-A Visual Studio Code extension that provides syntax highlighting for BeamLang (.bl files).
+A Visual Studio Code extension that provides syntax highlighting and LSP-powered language features for BeamLang (.bl files).
 
 ## Features
 
@@ -22,6 +22,11 @@ A Visual Studio Code extension that provides syntax highlighting for BeamLang (.
 - **Code Folding** for functions, types, and control structures
 - **Auto-closing** brackets, quotes, and parentheses
 - **Bracket Matching** for `{}`, `[]`, `()`
+- **Language Server** features (requires the BeamLang CLI in your PATH):
+  - Diagnostics
+  - Hover
+  - Go-to definition
+  - Completion
 
 ## Installation
 
@@ -33,7 +38,7 @@ A Visual Studio Code extension that provides syntax highlighting for BeamLang (.
 
 2. Restart VS Code
 
-3. Open any `.bl` file to see syntax highlighting
+3. Open any `.bl` file to see syntax highlighting and language features
 
 ### Manual Installation (VSIX)
 
@@ -52,6 +57,8 @@ Once installed, the extension automatically activates for any file with the `.bl
 1. Open a file
 2. Click the language indicator in the bottom-right corner
 3. Select "BeamLang" from the list
+
+To enable LSP features, ensure the `beamlang` CLI is on your PATH (or configure the path in settings).
 
 ## Example
 
@@ -75,13 +82,18 @@ To modify this extension:
 
 1. Edit `syntaxes/beamlang.tmLanguage.json` to change syntax highlighting rules
 2. Edit `language-configuration.json` to change bracket matching and auto-closing behavior
-3. Reload VS Code window (Ctrl+R / Cmd+R) to see changes
+3. Edit `extension.js` to change LSP client behavior
+4. Reload VS Code window (Ctrl+R / Cmd+R) to see changes
 
 ## License
 
 MIT
 
 ## Version History
+
+### 1.1.0
+- Add LSP client support for diagnostics, hover, go-to definition, and completion
+- Configurable LSP server path and arguments
 
 ### 1.0.0
 - Initial release

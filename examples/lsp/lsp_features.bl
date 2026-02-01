@@ -1,0 +1,14 @@
+type User {
+    name: String,
+    age: number
+}
+
+fn greet(user: User) -> String {
+    return "Hello";
+}
+
+fn main(args: [String]) -> number {
+    let user: User = { name = "Ada", age = 33 };
+    println(greet(user));
+    return 0;
+}

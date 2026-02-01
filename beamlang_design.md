@@ -12,6 +12,11 @@ BeamLang is a statically-typed, functional programming language that compiles to
 - **BEAM Native**: First-class support for processes, message passing, and fault tolerance
 - **Ergonomic Error Handling**: Result and Optional types with concise syntax as language primitives
 
+## Tooling
+
+- The CLI can run as a Language Server Protocol (LSP) server using `beamlang --lsp`.
+- The BeamLang VS Code extension launches the CLI LSP server for diagnostics, hover, go-to definition, and completion.
+
 ## Syntax Overview
 
 ### Naming Convention

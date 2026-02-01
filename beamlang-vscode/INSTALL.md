@@ -19,6 +19,7 @@
    - Open the `example.bl` file
    - You should see syntax highlighting
    - Check the language mode in the bottom-right corner (should say "BeamLang")
+   - For LSP features, ensure the `beamlang` CLI is available in your PATH
 
 ## Method 2: Build and Install VSIX (Advanced)
 
@@ -55,7 +56,8 @@ If you want to create a proper VSIX package:
    - Types highlighted in blue/green
    - Strings highlighted in orange/red
    - Comments highlighted in gray/green
-   - Function names highlighted
+- Function names highlighted
+3. Hover over a function name or trigger completion to verify the language server is running
 
 ## Troubleshooting
 
@@ -64,6 +66,11 @@ If you want to create a proper VSIX package:
 - Ensure VS Code has been restarted
 - Check that `.bl` files are associated with "BeamLang" language mode
 - Try manually setting the language: Click the language indicator in bottom-right → Select "BeamLang"
+
+**Language server not starting?**
+- Ensure the `beamlang` CLI is on your PATH
+- Or set `beamlang.lsp.serverPath` in VS Code settings to the full path of the CLI
+- If you need custom args, update `beamlang.lsp.serverArgs`
 
 **Syntax highlighting looks wrong?**
 - Some themes may display colors differently

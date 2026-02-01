@@ -1,11 +1,15 @@
 {
   "name": "beamlang",
   "displayName": "BeamLang",
-  "description": "Syntax highlighting for BeamLang",
-  "version": "1.0.0",
+  "description": "Syntax highlighting and language server support for BeamLang",
+  "version": "1.1.0",
   "engines": {
     "vscode": "^1.75.0"
   },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onLanguage:beamlang"
+  ],
   "categories": [
     "Programming Languages"
   ],
@@ -29,6 +33,26 @@
         "scopeName": "source.beamlang",
         "path": "./syntaxes/beamlang.tmLanguage.json"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "BeamLang",
+      "properties": {
+        "beamlang.lsp.serverPath": {
+          "type": "string",
+          "default": "beamlang",
+          "description": "Path to the BeamLang CLI executable."
+        },
+        "beamlang.lsp.serverArgs": {
+          "type": "array",
+          "default": [
+            "--lsp"
+          ],
+          "description": "Arguments to start the BeamLang LSP server."
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
   }
 }
