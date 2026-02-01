@@ -415,4 +415,34 @@ defmodule BeamLang.ParserTest do
     assert {:function, %{body: {:block, %{stmts: [s1, _s2]}}}} = func
     assert {:let, %{expr: {:if_expr, _}}} = s1
   end
+
+  test "parses list method calls" do
+    source = """
+    fn main() -> number {
+        let nums = list_new();
+        let nums2 = nums->push(1);
+        let len = nums2->length();
+        return len;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{functions: [func]}} = ast
+    assert {:function, %{name: "main", body: {:block, %{stmts: stmts}}}} = func
+    assert length(stmts) == 4
+
+    # let nums = list_new();
+    assert {:let, %{name: "nums", expr: {:call, %{name: "list_new", args: []}}}} = Enum.at(stmts, 0)
+
+    # let nums2 = nums->push(1);
+    assert {:let, %{name: "nums2", expr: {:method_call, %{target: {:identifier, %{name: "nums"}}, name: "push", args: [_]}}}} = Enum.at(stmts, 1)
+
+    # let len = nums2->length();
+    assert {:let, %{name: "len", expr: {:method_call, %{target: {:identifier, %{name: "nums2"}}, name: "length", args: []}}}} = Enum.at(stmts, 2)
+
+    # return len;
+    assert {:return, %{expr: {:identifier, %{name: "len"}}}} = Enum.at(stmts, 3)
+  end
 end

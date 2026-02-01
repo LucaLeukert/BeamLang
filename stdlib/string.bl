@@ -23,6 +23,14 @@ fn println(value: any) -> void;
 @external(elixir, "BeamLang.Runtime", "print")
 fn print(value: any) -> void;
 
+@external(elixir, "BeamLang.Runtime", "any_to_string_data")
+fn any_to_string_data(value: any) -> any;
+
+fn to_string(value: any) -> String {
+    let data = any_to_string_data(value);
+    return string_new(data);
+}
+
 fn typeof(value: any) -> String {
     let data = typeof_data(value);
     return string_new(data);

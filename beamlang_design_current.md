@@ -276,6 +276,45 @@ type Optional<T> {
 }
 ```
 
+### List
+
+```beamlang
+type List<T> {
+    data: any,
+    length: fn(List<T>) -> number,
+    get: fn(List<T>, number) -> T?,
+    push: fn(List<T>, T) -> List<T>,
+    pop: fn(List<T>) -> List<T>,
+    first: fn(List<T>) -> T?,
+    last: fn(List<T>) -> T?,
+    iter: fn(List<T>) -> Iterator<T>,
+    map: fn(List<T>, fn(T) -> any) -> List<any>,
+    filter: fn(List<T>, fn(T) -> bool) -> List<T>,
+    fold: fn(List<T>, any, fn(any, T) -> any) -> any,
+    reverse: fn(List<T>) -> List<T>,
+    concat: fn(List<T>, List<T>) -> List<T>
+}
+```
+
+Constructor:
+
+```beamlang
+let nums = list_new();  // Creates an empty List<any>
+let nums2 = nums->push(1);
+```
+
+Example:
+
+```beamlang
+let nums = make_nums();
+let sum = nums->fold(0, add_nums);
+println("Sum: ${sum}");
+
+for (item in nums->iter()) {
+    print("${item} ");
+}
+```
+
 ### Result
 
 ```beamlang

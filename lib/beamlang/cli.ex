@@ -74,7 +74,7 @@ defmodule BeamLang.CLI do
             {:ok, tokens} ->
               case BeamLang.Parser.parse(tokens) do
                 {:ok, ast} ->
-                  if opts[:print_tokens], do: IO.inspect(tokens, label: "TOKENS")
+                  if opts[:print_tokens], do: IO.inspect(tokens, label: "TOKENS", limit: :infinity)
                   if opts[:print_ast], do: IO.inspect(ast, label: "AST")
                   if opts[:print_ast_pretty] do
                     IO.puts("AST (pretty):")

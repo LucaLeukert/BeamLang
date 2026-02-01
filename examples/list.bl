@@ -1,0 +1,57 @@
+fn main() -> number {
+    let nums = make_nums();
+    
+    println("List length: ${nums->length()}");
+    
+    let third = nums->get(2);
+    match (third) {
+        case ?some val => println("Third element: ${val}"),
+        case ?none => println("No third element")
+    };
+    
+    match (nums->first()) {
+        case ?some val => println("First: ${val}"),
+        case ?none => println("Empty list")
+    };
+    
+    match (nums->last()) {
+        case ?some val => println("Last: ${val}"),
+        case ?none => println("Empty list")
+    };
+    
+    let sum = nums->fold(0, add_nums);
+    println("Sum: ${sum}");
+    
+    let reversed = nums->reverse();
+    match (reversed->get(0)) {
+        case ?some val => println("Reversed first: ${val}"),
+        case ?none => println("Empty reversed")
+    };
+    
+    let more = make_more();
+    let combined = nums->concat(more);
+    println("Combined length: ${combined->length()}");
+    
+    return 0;
+}
+
+fn make_nums() -> List<number> {
+    let l0 = list_new();
+    let l1 = l0->push(1);
+    let l2 = l1->push(2);
+    let l3 = l2->push(3);
+    let l4 = l3->push(4);
+    let l5 = l4->push(5);
+    return l5;
+}
+
+fn make_more() -> List<number> {
+    let m0 = list_new();
+    let m1 = m0->push(6);
+    let m2 = m1->push(7);
+    return m2;
+}
+
+fn add_nums(acc: number, x: number) -> number {
+    return acc + x;
+}

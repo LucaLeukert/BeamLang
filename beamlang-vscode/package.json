@@ -1,0 +1,34 @@
+{
+  "name": "beamlang",
+  "displayName": "BeamLang",
+  "description": "Syntax highlighting for BeamLang",
+  "version": "1.0.0",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "beamlang",
+        "aliases": [
+          "BeamLang",
+          "beamlang"
+        ],
+        "extensions": [
+          ".bl"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "beamlang",
+        "scopeName": "source.beamlang",
+        "path": "./syntaxes/beamlang.tmLanguage.json"
+      }
+    ]
+  }
+}

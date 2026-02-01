@@ -1,0 +1,202 @@
+// BeamLang Example - Demonstrating Syntax Highlighting
+
+// Import statements
+import math.{add, subtract};
+import utils.*;
+import string as str;
+
+/* 
+ * Block comment
+ * Multi-line
+ */
+
+// Type definitions with generics
+type Pair<T> {
+    left: T,
+    right: T
+}
+
+type User {
+    name: String,
+    age: number,
+    email: String?
+}
+
+type Box {
+    value: number,
+    get: fn(Box) -> number,
+    set: fn(Box, number) -> Box
+}
+
+// External function declaration
+@external(elixir, "BeamLang.Runtime", "println")
+fn println(value: any) -> void;
+
+// Generic function
+export fn identity<T>(value: T) -> T {
+    return value;
+}
+
+// Function with Optional parameter
+fn get_user_age<T>(user: Optional<User>) -> number {
+    match (user) {
+        case ?some u => u->age,
+        case ?none => 0
+    }
+}
+
+// Function with Result type
+fn divide(a: number, b: number) -> Result<number, String> {
+    if (b == 0) {
+        return !err "Division by zero";
+    } else {
+        return !ok (a / b);
+    }
+}
+
+// Method implementation
+fn box_get(self: Box) -> number {
+    return self->value;
+}
+
+fn box_set(self: Box, new_value: number) -> Box {
+    return { value = new_value, get = box_get, set = box_set };
+}
+
+// Pattern matching with guards
+internal fn categorize_age(age: number) -> String {
+    match (age) {
+        case x if x < 13 => "child",
+        case x if x < 20 => "teenager",
+        case x if x < 65 => "adult",
+        case _ => "senior"
+    }
+}
+
+// Control flow examples
+fn control_flow_demo(n: number) -> number {
+    // If statement
+    if (n < 0) {
+        return 0;
+    } else if (n == 0) {
+        return 1;
+    } else {
+        return n;
+    }
+}
+
+// Guard statement
+fn validate_positive(n: number) -> number {
+    guard (n > 0) else {
+        return 0;
+    }
+    return n * 2;
+}
+
+// While loop
+fn count_down(n: number) -> void {
+    let mut counter: number = n;
+    while (counter > 0) {
+        println(counter);
+        counter = counter - 1;
+    }
+    return;
+}
+
+// Loop with break
+fn infinite_demo() -> number {
+    let mut i: number = 0;
+    loop {
+        i = i + 1;
+        if (i > 10) {
+            break;
+        }
+    }
+    return i;
+}
+
+// For loop with Iterator
+fn iterate_string(text: String) -> void {
+    for (ch in text->chars()) {
+        println(ch);
+    }
+    return;
+}
+
+// Lambda function
+fn use_lambda() -> number {
+    let add_one = fn(x: number) -> number {
+        return x + 1;
+    };
+    return add_one(5);
+}
+
+// Working with Optional
+fn optional_example() -> number {
+    let maybe_value: number? = ?some 42;
+    let none_value: String? = ?none;
+    
+    return maybe_value->unwrap(0);
+}
+
+// Working with Result
+fn result_example() -> String {
+    let success: Result<number, String> = !ok 100;
+    let failure: Result<number, String> = !err "error occurred";
+    
+    match (success) {
+        case !ok value => "Success",
+        case !err msg => "Failed"
+    }
+}
+
+// Struct literal
+fn create_user() -> User {
+    let user: User = {
+        name = "Alice",
+        age = 30,
+        email = ?some "alice@example.com"
+    };
+    return user;
+}
+
+// Using methods with -> syntax
+fn box_demo() -> number {
+    let b: Box = {
+        value = 7,
+        get = box_get,
+        set = box_set
+    };
+    
+    let new_box: Box = b->set(10);
+    return new_box->get();
+}
+
+// Namespace access
+fn math_operations(a: number, b: number) -> number {
+    let sum: number = math::add(a, b);
+    let diff: number = math::subtract(a, b);
+    return sum + diff;
+}
+
+// Main entry point
+export fn main() -> number {
+    println("BeamLang Syntax Example");
+    
+    let result: number = box_demo();
+    println(result);
+    
+    // Boolean literals
+    let flag: bool = true;
+    let other: bool = false;
+    
+    // Arithmetic operators
+    let x: number = 10 + 5 - 3 * 2 / 1 % 3;
+    
+    // Comparison operators
+    if (x > 5 and x <= 20 or x != 0) {
+        println("Condition met");
+    }
+    
+    return 0;
+}

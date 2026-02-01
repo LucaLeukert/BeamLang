@@ -1132,7 +1132,13 @@ defmodule BeamLang.Parser do
   end
 
   defp parse_literal([%Token{type: :string} = tok | rest]) do
-    {:ok, {:string, %{value: tok.value, span: tok.span}}, rest}
+    if String.contains?(tok.value, "${") do
+      with {:ok, parsed_string, expressions} <- parse_interpolations(tok.value, tok.span) do
+        {:ok, {:interpolated_string, %{string: parsed_string, expressions: expressions, span: tok.span}}, rest}
+      end
+    else
+      {:ok, {:string, %{value: tok.value, span: tok.span}}, rest}
+    end
   end
 
   defp parse_literal([%Token{type: :char} = tok | rest]) do
@@ -1149,6 +1155,97 @@ defmodule BeamLang.Parser do
           {:ok, BeamLang.AST.literal(), [Token.t()]} | {:error, BeamLang.Error.t()}
   defp parse_literal([%Token{} = tok | _]) do
     {:error, error("Expected literal.", tok)}
+  end
+
+  @spec parse_interpolations(binary(), BeamLang.Span.t()) ::
+          {:ok, binary(), [BeamLang.AST.expr()]} | {:error, BeamLang.Error.t()}
+  defp parse_interpolations(string, span) do
+    case extract_interpolation_parts(string, [], []) do
+      {:ok, parts, expressions} ->
+        # Parse each expression string into an AST
+        case parse_interpolation_expressions(expressions, span) do
+          {:ok, parsed_exprs} ->
+            # Reconstruct string with placeholders
+            reconstructed = Enum.join(parts, "{}")
+            {:ok, reconstructed, parsed_exprs}
+
+          {:error, _} = err ->
+            err
+        end
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  @spec extract_interpolation_parts(binary(), [binary()], [binary()]) ::
+          {:ok, [binary()], [binary()]} | {:error, BeamLang.Error.t()}
+  defp extract_interpolation_parts("", parts, exprs) do
+    {:ok, Enum.reverse(parts), Enum.reverse(exprs)}
+  end
+
+  defp extract_interpolation_parts(<<"${", rest::binary>>, parts, exprs) do
+    case find_closing_brace(rest, 0, "") do
+      {:ok, expr, remaining} ->
+        extract_interpolation_parts(remaining, ["" | parts], [expr | exprs])
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  defp extract_interpolation_parts(<<char::utf8, rest::binary>>, [], exprs) do
+    extract_interpolation_parts(rest, [<<char::utf8>> | []], exprs)
+  end
+
+  defp extract_interpolation_parts(<<char::utf8, rest::binary>>, [last | parts], exprs) do
+    extract_interpolation_parts(rest, [last <> <<char::utf8>> | parts], exprs)
+  end
+
+  @spec find_closing_brace(binary(), non_neg_integer(), binary()) ::
+          {:ok, binary(), binary()} | {:error, binary()}
+  defp find_closing_brace("", _depth, _acc) do
+    {:error, "Unclosed interpolation"}
+  end
+
+  defp find_closing_brace(<<"}", rest::binary>>, 0, acc) do
+    {:ok, acc, rest}
+  end
+
+  defp find_closing_brace(<<"}", rest::binary>>, depth, acc) do
+    find_closing_brace(rest, depth - 1, acc <> "}")
+  end
+
+  defp find_closing_brace(<<"{", rest::binary>>, depth, acc) do
+    find_closing_brace(rest, depth + 1, acc <> "{")
+  end
+
+  defp find_closing_brace(<<char::utf8, rest::binary>>, depth, acc) do
+    find_closing_brace(rest, depth, acc <> <<char::utf8>>)
+  end
+
+  @spec parse_interpolation_expressions([binary()], BeamLang.Span.t()) ::
+          {:ok, [BeamLang.AST.expr()]} | {:error, BeamLang.Error.t()}
+  defp parse_interpolation_expressions(exprs, _span) do
+    results =
+      Enum.map(exprs, fn expr_str ->
+        case BeamLang.Lexer.tokenize(expr_str) do
+          {:ok, tokens} ->
+            case parse_expression(tokens) do
+              {:ok, expr, _rest} -> {:ok, expr}
+              {:error, _} = err -> err
+            end
+
+          {:error, _} = err ->
+            err
+        end
+      end)
+
+    # Check if all parsed successfully
+    case Enum.find(results, fn r -> match?({:error, _}, r) end) do
+      nil -> {:ok, Enum.map(results, fn {:ok, expr} -> expr end)}
+      {:error, _} = err -> err
+    end
   end
 
   @spec parse_pattern([Token.t()]) ::
@@ -1264,6 +1361,7 @@ defmodule BeamLang.Parser do
   defp expr_span({:integer, %{span: span}}), do: span
   defp expr_span({:float, %{span: span}}), do: span
   defp expr_span({:string, %{span: span}}), do: span
+  defp expr_span({:interpolated_string, %{span: span}}), do: span
   defp expr_span({:char, %{span: span}}), do: span
   defp expr_span({:bool, %{span: span}}), do: span
   defp expr_span({:identifier, %{span: span}}), do: span

@@ -3,14 +3,16 @@ defmodule BeamLang.Semantic do
   Performs basic semantic checks for the MVP.
   """
 
-  @spec validate(BeamLang.AST.t(), keyword()) :: {:ok, BeamLang.AST.t()} | {:error, [BeamLang.Error.t()]}
-  def validate({:program, %{types: types, functions: functions}} = ast, opts \\ []) when is_list(functions) do
+  @spec validate(BeamLang.AST.t(), keyword()) ::
+          {:ok, BeamLang.AST.t()} | {:error, [BeamLang.Error.t()]}
+  def validate({:program, %{types: types, functions: functions}} = ast, opts \\ [])
+      when is_list(functions) do
     require_main = Keyword.get(opts, :require_main, true)
     {:ok, func_table} = build_function_table(functions)
     {:ok, type_table} = build_type_table(types)
 
     errors =
-      (if require_main, do: collect_main_error(functions), else: []) ++
+      if(require_main, do: collect_main_error(functions), else: []) ++
         collect_type_errors(types, type_table) ++
         collect_function_errors(functions, func_table, type_table)
 
@@ -22,7 +24,9 @@ defmodule BeamLang.Semantic do
 
   @spec require_main_exists([BeamLang.AST.func()]) :: :ok | {:error, [BeamLang.Error.t()]}
   defp require_main_exists(functions) do
-    case Enum.find(functions, fn {:function, %{name: name, body: body}} -> name == "main" and body != nil end) do
+    case Enum.find(functions, fn {:function, %{name: name, body: body}} ->
+           name == "main" and body != nil
+         end) do
       nil ->
         span = BeamLang.Span.new("<source>", 0, 0)
         {:error, [BeamLang.Error.new(:type, "Missing required function 'main'.", span)]}
@@ -34,7 +38,13 @@ defmodule BeamLang.Semantic do
 
   @spec typecheck_return(BeamLang.AST.type_name(), BeamLang.AST.block(), map(), map(), map()) ::
           :ok | {:error, [BeamLang.Error.t()]}
-  defp typecheck_return(expected_type, {:block, %{stmts: stmts}} = block, func_table, type_table, env) do
+  defp typecheck_return(
+         expected_type,
+         {:block, %{stmts: stmts}} = block,
+         func_table,
+         type_table,
+         env
+       ) do
     case List.last(stmts) do
       {:return, %{expr: nil, span: span}} ->
         if expected_type == :void do
@@ -46,25 +56,62 @@ defmodule BeamLang.Semantic do
       {:return, %{expr: expr}} ->
         case type_of_expr(expr, func_table, type_table, env, expected_type) do
           {:error, :unknown_function} ->
-            {:error, [BeamLang.Error.new(:type, "Unknown function in return expression.", expr_span(expr))]}
+            {:error,
+             [
+               BeamLang.Error.new(
+                 :type,
+                 "Unknown function in return expression.",
+                 expr_span(expr)
+               )
+             ]}
 
           {:error, :wrong_arity} ->
-            {:error, [BeamLang.Error.new(:type, "Function called with wrong number of arguments.", expr_span(expr))]}
+            {:error,
+             [
+               BeamLang.Error.new(
+                 :type,
+                 "Function called with wrong number of arguments.",
+                 expr_span(expr)
+               )
+             ]}
 
           {:error, :unknown_variable} ->
-            {:error, [BeamLang.Error.new(:type, "Unknown variable in return expression.", expr_span(expr))]}
+            {:error,
+             [
+               BeamLang.Error.new(
+                 :type,
+                 "Unknown variable in return expression.",
+                 expr_span(expr)
+               )
+             ]}
 
           {:error, :unknown_type} ->
-            {:error, [BeamLang.Error.new(:type, "Unknown type in return expression.", expr_span(expr))]}
+            {:error,
+             [BeamLang.Error.new(:type, "Unknown type in return expression.", expr_span(expr))]}
 
           {:error, :internal_function} ->
-            {:error, [BeamLang.Error.new(:type, "Internal function cannot be called outside its module.", expr_span(expr))]}
+            {:error,
+             [
+               BeamLang.Error.new(
+                 :type,
+                 "Internal function cannot be called outside its module.",
+                 expr_span(expr)
+               )
+             ]}
 
           {:error, :missing_type_annotation} ->
-            {:error, [BeamLang.Error.new(:type, "Struct literal requires a type annotation.", expr_span(expr))]}
+            {:error,
+             [
+               BeamLang.Error.new(
+                 :type,
+                 "Struct literal requires a type annotation.",
+                 expr_span(expr)
+               )
+             ]}
 
           {:error, :not_a_struct} ->
-            {:error, [BeamLang.Error.new(:type, "Field access requires a struct value.", expr_span(expr))]}
+            {:error,
+             [BeamLang.Error.new(:type, "Field access requires a struct value.", expr_span(expr))]}
 
           {:error, {:unknown_field, name}} ->
             {:error, [BeamLang.Error.new(:type, "Unknown field '#{name}'.", expr_span(expr))]}
@@ -100,14 +147,14 @@ defmodule BeamLang.Semantic do
           if block_returns?(block) do
             :ok
           else
-            {:error,
-             [BeamLang.Error.new(:type, "Missing return statement.", block_span(stmts))]}
+            {:error, [BeamLang.Error.new(:type, "Missing return statement.", block_span(stmts))]}
           end
         end
     end
   end
 
-  @spec require_main_number(binary(), BeamLang.AST.type_name()) :: :ok | {:error, [BeamLang.Error.t()]}
+  @spec require_main_number(binary(), BeamLang.AST.type_name()) ::
+          :ok | {:error, [BeamLang.Error.t()]}
   defp require_main_number("main", :number), do: :ok
 
   defp require_main_number("main", other),
@@ -140,14 +187,57 @@ defmodule BeamLang.Semantic do
              | :invalid_binary_op
              | {:unknown_field, binary()}
              | :not_a_struct}
-  defp type_of_expr({:integer, %{value: _value}}, _func_table, _type_table, _env, _expected), do: {:ok, :number}
-  defp type_of_expr({:float, %{value: _value}}, _func_table, _type_table, _env, _expected), do: {:ok, :number}
-  defp type_of_expr({:string, %{value: _value}}, _func_table, _type_table, _env, _expected), do: {:ok, :String}
-  defp type_of_expr({:char, %{value: _value}}, _func_table, _type_table, _env, _expected), do: {:ok, :char}
-  defp type_of_expr({:bool, %{value: _value}}, _func_table, _type_table, _env, _expected), do: {:ok, :bool}
+  defp type_of_expr({:integer, %{value: _value}}, _func_table, _type_table, _env, _expected),
+    do: {:ok, :number}
 
-  defp type_of_expr({:lambda, %{params: params, return_type: return_type, body: body}}, func_table, type_table, env, _expected) do
+  defp type_of_expr({:float, %{value: _value}}, _func_table, _type_table, _env, _expected),
+    do: {:ok, :number}
+
+  defp type_of_expr({:string, %{value: _value}}, _func_table, _type_table, _env, _expected),
+    do: {:ok, :String}
+
+  defp type_of_expr(
+         {:interpolated_string, %{expressions: expressions}},
+         func_table,
+         type_table,
+         env,
+         _expected
+       ) do
+    # Validate that all expressions in the interpolation are valid
+    errors =
+      Enum.flat_map(expressions, fn expr ->
+        case type_of_expr(expr, func_table, type_table, env, nil) do
+          {:ok, _type} ->
+            # Any type can be interpolated into a string
+            []
+
+          {:error, reason} ->
+            expr_error(reason, expr)
+        end
+      end)
+
+    if errors == [] do
+      {:ok, :String}
+    else
+      {:error, {:match, errors}}
+    end
+  end
+
+  defp type_of_expr({:char, %{value: _value}}, _func_table, _type_table, _env, _expected),
+    do: {:ok, :char}
+
+  defp type_of_expr({:bool, %{value: _value}}, _func_table, _type_table, _env, _expected),
+    do: {:ok, :bool}
+
+  defp type_of_expr(
+         {:lambda, %{params: params, return_type: return_type, body: body}},
+         func_table,
+         type_table,
+         env,
+         _expected
+       ) do
     lambda_errors = validate_param_names(params)
+
     param_env =
       Enum.reduce(params, %{}, fn %{name: param_name, type: param_type}, acc ->
         Map.put(acc, param_name, %{type: normalize_type(param_type), mutable: false})
@@ -156,7 +246,9 @@ defmodule BeamLang.Semantic do
     return_type = normalize_type(return_type)
     lambda_env = Map.merge(env, param_env)
 
-    {:ok, _env, stmt_errors} = validate_statements(body, func_table, type_table, lambda_env, return_type)
+    {:ok, _env, stmt_errors} =
+      validate_statements(body, func_table, type_table, lambda_env, return_type)
+
     errors =
       case typecheck_return(return_type, body, func_table, type_table, lambda_env) do
         :ok -> stmt_errors ++ lambda_errors
@@ -170,10 +262,23 @@ defmodule BeamLang.Semantic do
     end
   end
 
-  defp type_of_expr({:method_call, %{target: target, name: name, args: args}}, func_table, type_table, env, _expected) do
+  defp type_of_expr(
+         {:method_call, %{target: target, name: name, args: args}},
+         func_table,
+         type_table,
+         env,
+         _expected
+       ) do
     case type_of_expr(target, func_table, type_table, env, nil) do
       {:ok, target_type} ->
-        case method_call_type(normalize_type(target_type), name, args, func_table, type_table, env) do
+        case method_call_type(
+               normalize_type(target_type),
+               name,
+               args,
+               func_table,
+               type_table,
+               env
+             ) do
           {:ok, type} -> {:ok, type}
           {:error, {:match, errors}} -> {:error, {:match, errors}}
           {:error, err} -> {:error, {:match, [err]}}
@@ -184,9 +289,22 @@ defmodule BeamLang.Semantic do
     end
   end
 
-  defp type_of_expr({:call, %{name: name, args: args, span: call_span}}, func_table, type_table, env, _expected) do
+  defp type_of_expr(
+         {:call, %{name: name, args: args, span: call_span}},
+         func_table,
+         type_table,
+         env,
+         _expected
+       ) do
     case Map.fetch(func_table, name) do
-      {:ok, %{params: param_types, return: return_type, internal: internal, span: func_span, type_params: type_params}} ->
+      {:ok,
+       %{
+         params: param_types,
+         return: return_type,
+         internal: internal,
+         span: func_span,
+         type_params: type_params
+       }} ->
         if internal_call?(internal, func_span, call_span) do
           {:error, :internal_function}
         else
@@ -267,7 +385,13 @@ defmodule BeamLang.Semantic do
     end
   end
 
-  defp type_of_expr({:identifier, %{name: name, span: ident_span}}, func_table, _type_table, env, _expected) do
+  defp type_of_expr(
+         {:identifier, %{name: name, span: ident_span}},
+         func_table,
+         _type_table,
+         env,
+         _expected
+       ) do
     case Map.fetch(env, name) do
       {:ok, %{type: type}} ->
         {:ok, type}
@@ -281,7 +405,8 @@ defmodule BeamLang.Semantic do
               {:ok, {:fn, param_types, return_type}}
             end
 
-          :error -> {:error, :unknown_variable}
+          :error ->
+            {:error, :unknown_variable}
         end
     end
   end
@@ -294,7 +419,17 @@ defmodule BeamLang.Semantic do
             case type_arg_map(params, args) do
               {:ok, param_map} ->
                 type_fields = substitute_field_types(field_map, param_map)
-                errors = validate_struct_fields(fields, type_fields, func_table, type_table, env, type_name)
+
+                errors =
+                  validate_struct_fields(
+                    fields,
+                    type_fields,
+                    func_table,
+                    type_table,
+                    env,
+                    type_name
+                  )
+
                 if errors == [], do: {:ok, expected}, else: {:error, {:struct, errors}}
 
               :error ->
@@ -423,7 +558,13 @@ defmodule BeamLang.Semantic do
     end
   end
 
-  defp type_of_expr({:field, %{target: target, name: name}}, func_table, type_table, env, _expected) do
+  defp type_of_expr(
+         {:field, %{target: target, name: name}},
+         func_table,
+         type_table,
+         env,
+         _expected
+       ) do
     case type_of_expr(target, func_table, type_table, env, nil) do
       {:ok, type} ->
         case struct_type_info(type) do
@@ -461,7 +602,13 @@ defmodule BeamLang.Semantic do
     if errors == [], do: {:ok, type}, else: {:error, {:match, errors}}
   end
 
-  defp type_of_expr({:if_expr, %{cond: cond, then_block: then_block, else_branch: else_branch}}, func_table, type_table, env, _expected) do
+  defp type_of_expr(
+         {:if_expr, %{cond: cond, then_block: then_block, else_branch: else_branch}},
+         func_table,
+         type_table,
+         env,
+         _expected
+       ) do
     errors = condition_errors(cond, func_table, type_table, env)
     {then_type, then_errors} = block_expr_type(then_block, func_table, type_table, env)
     {else_type, else_errors} = else_branch_type(else_branch, func_table, type_table, env)
@@ -490,12 +637,15 @@ defmodule BeamLang.Semantic do
     case type_of_expr(expr, func_table, type_table, env, nil) do
       {:ok, match_type} ->
         {case_types, errors} =
-          Enum.reduce(cases, {[], []}, fn %{pattern: pattern, guard: guard, body: body}, {types, errs} ->
+          Enum.reduce(cases, {[], []}, fn %{pattern: pattern, guard: guard, body: body},
+                                          {types, errs} ->
             {bindings, pattern_errors} = pattern_bindings(pattern, match_type, type_table)
             case_env = Map.merge(env, bindings)
             guard_errors = guard_errors(guard, func_table, type_table, case_env)
             {body_type, body_errors} = case_body_type(body, func_table, type_table, case_env)
-            {[{body_type, expr_span(body)} | types], errs ++ pattern_errors ++ guard_errors ++ body_errors}
+
+            {[{body_type, expr_span(body)} | types],
+             errs ++ pattern_errors ++ guard_errors ++ body_errors}
           end)
 
         case_types = Enum.reverse(case_types)
@@ -507,7 +657,13 @@ defmodule BeamLang.Semantic do
             [] ->
               {:error,
                {:match,
-                [BeamLang.Error.new(:type, "Match expression must have at least one case.", BeamLang.Span.new("<source>", 0, 0))]}}
+                [
+                  BeamLang.Error.new(
+                    :type,
+                    "Match expression must have at least one case.",
+                    BeamLang.Span.new("<source>", 0, 0)
+                  )
+                ]}}
 
             _ ->
               expected = select_match_type(case_types)
@@ -527,7 +683,13 @@ defmodule BeamLang.Semantic do
     end
   end
 
-  defp type_of_expr({:binary, %{op: op, left: left, right: right}}, func_table, type_table, env, _expected) do
+  defp type_of_expr(
+         {:binary, %{op: op, left: left, right: right}},
+         func_table,
+         type_table,
+         env,
+         _expected
+       ) do
     with {:ok, left_type} <- type_of_expr(left, func_table, type_table, env, nil),
          {:ok, right_type} <- type_of_expr(right, func_table, type_table, env, nil) do
       cond do
@@ -566,7 +728,12 @@ defmodule BeamLang.Semantic do
                   {:ok, {:fn, [self_type | param_types], return_type}} ->
                     if type_compatible?(self_type, target_type) do
                       if length(param_types) != length(args) do
-                        {:error, BeamLang.Error.new(:type, "Method '#{name}' called with wrong number of arguments.", error_span)}
+                        {:error,
+                         BeamLang.Error.new(
+                           :type,
+                           "Method '#{name}' called with wrong number of arguments.",
+                           error_span
+                         )}
                       else
                         errors =
                           Enum.zip(args, param_types)
@@ -593,34 +760,80 @@ defmodule BeamLang.Semantic do
                         if errors == [], do: {:ok, return_type}, else: {:error, {:match, errors}}
                       end
                     else
-                      {:error, BeamLang.Error.new(:type, "Method '#{name}' does not match receiver type.", error_span)}
+                      {:error,
+                       BeamLang.Error.new(
+                         :type,
+                         "Method '#{name}' does not match receiver type.",
+                         error_span
+                       )}
                     end
 
                   {:ok, _field_type} ->
-                    {:error, BeamLang.Error.new(:type, "Field '#{name}' is not callable.", BeamLang.Span.new("<source>", 0, 0))}
+                    {:error,
+                     BeamLang.Error.new(
+                       :type,
+                       "Field '#{name}' is not callable.",
+                       BeamLang.Span.new("<source>", 0, 0)
+                     )}
 
                   :error ->
-                    {:error, BeamLang.Error.new(:type, "Unknown field '#{name}'.", BeamLang.Span.new("<source>", 0, 0))}
+                    {:error,
+                     BeamLang.Error.new(
+                       :type,
+                       "Unknown field '#{name}'.",
+                       BeamLang.Span.new("<source>", 0, 0)
+                     )}
                 end
 
               :error ->
-                {:error, BeamLang.Error.new(:type, "Unknown type in method call.", BeamLang.Span.new("<source>", 0, 0))}
+                {:error,
+                 BeamLang.Error.new(
+                   :type,
+                   "Unknown type in method call.",
+                   BeamLang.Span.new("<source>", 0, 0)
+                 )}
             end
 
           :error ->
-            {:error, BeamLang.Error.new(:type, "Unknown type in method call.", BeamLang.Span.new("<source>", 0, 0))}
+            {:error,
+             BeamLang.Error.new(
+               :type,
+               "Unknown type in method call.",
+               BeamLang.Span.new("<source>", 0, 0)
+             )}
         end
 
       :missing ->
-        {:error, BeamLang.Error.new(:type, "Method call requires a struct value.", BeamLang.Span.new("<source>", 0, 0))}
+        {:error,
+         BeamLang.Error.new(
+           :type,
+           "Method call requires a struct value.",
+           BeamLang.Span.new("<source>", 0, 0)
+         )}
 
       :error ->
-        {:error, BeamLang.Error.new(:type, "Method call requires a struct value.", BeamLang.Span.new("<source>", 0, 0))}
+        {:error,
+         BeamLang.Error.new(
+           :type,
+           "Method call requires a struct value.",
+           BeamLang.Span.new("<source>", 0, 0)
+         )}
     end
   end
 
   @spec validate_function(BeamLang.AST.func(), map(), map()) :: [BeamLang.Error.t()]
-  defp validate_function({:function, %{name: name, type_params: type_params, params: params, return_type: return_type, body: body}}, func_table, type_table) do
+  defp validate_function(
+         {:function,
+          %{
+            name: name,
+            type_params: type_params,
+            params: params,
+            return_type: return_type,
+            body: body
+          }},
+         func_table,
+         type_table
+       ) do
     errors = validate_param_names(params)
 
     param_env =
@@ -633,7 +846,9 @@ defmodule BeamLang.Semantic do
 
     {env, stmt_errors} =
       case body do
-        nil -> {param_env, []}
+        nil ->
+          {param_env, []}
+
         _ ->
           case validate_statements(body, func_table, type_table, param_env, return_type) do
             {:ok, env, errs} -> {env, errs}
@@ -669,42 +884,100 @@ defmodule BeamLang.Semantic do
     validate_statements(block, func_table, type_table, env, 0, nil)
   end
 
-  @spec validate_statements(BeamLang.AST.block(), map(), map(), map(), BeamLang.AST.type_name() | nil) ::
+  @spec validate_statements(
+          BeamLang.AST.block(),
+          map(),
+          map(),
+          map(),
+          BeamLang.AST.type_name() | nil
+        ) ::
           {:ok, map(), [BeamLang.Error.t()]}
   defp validate_statements(block, func_table, type_table, env, return_type) do
     validate_statements(block, func_table, type_table, env, 0, return_type)
   end
 
-  @spec validate_statements(BeamLang.AST.block(), map(), map(), map(), non_neg_integer(), BeamLang.AST.type_name() | nil) ::
+  @spec validate_statements(
+          BeamLang.AST.block(),
+          map(),
+          map(),
+          map(),
+          non_neg_integer(),
+          BeamLang.AST.type_name() | nil
+        ) ::
           {:ok, map(), [BeamLang.Error.t()]}
-  defp validate_statements({:block, %{stmts: stmts}}, func_table, type_table, env, loop_depth, return_type) do
+  defp validate_statements(
+         {:block, %{stmts: stmts}},
+         func_table,
+         type_table,
+         env,
+         loop_depth,
+         return_type
+       ) do
     Enum.reduce_while(stmts, {:ok, env, []}, fn stmt, {:ok, acc_env, errors} ->
       case stmt do
         {:break, %{span: span}} ->
           if loop_depth == 0 do
-            {:cont, {:ok, acc_env, [BeamLang.Error.new(:type, "break used outside of loop.", span) | errors]}}
+            {:cont,
+             {:ok, acc_env,
+              [BeamLang.Error.new(:type, "break used outside of loop.", span) | errors]}}
           else
             {:cont, {:ok, acc_env, errors}}
           end
 
         {:if_stmt, %{cond: cond, then_block: then_block, else_branch: else_branch}} ->
           errors = errors ++ condition_errors(cond, func_table, type_table, acc_env)
+
           {:ok, _env_then, then_errors} =
-            validate_statements(then_block, func_table, type_table, acc_env, loop_depth, return_type)
+            validate_statements(
+              then_block,
+              func_table,
+              type_table,
+              acc_env,
+              loop_depth,
+              return_type
+            )
+
           errors = then_errors ++ errors
+
           {errors, _} =
-            else_errors(else_branch, func_table, type_table, acc_env, loop_depth, return_type, errors)
+            else_errors(
+              else_branch,
+              func_table,
+              type_table,
+              acc_env,
+              loop_depth,
+              return_type,
+              errors
+            )
+
           {:cont, {:ok, acc_env, errors}}
 
         {:while, %{cond: cond, body: body}} ->
           errors = errors ++ condition_errors(cond, func_table, type_table, acc_env)
+
           {:ok, _env_body, body_errors} =
-            validate_statements(body, func_table, type_table, acc_env, loop_depth + 1, return_type)
+            validate_statements(
+              body,
+              func_table,
+              type_table,
+              acc_env,
+              loop_depth + 1,
+              return_type
+            )
+
           {:cont, {:ok, acc_env, body_errors ++ errors}}
 
         {:loop, %{body: body}} ->
           {:ok, _env_body, body_errors} =
-            validate_statements(body, func_table, type_table, acc_env, loop_depth + 1, return_type)
+            validate_statements(
+              body,
+              func_table,
+              type_table,
+              acc_env,
+              loop_depth + 1,
+              return_type
+            )
+
           {:cont, {:ok, acc_env, body_errors ++ errors}}
 
         {:for, %{name: name, collection: collection, body: body, span: span}} ->
@@ -718,8 +991,17 @@ defmodule BeamLang.Semantic do
           errors = errors ++ iterator_errors(collection, func_table, type_table, acc_env, span)
           item_type = iterator_item_type(collection, func_table, type_table, acc_env)
           loop_env = Map.put(acc_env, name, %{type: item_type, mutable: false})
+
           {:ok, _env_body, body_errors} =
-            validate_statements(body, func_table, type_table, loop_env, loop_depth + 1, return_type)
+            validate_statements(
+              body,
+              func_table,
+              type_table,
+              loop_env,
+              loop_depth + 1,
+              return_type
+            )
+
           {:cont, {:ok, acc_env, body_errors ++ errors}}
 
         {:guard, %{cond: cond, else_block: else_block}} ->
@@ -743,14 +1025,29 @@ defmodule BeamLang.Semantic do
             end
 
           {:ok, _env, else_errors} =
-            validate_statements(else_block, func_table, type_table, acc_env, loop_depth, return_type)
+            validate_statements(
+              else_block,
+              func_table,
+              type_table,
+              acc_env,
+              loop_depth,
+              return_type
+            )
+
           errors = else_errors ++ errors
 
           errors =
             if guard_has_return?(else_block) do
               errors
             else
-              [BeamLang.Error.new(:type, "Guard else block must end with return.", block_span(else_block)) | errors]
+              [
+                BeamLang.Error.new(
+                  :type,
+                  "Guard else block must end with return.",
+                  block_span(else_block)
+                )
+                | errors
+              ]
             end
 
           {:cont, {:ok, acc_env, errors}}
@@ -760,7 +1057,14 @@ defmodule BeamLang.Semantic do
 
           errors =
             if name == "self" do
-              [BeamLang.Error.new(:type, "self is reserved for method receivers.", stmt_span(stmt)) | errors]
+              [
+                BeamLang.Error.new(
+                  :type,
+                  "self is reserved for method receivers.",
+                  stmt_span(stmt)
+                )
+                | errors
+              ]
             else
               errors
             end
@@ -768,39 +1072,88 @@ defmodule BeamLang.Semantic do
           case type_of_expr(expr, func_table, type_table, acc_env, declared_type) do
             {:error, :unknown_function} ->
               {:cont,
-               {:ok, acc_env, [BeamLang.Error.new(:type, "Unknown function in let expression.", expr_span(expr)) | errors]}}
+               {:ok, acc_env,
+                [
+                  BeamLang.Error.new(
+                    :type,
+                    "Unknown function in let expression.",
+                    expr_span(expr)
+                  )
+                  | errors
+                ]}}
 
             {:error, :wrong_arity} ->
               {:cont,
                {:ok, acc_env,
                 [
-                  BeamLang.Error.new(:type, "Function called with wrong number of arguments.", expr_span(expr))
+                  BeamLang.Error.new(
+                    :type,
+                    "Function called with wrong number of arguments.",
+                    expr_span(expr)
+                  )
                   | errors
                 ]}}
 
             {:error, :unknown_variable} ->
               {:cont,
-               {:ok, acc_env, [BeamLang.Error.new(:type, "Unknown variable in let expression.", expr_span(expr)) | errors]}}
+               {:ok, acc_env,
+                [
+                  BeamLang.Error.new(
+                    :type,
+                    "Unknown variable in let expression.",
+                    expr_span(expr)
+                  )
+                  | errors
+                ]}}
 
             {:error, :unknown_type} ->
               {:cont,
-               {:ok, acc_env, [BeamLang.Error.new(:type, "Unknown type in let expression.", expr_span(expr)) | errors]}}
+               {:ok, acc_env,
+                [
+                  BeamLang.Error.new(:type, "Unknown type in let expression.", expr_span(expr))
+                  | errors
+                ]}}
 
             {:error, :internal_function} ->
               {:cont,
-               {:ok, acc_env, [BeamLang.Error.new(:type, "Internal function cannot be called outside its module.", expr_span(expr)) | errors]}}
+               {:ok, acc_env,
+                [
+                  BeamLang.Error.new(
+                    :type,
+                    "Internal function cannot be called outside its module.",
+                    expr_span(expr)
+                  )
+                  | errors
+                ]}}
 
             {:error, :missing_type_annotation} ->
               {:cont,
-               {:ok, acc_env, [BeamLang.Error.new(:type, "Struct literal requires a type annotation.", expr_span(expr)) | errors]}}
+               {:ok, acc_env,
+                [
+                  BeamLang.Error.new(
+                    :type,
+                    "Struct literal requires a type annotation.",
+                    expr_span(expr)
+                  )
+                  | errors
+                ]}}
 
             {:error, :not_a_struct} ->
               {:cont,
-               {:ok, acc_env, [BeamLang.Error.new(:type, "Field access requires a struct value.", expr_span(expr)) | errors]}}
+               {:ok, acc_env,
+                [
+                  BeamLang.Error.new(
+                    :type,
+                    "Field access requires a struct value.",
+                    expr_span(expr)
+                  )
+                  | errors
+                ]}}
 
             {:error, {:unknown_field, field}} ->
               {:cont,
-               {:ok, acc_env, [BeamLang.Error.new(:type, "Unknown field '#{field}'.", expr_span(expr)) | errors]}}
+               {:ok, acc_env,
+                [BeamLang.Error.new(:type, "Unknown field '#{field}'.", expr_span(expr)) | errors]}}
 
             {:error, {:struct, errs}} ->
               {:cont, {:ok, acc_env, errs ++ errors}}
@@ -816,11 +1169,16 @@ defmodule BeamLang.Semantic do
                 {:cont,
                  {:ok, acc_env,
                   [
-                    BeamLang.Error.new(:type, "Variable '#{name}' is already defined.", stmt_span(stmt))
+                    BeamLang.Error.new(
+                      :type,
+                      "Variable '#{name}' is already defined.",
+                      stmt_span(stmt)
+                    )
                     | errors
                   ]}}
               else
-                {:cont, {:ok, Map.put(acc_env, name, %{type: inferred, mutable: mutable}), errors}}
+                {:cont,
+                 {:ok, Map.put(acc_env, name, %{type: inferred, mutable: mutable}), errors}}
               end
           end
 
@@ -832,37 +1190,84 @@ defmodule BeamLang.Semantic do
             {:ok, %{name: name, type: _declared, mutable: false}} ->
               {:cont,
                {:ok, acc_env,
-                [BeamLang.Error.new(:type, "Cannot assign to immutable variable '#{name}'.", stmt_span(stmt)) | errors]}}
+                [
+                  BeamLang.Error.new(
+                    :type,
+                    "Cannot assign to immutable variable '#{name}'.",
+                    stmt_span(stmt)
+                  )
+                  | errors
+                ]}}
 
             {:ok, %{name: _name, type: declared, mutable: true, field: nil}} ->
               case type_of_expr(expr, func_table, type_table, acc_env, declared) do
                 {:error, :unknown_function} ->
                   {:cont,
-                   {:ok, acc_env, [BeamLang.Error.new(:type, "Unknown function in assignment.", expr_span(expr)) | errors]}}
+                   {:ok, acc_env,
+                    [
+                      BeamLang.Error.new(
+                        :type,
+                        "Unknown function in assignment.",
+                        expr_span(expr)
+                      )
+                      | errors
+                    ]}}
 
                 {:error, :wrong_arity} ->
                   {:cont,
                    {:ok, acc_env,
                     [
-                      BeamLang.Error.new(:type, "Function called with wrong number of arguments.", expr_span(expr))
+                      BeamLang.Error.new(
+                        :type,
+                        "Function called with wrong number of arguments.",
+                        expr_span(expr)
+                      )
                       | errors
                     ]}}
 
                 {:error, :unknown_variable} ->
                   {:cont,
-                   {:ok, acc_env, [BeamLang.Error.new(:type, "Unknown variable in assignment.", expr_span(expr)) | errors]}}
+                   {:ok, acc_env,
+                    [
+                      BeamLang.Error.new(
+                        :type,
+                        "Unknown variable in assignment.",
+                        expr_span(expr)
+                      )
+                      | errors
+                    ]}}
 
                 {:error, :unknown_type} ->
                   {:cont,
-                   {:ok, acc_env, [BeamLang.Error.new(:type, "Unknown type in assignment.", expr_span(expr)) | errors]}}
+                   {:ok, acc_env,
+                    [
+                      BeamLang.Error.new(:type, "Unknown type in assignment.", expr_span(expr))
+                      | errors
+                    ]}}
 
                 {:error, :internal_function} ->
                   {:cont,
-                   {:ok, acc_env, [BeamLang.Error.new(:type, "Internal function cannot be called outside its module.", expr_span(expr)) | errors]}}
+                   {:ok, acc_env,
+                    [
+                      BeamLang.Error.new(
+                        :type,
+                        "Internal function cannot be called outside its module.",
+                        expr_span(expr)
+                      )
+                      | errors
+                    ]}}
 
                 {:error, :missing_type_annotation} ->
                   {:cont,
-                   {:ok, acc_env, [BeamLang.Error.new(:type, "Struct literal requires a type annotation.", expr_span(expr)) | errors]}}
+                   {:ok, acc_env,
+                    [
+                      BeamLang.Error.new(
+                        :type,
+                        "Struct literal requires a type annotation.",
+                        expr_span(expr)
+                      )
+                      | errors
+                    ]}}
 
                 {:error, {:struct, errs}} ->
                   {:cont, {:ok, acc_env, errs ++ errors}}
@@ -899,31 +1304,75 @@ defmodule BeamLang.Semantic do
                   case type_of_expr(expr, func_table, type_table, acc_env, field_type) do
                     {:error, :unknown_function} ->
                       {:cont,
-                       {:ok, acc_env, [BeamLang.Error.new(:type, "Unknown function in assignment.", expr_span(expr)) | errors]}}
+                       {:ok, acc_env,
+                        [
+                          BeamLang.Error.new(
+                            :type,
+                            "Unknown function in assignment.",
+                            expr_span(expr)
+                          )
+                          | errors
+                        ]}}
 
                     {:error, :wrong_arity} ->
                       {:cont,
                        {:ok, acc_env,
                         [
-                          BeamLang.Error.new(:type, "Function called with wrong number of arguments.", expr_span(expr))
+                          BeamLang.Error.new(
+                            :type,
+                            "Function called with wrong number of arguments.",
+                            expr_span(expr)
+                          )
                           | errors
                         ]}}
 
                     {:error, :unknown_variable} ->
                       {:cont,
-                       {:ok, acc_env, [BeamLang.Error.new(:type, "Unknown variable in assignment.", expr_span(expr)) | errors]}}
+                       {:ok, acc_env,
+                        [
+                          BeamLang.Error.new(
+                            :type,
+                            "Unknown variable in assignment.",
+                            expr_span(expr)
+                          )
+                          | errors
+                        ]}}
 
                     {:error, :unknown_type} ->
                       {:cont,
-                       {:ok, acc_env, [BeamLang.Error.new(:type, "Unknown type in assignment.", expr_span(expr)) | errors]}}
+                       {:ok, acc_env,
+                        [
+                          BeamLang.Error.new(
+                            :type,
+                            "Unknown type in assignment.",
+                            expr_span(expr)
+                          )
+                          | errors
+                        ]}}
 
                     {:error, :internal_function} ->
                       {:cont,
-                       {:ok, acc_env, [BeamLang.Error.new(:type, "Internal function cannot be called outside its module.", expr_span(expr)) | errors]}}
+                       {:ok, acc_env,
+                        [
+                          BeamLang.Error.new(
+                            :type,
+                            "Internal function cannot be called outside its module.",
+                            expr_span(expr)
+                          )
+                          | errors
+                        ]}}
 
                     {:error, :missing_type_annotation} ->
                       {:cont,
-                       {:ok, acc_env, [BeamLang.Error.new(:type, "Struct literal requires a type annotation.", expr_span(expr)) | errors]}}
+                       {:ok, acc_env,
+                        [
+                          BeamLang.Error.new(
+                            :type,
+                            "Struct literal requires a type annotation.",
+                            expr_span(expr)
+                          )
+                          | errors
+                        ]}}
 
                     {:error, {:struct, errs}} ->
                       {:cont, {:ok, acc_env, errs ++ errors}}
@@ -958,42 +1407,76 @@ defmodule BeamLang.Semantic do
             {:cont, {:ok, acc_env, errors}}
           else
             {:cont,
-             {:ok, acc_env, [BeamLang.Error.new(:type, "Non-void return requires a value.", span) | errors]}}
+             {:ok, acc_env,
+              [BeamLang.Error.new(:type, "Non-void return requires a value.", span) | errors]}}
           end
 
         {:return, %{expr: expr}} ->
           case type_of_expr(expr, func_table, type_table, acc_env, return_type) do
             {:error, :unknown_function} ->
               {:cont,
-               {:ok, acc_env, [BeamLang.Error.new(:type, "Unknown function in expression.", expr_span(expr)) | errors]}}
+               {:ok, acc_env,
+                [
+                  BeamLang.Error.new(:type, "Unknown function in expression.", expr_span(expr))
+                  | errors
+                ]}}
 
             {:error, :wrong_arity} ->
               {:cont,
                {:ok, acc_env,
                 [
-                  BeamLang.Error.new(:type, "Function called with wrong number of arguments.", expr_span(expr))
+                  BeamLang.Error.new(
+                    :type,
+                    "Function called with wrong number of arguments.",
+                    expr_span(expr)
+                  )
                   | errors
                 ]}}
 
             {:error, :unknown_variable} ->
               {:cont,
-               {:ok, acc_env, [BeamLang.Error.new(:type, "Unknown variable in expression.", expr_span(expr)) | errors]}}
+               {:ok, acc_env,
+                [
+                  BeamLang.Error.new(:type, "Unknown variable in expression.", expr_span(expr))
+                  | errors
+                ]}}
 
             {:error, :unknown_type} ->
               {:cont,
-               {:ok, acc_env, [BeamLang.Error.new(:type, "Unknown type in expression.", expr_span(expr)) | errors]}}
+               {:ok, acc_env,
+                [
+                  BeamLang.Error.new(:type, "Unknown type in expression.", expr_span(expr))
+                  | errors
+                ]}}
 
             {:error, :missing_type_annotation} ->
               {:cont,
-               {:ok, acc_env, [BeamLang.Error.new(:type, "Struct literal requires a type annotation.", expr_span(expr)) | errors]}}
+               {:ok, acc_env,
+                [
+                  BeamLang.Error.new(
+                    :type,
+                    "Struct literal requires a type annotation.",
+                    expr_span(expr)
+                  )
+                  | errors
+                ]}}
 
             {:error, :not_a_struct} ->
               {:cont,
-               {:ok, acc_env, [BeamLang.Error.new(:type, "Field access requires a struct value.", expr_span(expr)) | errors]}}
+               {:ok, acc_env,
+                [
+                  BeamLang.Error.new(
+                    :type,
+                    "Field access requires a struct value.",
+                    expr_span(expr)
+                  )
+                  | errors
+                ]}}
 
             {:error, {:unknown_field, field}} ->
               {:cont,
-               {:ok, acc_env, [BeamLang.Error.new(:type, "Unknown field '#{field}'.", expr_span(expr)) | errors]}}
+               {:ok, acc_env,
+                [BeamLang.Error.new(:type, "Unknown field '#{field}'.", expr_span(expr)) | errors]}}
 
             {:error, {:struct, errs}} ->
               {:cont, {:ok, acc_env, errs ++ errors}}
@@ -1005,7 +1488,8 @@ defmodule BeamLang.Semantic do
               {:cont, {:ok, acc_env, errs ++ errors}}
 
             {:ok, inferred} ->
-              if return_type == nil or return_type == :void or type_compatible?(return_type, inferred) do
+              if return_type == nil or return_type == :void or
+                   type_compatible?(return_type, inferred) do
                 {:cont, {:ok, acc_env, errors}}
               else
                 {:cont,
@@ -1025,39 +1509,80 @@ defmodule BeamLang.Semantic do
           case type_of_expr(expr, func_table, type_table, acc_env, nil) do
             {:error, :unknown_function} ->
               {:cont,
-               {:ok, acc_env, [BeamLang.Error.new(:type, "Unknown function in expression.", expr_span(expr)) | errors]}}
+               {:ok, acc_env,
+                [
+                  BeamLang.Error.new(:type, "Unknown function in expression.", expr_span(expr))
+                  | errors
+                ]}}
 
             {:error, :wrong_arity} ->
               {:cont,
                {:ok, acc_env,
                 [
-                  BeamLang.Error.new(:type, "Function called with wrong number of arguments.", expr_span(expr))
+                  BeamLang.Error.new(
+                    :type,
+                    "Function called with wrong number of arguments.",
+                    expr_span(expr)
+                  )
                   | errors
                 ]}}
 
             {:error, :unknown_variable} ->
               {:cont,
-               {:ok, acc_env, [BeamLang.Error.new(:type, "Unknown variable in expression.", expr_span(expr)) | errors]}}
+               {:ok, acc_env,
+                [
+                  BeamLang.Error.new(:type, "Unknown variable in expression.", expr_span(expr))
+                  | errors
+                ]}}
 
             {:error, :unknown_type} ->
               {:cont,
-               {:ok, acc_env, [BeamLang.Error.new(:type, "Unknown type in expression.", expr_span(expr)) | errors]}}
+               {:ok, acc_env,
+                [
+                  BeamLang.Error.new(:type, "Unknown type in expression.", expr_span(expr))
+                  | errors
+                ]}}
 
             {:error, :internal_function} ->
               {:cont,
-               {:ok, acc_env, [BeamLang.Error.new(:type, "Internal function cannot be called outside its module.", expr_span(expr)) | errors]}}
+               {:ok, acc_env,
+                [
+                  BeamLang.Error.new(
+                    :type,
+                    "Internal function cannot be called outside its module.",
+                    expr_span(expr)
+                  )
+                  | errors
+                ]}}
 
             {:error, :missing_type_annotation} ->
               {:cont,
-               {:ok, acc_env, [BeamLang.Error.new(:type, "Struct literal requires a type annotation.", expr_span(expr)) | errors]}}
+               {:ok, acc_env,
+                [
+                  BeamLang.Error.new(
+                    :type,
+                    "Struct literal requires a type annotation.",
+                    expr_span(expr)
+                  )
+                  | errors
+                ]}}
 
             {:error, :not_a_struct} ->
               {:cont,
-               {:ok, acc_env, [BeamLang.Error.new(:type, "Field access requires a struct value.", expr_span(expr)) | errors]}}
+               {:ok, acc_env,
+                [
+                  BeamLang.Error.new(
+                    :type,
+                    "Field access requires a struct value.",
+                    expr_span(expr)
+                  )
+                  | errors
+                ]}}
 
             {:error, {:unknown_field, field}} ->
               {:cont,
-               {:ok, acc_env, [BeamLang.Error.new(:type, "Unknown field '#{field}'.", expr_span(expr)) | errors]}}
+               {:ok, acc_env,
+                [BeamLang.Error.new(:type, "Unknown field '#{field}'.", expr_span(expr)) | errors]}}
 
             {:error, {:struct, errs}} ->
               {:cont, {:ok, acc_env, errs ++ errors}}
@@ -1079,7 +1604,16 @@ defmodule BeamLang.Semantic do
   @spec build_function_table([BeamLang.AST.func()]) :: {:ok, map()}
   defp build_function_table(functions) do
     table =
-      Enum.reduce(functions, %{}, fn {:function, %{name: name, type_params: type_params, params: params, return_type: return_type, internal: internal, span: span}}, acc ->
+      Enum.reduce(functions, %{}, fn {:function,
+                                      %{
+                                        name: name,
+                                        type_params: type_params,
+                                        params: params,
+                                        return_type: return_type,
+                                        internal: internal,
+                                        span: span
+                                      }},
+                                     acc ->
         param_types =
           params
           |> Enum.map(&normalize_type(&1.type))
@@ -1087,7 +1621,15 @@ defmodule BeamLang.Semantic do
 
         param_names = Enum.map(params, & &1.name)
         return_type = return_type |> normalize_type() |> replace_type_params(type_params)
-        Map.put(acc, name, %{params: param_types, param_names: param_names, return: return_type, type_params: type_params, internal: internal, span: span})
+
+        Map.put(acc, name, %{
+          params: param_types,
+          param_names: param_names,
+          return: return_type,
+          type_params: type_params,
+          internal: internal,
+          span: span
+        })
       end)
 
     {:ok, table}
@@ -1132,7 +1674,14 @@ defmodule BeamLang.Semantic do
     end
   end
 
-  @spec validate_struct_fields([BeamLang.AST.field_assign()], map(), map(), map(), map(), binary()) ::
+  @spec validate_struct_fields(
+          [BeamLang.AST.field_assign()],
+          map(),
+          map(),
+          map(),
+          map(),
+          binary()
+        ) ::
           [BeamLang.Error.t()]
   defp validate_struct_fields(fields, type_fields, func_table, type_table, env, type_name) do
     provided = Map.new(fields, fn %{name: name} -> {name, true} end)
@@ -1144,7 +1693,11 @@ defmodule BeamLang.Semantic do
 
     missing_errors =
       Enum.map(missing, fn field ->
-        BeamLang.Error.new(:type, "Missing field '#{field}' for #{type_name}.", BeamLang.Span.new("<source>", 0, 0))
+        BeamLang.Error.new(
+          :type,
+          "Missing field '#{field}' for #{type_name}.",
+          BeamLang.Span.new("<source>", 0, 0)
+        )
       end)
 
     field_errors =
@@ -1162,11 +1715,23 @@ defmodule BeamLang.Semantic do
                       if first == "self" do
                         []
                       else
-                        [BeamLang.Error.new(:type, "Method function must have first parameter named self.", expr_span)]
+                        [
+                          BeamLang.Error.new(
+                            :type,
+                            "Method function must have first parameter named self.",
+                            expr_span
+                          )
+                        ]
                       end
 
                     {:ok, %{param_names: []}} ->
-                      [BeamLang.Error.new(:type, "Method function must take self as first parameter.", expr_span)]
+                      [
+                        BeamLang.Error.new(
+                          :type,
+                          "Method function must take self as first parameter.",
+                          expr_span
+                        )
+                      ]
 
                     _ ->
                       []
@@ -1174,9 +1739,26 @@ defmodule BeamLang.Semantic do
 
                 {{:fn, [_ | _], _return_type}, {:lambda, %{params: params, span: expr_span}}} ->
                   case params do
-                    [%{name: "self"} | _] -> []
-                    [] -> [BeamLang.Error.new(:type, "Method function must take self as first parameter.", expr_span)]
-                    _ -> [BeamLang.Error.new(:type, "Method function must have first parameter named self.", expr_span)]
+                    [%{name: "self"} | _] ->
+                      []
+
+                    [] ->
+                      [
+                        BeamLang.Error.new(
+                          :type,
+                          "Method function must take self as first parameter.",
+                          expr_span
+                        )
+                      ]
+
+                    _ ->
+                      [
+                        BeamLang.Error.new(
+                          :type,
+                          "Method function must have first parameter named self.",
+                          expr_span
+                        )
+                      ]
                   end
 
                 _ ->
@@ -1199,16 +1781,40 @@ defmodule BeamLang.Semantic do
                 end
 
               {:error, :unknown_variable} ->
-                [BeamLang.Error.new(:type, "Unknown variable in field '#{name}'.", expr_span(expr)) | method_errors]
+                [
+                  BeamLang.Error.new(
+                    :type,
+                    "Unknown variable in field '#{name}'.",
+                    expr_span(expr)
+                  )
+                  | method_errors
+                ]
 
               {:error, :unknown_function} ->
-                [BeamLang.Error.new(:type, "Unknown function in field '#{name}'.", expr_span(expr)) | method_errors]
+                [
+                  BeamLang.Error.new(
+                    :type,
+                    "Unknown function in field '#{name}'.",
+                    expr_span(expr)
+                  )
+                  | method_errors
+                ]
 
               {:error, :internal_function} ->
-                [BeamLang.Error.new(:type, "Internal function cannot be called outside its module.", expr_span(expr)) | method_errors]
+                [
+                  BeamLang.Error.new(
+                    :type,
+                    "Internal function cannot be called outside its module.",
+                    expr_span(expr)
+                  )
+                  | method_errors
+                ]
 
               {:error, _} ->
-                [BeamLang.Error.new(:type, "Invalid value for field '#{name}'.", expr_span(expr)) | method_errors]
+                [
+                  BeamLang.Error.new(:type, "Invalid value for field '#{name}'.", expr_span(expr))
+                  | method_errors
+                ]
             end
         end
       end)
@@ -1289,8 +1895,11 @@ defmodule BeamLang.Semantic do
 
   defp pattern_bindings({:opt_none_pat, %{span: span}}, match_type, _type_table) do
     case match_type do
-      {:optional, _inner} -> {%{}, []}
-      _ -> {%{}, [BeamLang.Error.new(:type, "Optional pattern requires an optional value.", span)]}
+      {:optional, _inner} ->
+        {%{}, []}
+
+      _ ->
+        {%{}, [BeamLang.Error.new(:type, "Optional pattern requires an optional value.", span)]}
     end
   end
 
@@ -1346,7 +1955,11 @@ defmodule BeamLang.Semantic do
     literal_pattern_bindings(pattern, match_type)
   end
 
-  defp pattern_bindings({:struct_pattern, %{name: name, fields: fields, span: span}}, match_type, type_table) do
+  defp pattern_bindings(
+         {:struct_pattern, %{name: name, fields: fields, span: span}},
+         match_type,
+         type_table
+       ) do
     case struct_type_info(match_type) do
       {:ok, ^name, args} ->
         case Map.fetch(type_table, name) do
@@ -1355,12 +1968,23 @@ defmodule BeamLang.Semantic do
               {:ok, param_map} ->
                 type_fields = substitute_field_types(field_map, param_map)
 
-                Enum.reduce(fields, {%{}, []}, fn %{name: field_name, pattern: pattern, span: field_span},
-                                                 {env, errors} ->
+                Enum.reduce(fields, {%{}, []}, fn %{
+                                                    name: field_name,
+                                                    pattern: pattern,
+                                                    span: field_span
+                                                  },
+                                                  {env, errors} ->
                   case Map.fetch(type_fields, field_name) do
                     :error ->
                       {env,
-                       [BeamLang.Error.new(:type, "Unknown field '#{field_name}' in struct pattern.", field_span) | errors]}
+                       [
+                         BeamLang.Error.new(
+                           :type,
+                           "Unknown field '#{field_name}' in struct pattern.",
+                           field_span
+                         )
+                         | errors
+                       ]}
 
                     {:ok, field_type} ->
                       {bindings, field_errors} = pattern_bindings(pattern, field_type, type_table)
@@ -1369,7 +1993,8 @@ defmodule BeamLang.Semantic do
                 end)
 
               :error ->
-                {%{}, [BeamLang.Error.new(:type, "Unknown type '#{name}' in struct pattern.", span)]}
+                {%{},
+                 [BeamLang.Error.new(:type, "Unknown type '#{name}' in struct pattern.", span)]}
             end
 
           :error ->
@@ -1377,7 +2002,14 @@ defmodule BeamLang.Semantic do
         end
 
       {:ok, other, _args} ->
-        {%{}, [BeamLang.Error.new(:type, "Struct pattern expects #{name}, got #{type_label({:named, other})}.", span)]}
+        {%{},
+         [
+           BeamLang.Error.new(
+             :type,
+             "Struct pattern expects #{name}, got #{type_label({:named, other})}.",
+             span
+           )
+         ]}
 
       :error ->
         {%{}, [BeamLang.Error.new(:type, "Struct pattern requires a struct value.", span)]}
@@ -1444,16 +2076,34 @@ defmodule BeamLang.Semantic do
         [BeamLang.Error.new(:type, "Unknown type in expression.", expr_span(expr))]
 
       :internal_function ->
-        [BeamLang.Error.new(:type, "Internal function cannot be called outside its module.", expr_span(expr))]
+        [
+          BeamLang.Error.new(
+            :type,
+            "Internal function cannot be called outside its module.",
+            expr_span(expr)
+          )
+        ]
 
       :missing_type_annotation ->
         [BeamLang.Error.new(:type, "Struct literal requires a type annotation.", expr_span(expr))]
 
       :missing_optional_context ->
-        [BeamLang.Error.new(:type, "Optional literal requires an optional type context.", expr_span(expr))]
+        [
+          BeamLang.Error.new(
+            :type,
+            "Optional literal requires an optional type context.",
+            expr_span(expr)
+          )
+        ]
 
       :missing_result_context ->
-        [BeamLang.Error.new(:type, "Result literal requires a result type context.", expr_span(expr))]
+        [
+          BeamLang.Error.new(
+            :type,
+            "Result literal requires a result type context.",
+            expr_span(expr)
+          )
+        ]
 
       :not_a_struct ->
         [BeamLang.Error.new(:type, "Field access requires a struct value.", expr_span(expr))]
@@ -1471,7 +2121,13 @@ defmodule BeamLang.Semantic do
         errs
 
       :wrong_arity ->
-        [BeamLang.Error.new(:type, "Function called with wrong number of arguments.", expr_span(expr))]
+        [
+          BeamLang.Error.new(
+            :type,
+            "Function called with wrong number of arguments.",
+            expr_span(expr)
+          )
+        ]
 
       :invalid_binary_op ->
         [BeamLang.Error.new(:type, "Invalid operands for comparison.", expr_span(expr))]
@@ -1513,7 +2169,13 @@ defmodule BeamLang.Semantic do
           expr_error(reason, expr)
       end
     else
-      [BeamLang.Error.new(:type, "Match guard only supports comparison operators.", expr_span(expr))]
+      [
+        BeamLang.Error.new(
+          :type,
+          "Match guard only supports comparison operators.",
+          expr_span(expr)
+        )
+      ]
     end
   end
 
@@ -1565,19 +2227,53 @@ defmodule BeamLang.Semantic do
     end
   end
 
-  @spec else_errors(BeamLang.AST.if_else_branch() | nil, map(), map(), map(), non_neg_integer(), BeamLang.AST.type_name() | nil, [BeamLang.Error.t()]) ::
+  @spec else_errors(
+          BeamLang.AST.if_else_branch() | nil,
+          map(),
+          map(),
+          map(),
+          non_neg_integer(),
+          BeamLang.AST.type_name() | nil,
+          [BeamLang.Error.t()]
+        ) ::
           {[BeamLang.Error.t()], map()}
-  defp else_errors(nil, _func_table, _type_table, _env, _loop_depth, _return_type, errors), do: {errors, %{}}
+  defp else_errors(nil, _func_table, _type_table, _env, _loop_depth, _return_type, errors),
+    do: {errors, %{}}
 
-  defp else_errors({:else_block, %{block: block}}, func_table, type_table, env, loop_depth, return_type, errors) do
-    {:ok, _env_else, else_errors} = validate_statements(block, func_table, type_table, env, loop_depth, return_type)
+  defp else_errors(
+         {:else_block, %{block: block}},
+         func_table,
+         type_table,
+         env,
+         loop_depth,
+         return_type,
+         errors
+       ) do
+    {:ok, _env_else, else_errors} =
+      validate_statements(block, func_table, type_table, env, loop_depth, return_type)
+
     {else_errors ++ errors, %{}}
   end
 
-  defp else_errors({:else_if, %{if: if_stmt}}, func_table, type_table, env, loop_depth, return_type, errors) do
+  defp else_errors(
+         {:else_if, %{if: if_stmt}},
+         func_table,
+         type_table,
+         env,
+         loop_depth,
+         return_type,
+         errors
+       ) do
     {:ok, _env, if_errors} =
-      validate_statements({:block, %{stmts: [if_stmt], span: BeamLang.Span.new("<source>", 0, 0)}},
-        func_table, type_table, env, loop_depth, return_type)
+      validate_statements(
+        {:block, %{stmts: [if_stmt], span: BeamLang.Span.new("<source>", 0, 0)}},
+        func_table,
+        type_table,
+        env,
+        loop_depth,
+        return_type
+      )
+
     {if_errors ++ errors, %{}}
   end
 
@@ -1592,6 +2288,7 @@ defmodule BeamLang.Semantic do
       {:if_stmt, %{cond: cond, then_block: then_block, else_branch: else_branch}} ->
         if else_branch == nil do
           {then_type, then_errors} = block_expr_type(then_block, func_table, type_table, env)
+
           {then_type,
            [
              BeamLang.Error.new(
@@ -1626,13 +2323,24 @@ defmodule BeamLang.Semantic do
     end
   end
 
-  @spec iterator_errors(BeamLang.AST.expr(), map(), map(), map(), BeamLang.Span.t()) :: [BeamLang.Error.t()]
+  @spec iterator_errors(BeamLang.AST.expr(), map(), map(), map(), BeamLang.Span.t()) :: [
+          BeamLang.Error.t()
+        ]
   defp iterator_errors(collection, func_table, type_table, env, span) do
     case type_of_expr(collection, func_table, type_table, env, nil) do
       {:ok, type} ->
         case iterator_item_type_from_type(type) do
-          {:ok, _item_type} -> []
-          :error -> [BeamLang.Error.new(:type, "For loop requires Iterator<T>, got #{type_label(type)}.", span)]
+          {:ok, _item_type} ->
+            []
+
+          :error ->
+            [
+              BeamLang.Error.new(
+                :type,
+                "For loop requires Iterator<T>, got #{type_label(type)}.",
+                span
+              )
+            ]
         end
 
       {:error, reason} ->
@@ -1665,6 +2373,7 @@ defmodule BeamLang.Semantic do
   defp expr_span({:integer, %{span: span}}), do: span
   defp expr_span({:float, %{span: span}}), do: span
   defp expr_span({:string, %{span: span}}), do: span
+  defp expr_span({:interpolated_string, %{span: span}}), do: span
   defp expr_span({:char, %{span: span}}), do: span
   defp expr_span({:bool, %{span: span}}), do: span
   defp expr_span({:call, %{span: span}}), do: span
@@ -1694,22 +2403,38 @@ defmodule BeamLang.Semantic do
   defp do_type_compatible?({:type_var, _name}, _inferred), do: true
   defp do_type_compatible?(_expected, {:type_var, _name}), do: true
   defp do_type_compatible?(expected, inferred) when expected == inferred, do: true
+
   defp do_type_compatible?({:optional, expected_inner}, {:optional, inferred_inner}),
     do: type_compatible?(expected_inner, inferred_inner)
-  defp do_type_compatible?({:result, expected_ok, expected_err}, {:result, inferred_ok, inferred_err}),
-    do: type_compatible?(expected_ok, inferred_ok) and type_compatible?(expected_err, inferred_err)
-  defp do_type_compatible?({:generic, expected_base, expected_args}, {:generic, inferred_base, inferred_args}) do
+
+  defp do_type_compatible?(
+         {:result, expected_ok, expected_err},
+         {:result, inferred_ok, inferred_err}
+       ),
+       do:
+         type_compatible?(expected_ok, inferred_ok) and
+           type_compatible?(expected_err, inferred_err)
+
+  defp do_type_compatible?(
+         {:generic, expected_base, expected_args},
+         {:generic, inferred_base, inferred_args}
+       ) do
     length(expected_args) == length(inferred_args) and
       type_compatible?(expected_base, inferred_base) and
       Enum.zip(expected_args, inferred_args)
       |> Enum.all?(fn {exp, inf} -> type_compatible?(exp, inf) end)
   end
-  defp do_type_compatible?({:fn, expected_params, expected_ret}, {:fn, inferred_params, inferred_ret}) do
+
+  defp do_type_compatible?(
+         {:fn, expected_params, expected_ret},
+         {:fn, inferred_params, inferred_ret}
+       ) do
     length(expected_params) == length(inferred_params) and
       Enum.zip(expected_params, inferred_params)
       |> Enum.all?(fn {exp, inf} -> type_compatible?(exp, inf) end) and
       type_compatible?(expected_ret, inferred_ret)
   end
+
   defp do_type_compatible?(_expected, _inferred), do: false
 
   @spec comparable_types?(BeamLang.AST.type_name(), BeamLang.AST.type_name()) :: boolean()
@@ -1722,11 +2447,18 @@ defmodule BeamLang.Semantic do
   defp do_comparable_types?(left, right) when left == right, do: true
   defp do_comparable_types?(_left, _right), do: false
 
+  @spec arithmetic_type(atom(), BeamLang.AST.type_name(), BeamLang.AST.type_name()) ::
+          {:ok, BeamLang.AST.type_name()} | {:error, :invalid_binary_op}
   defp arithmetic_type(op, left, right) do
-    if left == :number and right == :number and op in [:add, :sub, :mul, :div, :mod] do
-      {:ok, :number}
-    else
-      {:error, :invalid_binary_op}
+    cond do
+      left == :number and right == :number and op in [:add, :sub, :mul, :div, :mod] ->
+        {:ok, :number}
+
+      left == :String and right == :String and op == :add ->
+        {:ok, :String}
+
+      true ->
+        {:error, :invalid_binary_op}
     end
   end
 
@@ -1743,15 +2475,24 @@ defmodule BeamLang.Semantic do
   defp stmt_span({:break, %{span: span}}), do: span
 
   @spec assignment_target(BeamLang.AST.expr(), map()) ::
-          {:ok, %{name: binary(), type: BeamLang.AST.type_name(), mutable: boolean(), field: binary() | nil}}
+          {:ok,
+           %{
+             name: binary(),
+             type: BeamLang.AST.type_name(),
+             mutable: boolean(),
+             field: binary() | nil
+           }}
           | {:error, BeamLang.Error.t()}
   defp assignment_target({:identifier, %{name: name, span: span}}, env) do
     if name == "self" do
       {:error, BeamLang.Error.new(:type, "self is reserved for method receivers.", span)}
     else
       case Map.fetch(env, name) do
-        {:ok, %{type: type, mutable: mutable}} -> {:ok, %{name: name, type: type, mutable: mutable, field: nil}}
-        :error -> {:error, BeamLang.Error.new(:type, "Unknown variable in assignment.", span)}
+        {:ok, %{type: type, mutable: mutable}} ->
+          {:ok, %{name: name, type: type, mutable: mutable, field: nil}}
+
+        :error ->
+          {:error, BeamLang.Error.new(:type, "Unknown variable in assignment.", span)}
       end
     end
   end
@@ -1760,17 +2501,22 @@ defmodule BeamLang.Semantic do
     case target do
       {:identifier, %{name: name}} ->
         case Map.fetch(env, name) do
-          {:ok, %{type: type, mutable: mutable}} -> {:ok, %{name: name, type: type, mutable: mutable, field: field}}
-          :error -> {:error, BeamLang.Error.new(:type, "Unknown variable in assignment.", span)}
+          {:ok, %{type: type, mutable: mutable}} ->
+            {:ok, %{name: name, type: type, mutable: mutable, field: field}}
+
+          :error ->
+            {:error, BeamLang.Error.new(:type, "Unknown variable in assignment.", span)}
         end
 
       _ ->
-        {:error, BeamLang.Error.new(:type, "Assignment target must be a variable or struct field.", span)}
+        {:error,
+         BeamLang.Error.new(:type, "Assignment target must be a variable or struct field.", span)}
     end
   end
 
   defp assignment_target(_other, _env) do
-    {:error, BeamLang.Error.new(:type, "Invalid assignment target.", BeamLang.Span.new("<source>", 0, 0))}
+    {:error,
+     BeamLang.Error.new(:type, "Invalid assignment target.", BeamLang.Span.new("<source>", 0, 0))}
   end
 
   @spec resolve_field_type(BeamLang.AST.type_name(), binary(), map()) ::
@@ -1785,20 +2531,43 @@ defmodule BeamLang.Semantic do
                 type_fields = substitute_field_types(field_map, param_map)
 
                 case Map.fetch(type_fields, field) do
-                  {:ok, field_type} -> {:ok, field_type}
-                  :error -> {:error, BeamLang.Error.new(:type, "Unknown field '#{field}'.", BeamLang.Span.new("<source>", 0, 0))}
+                  {:ok, field_type} ->
+                    {:ok, field_type}
+
+                  :error ->
+                    {:error,
+                     BeamLang.Error.new(
+                       :type,
+                       "Unknown field '#{field}'.",
+                       BeamLang.Span.new("<source>", 0, 0)
+                     )}
                 end
 
               :error ->
-                {:error, BeamLang.Error.new(:type, "Unknown type '#{type_name}'.", BeamLang.Span.new("<source>", 0, 0))}
+                {:error,
+                 BeamLang.Error.new(
+                   :type,
+                   "Unknown type '#{type_name}'.",
+                   BeamLang.Span.new("<source>", 0, 0)
+                 )}
             end
 
           :error ->
-            {:error, BeamLang.Error.new(:type, "Unknown type '#{type_name}'.", BeamLang.Span.new("<source>", 0, 0))}
+            {:error,
+             BeamLang.Error.new(
+               :type,
+               "Unknown type '#{type_name}'.",
+               BeamLang.Span.new("<source>", 0, 0)
+             )}
         end
 
       :error ->
-        {:error, BeamLang.Error.new(:type, "Field access requires a struct value.", BeamLang.Span.new("<source>", 0, 0))}
+        {:error,
+         BeamLang.Error.new(
+           :type,
+           "Field access requires a struct value.",
+           BeamLang.Span.new("<source>", 0, 0)
+         )}
     end
   end
 
@@ -1854,7 +2623,8 @@ defmodule BeamLang.Semantic do
   defp else_branch_returns?({:else_block, %{block: block}}), do: block_returns?(block)
   defp else_branch_returns?({:else_if, %{if: if_stmt}}), do: stmt_returns?(if_stmt)
 
-  @spec select_match_type([{BeamLang.AST.type_name(), BeamLang.Span.t()}]) :: BeamLang.AST.type_name()
+  @spec select_match_type([{BeamLang.AST.type_name(), BeamLang.Span.t()}]) ::
+          BeamLang.AST.type_name()
   defp select_match_type(case_types) do
     preferred =
       case_types
@@ -1875,14 +2645,26 @@ defmodule BeamLang.Semantic do
   defp struct_type_info({:generic, {:named, name}, args}), do: {:ok, name, args}
   defp struct_type_info(_type), do: :error
 
-  defp annotate_program({:program, %{module: module, imports: imports, types: types, functions: functions, span: span}}, func_table, type_table) do
+  defp annotate_program(
+         {:program,
+          %{module: module, imports: imports, types: types, functions: functions, span: span}},
+         func_table,
+         type_table
+       ) do
     functions = Enum.map(functions, &annotate_function(&1, func_table, type_table))
-    {:program, %{module: module, imports: imports, types: types, functions: functions, span: span}}
+
+    {:program,
+     %{module: module, imports: imports, types: types, functions: functions, span: span}}
   end
 
   defp annotate_function({:function, %{body: nil}} = func, _func_table, _type_table), do: func
 
-  defp annotate_function({:function, %{params: params, return_type: return_type, type_params: type_params, body: body} = info}, func_table, type_table) do
+  defp annotate_function(
+         {:function,
+          %{params: params, return_type: return_type, type_params: type_params, body: body} = info},
+         func_table,
+         type_table
+       ) do
     env =
       Enum.reduce(params, %{}, fn %{name: name, type: type}, acc ->
         type = type |> normalize_type() |> replace_type_params(type_params)
@@ -1894,7 +2676,13 @@ defmodule BeamLang.Semantic do
     {:function, %{info | body: body}}
   end
 
-  defp annotate_block({:block, %{stmts: stmts, span: span}}, env, func_table, type_table, return_type) do
+  defp annotate_block(
+         {:block, %{stmts: stmts, span: span}},
+         env,
+         func_table,
+         type_table,
+         return_type
+       ) do
     {stmts, env} =
       Enum.map_reduce(stmts, env, fn stmt, acc_env ->
         annotate_stmt(stmt, acc_env, func_table, type_table, return_type)
@@ -1903,9 +2691,16 @@ defmodule BeamLang.Semantic do
     {{:block, %{stmts: stmts, span: span}}, env}
   end
 
-  defp annotate_stmt({:let, %{name: name, expr: expr, mutable: mutable, type: declared_type} = info}, env, func_table, type_table, _return_type) do
+  defp annotate_stmt(
+         {:let, %{name: name, expr: expr, mutable: mutable, type: declared_type} = info},
+         env,
+         func_table,
+         type_table,
+         _return_type
+       ) do
     declared_type = normalize_type(declared_type)
     {expr, _inferred} = annotate_expr(expr, declared_type, env, func_table, type_table)
+
     inferred =
       case declared_type do
         nil ->
@@ -1922,7 +2717,13 @@ defmodule BeamLang.Semantic do
     {{:let, %{info | expr: expr}}, env}
   end
 
-  defp annotate_stmt({:assign, %{target: target, expr: expr} = info}, env, func_table, type_table, _return_type) do
+  defp annotate_stmt(
+         {:assign, %{target: target, expr: expr} = info},
+         env,
+         func_table,
+         type_table,
+         _return_type
+       ) do
     expected =
       case assignment_target(target, env) do
         {:ok, %{type: type}} -> type
@@ -1933,7 +2734,8 @@ defmodule BeamLang.Semantic do
     {{:assign, %{info | expr: expr}}, env}
   end
 
-  defp annotate_stmt({:return, %{expr: nil}} = stmt, env, _func_table, _type_table, _return_type), do: {stmt, env}
+  defp annotate_stmt({:return, %{expr: nil}} = stmt, env, _func_table, _type_table, _return_type),
+    do: {stmt, env}
 
   defp annotate_stmt({:return, %{expr: expr} = info}, env, func_table, type_table, return_type) do
     {expr, _inferred} = annotate_expr(expr, return_type, env, func_table, type_table)
@@ -1945,14 +2747,26 @@ defmodule BeamLang.Semantic do
     {{:expr, %{info | expr: expr}}, env}
   end
 
-  defp annotate_stmt({:if_stmt, %{cond: cond, then_block: then_block, else_branch: else_branch} = info}, env, func_table, type_table, return_type) do
+  defp annotate_stmt(
+         {:if_stmt, %{cond: cond, then_block: then_block, else_branch: else_branch} = info},
+         env,
+         func_table,
+         type_table,
+         return_type
+       ) do
     {cond, _} = annotate_expr(cond, :bool, env, func_table, type_table)
     {then_block, _} = annotate_block(then_block, env, func_table, type_table, return_type)
     else_branch = annotate_else_branch(else_branch, env, func_table, type_table, return_type)
     {{:if_stmt, %{info | cond: cond, then_block: then_block, else_branch: else_branch}}, env}
   end
 
-  defp annotate_stmt({:while, %{cond: cond, body: body} = info}, env, func_table, type_table, return_type) do
+  defp annotate_stmt(
+         {:while, %{cond: cond, body: body} = info},
+         env,
+         func_table,
+         type_table,
+         return_type
+       ) do
     {cond, _} = annotate_expr(cond, :bool, env, func_table, type_table)
     {body, _} = annotate_block(body, env, func_table, type_table, return_type)
     {{:while, %{info | cond: cond, body: body}}, env}
@@ -1963,7 +2777,13 @@ defmodule BeamLang.Semantic do
     {{:loop, %{info | body: body}}, env}
   end
 
-  defp annotate_stmt({:for, %{name: name, collection: collection, body: body} = info}, env, func_table, type_table, return_type) do
+  defp annotate_stmt(
+         {:for, %{name: name, collection: collection, body: body} = info},
+         env,
+         func_table,
+         type_table,
+         return_type
+       ) do
     {collection, _} = annotate_expr(collection, nil, env, func_table, type_table)
 
     collection_type =
@@ -1980,11 +2800,25 @@ defmodule BeamLang.Semantic do
 
     loop_env = Map.put(env, name, %{type: item_type, mutable: false})
     {body, _} = annotate_block(body, loop_env, func_table, type_table, return_type)
-    updated = Map.merge(info, %{collection: collection, body: body, collection_type: collection_type, item_type: item_type})
+
+    updated =
+      Map.merge(info, %{
+        collection: collection,
+        body: body,
+        collection_type: collection_type,
+        item_type: item_type
+      })
+
     {{:for, updated}, env}
   end
 
-  defp annotate_stmt({:guard, %{cond: cond, else_block: else_block} = info}, env, func_table, type_table, return_type) do
+  defp annotate_stmt(
+         {:guard, %{cond: cond, else_block: else_block} = info},
+         env,
+         func_table,
+         type_table,
+         return_type
+       ) do
     {cond, _} = annotate_expr(cond, :bool, env, func_table, type_table)
     {else_block, _} = annotate_block(else_block, env, func_table, type_table, return_type)
     {{:guard, %{info | cond: cond, else_block: else_block}}, env}
@@ -1993,17 +2827,38 @@ defmodule BeamLang.Semantic do
   defp annotate_stmt(stmt, env, _func_table, _type_table, _return_type), do: {stmt, env}
 
   defp annotate_else_branch(nil, _env, _func_table, _type_table, _return_type), do: nil
-  defp annotate_else_branch({:else_block, %{block: block, span: span}}, env, func_table, type_table, return_type) do
+
+  defp annotate_else_branch(
+         {:else_block, %{block: block, span: span}},
+         env,
+         func_table,
+         type_table,
+         return_type
+       ) do
     {block, _} = annotate_block(block, env, func_table, type_table, return_type)
     {:else_block, %{block: block, span: span}}
   end
-  defp annotate_else_branch({:else_if, %{if: if_stmt, span: span}}, env, func_table, type_table, return_type) do
+
+  defp annotate_else_branch(
+         {:else_if, %{if: if_stmt, span: span}},
+         env,
+         func_table,
+         type_table,
+         return_type
+       ) do
     {if_stmt, _} = annotate_stmt(if_stmt, env, func_table, type_table, return_type)
     {:else_if, %{if: if_stmt, span: span}}
   end
 
-  defp annotate_expr({:struct, %{fields: fields, span: span} = info}, expected, env, func_table, type_table) do
+  defp annotate_expr(
+         {:struct, %{fields: fields, span: span} = info},
+         expected,
+         env,
+         func_table,
+         type_table
+       ) do
     expected = normalize_type(expected)
+
     {field_types, struct_type} =
       case struct_type_info(expected) do
         {:ok, name, args} ->
@@ -2036,7 +2891,13 @@ defmodule BeamLang.Semantic do
     {expr, struct_type || expected}
   end
 
-  defp annotate_expr({:call, %{name: name, args: args, span: span}}, _expected, env, func_table, type_table) do
+  defp annotate_expr(
+         {:call, %{name: name, args: args, span: span}},
+         _expected,
+         env,
+         func_table,
+         type_table
+       ) do
     args =
       case Map.fetch(func_table, name) do
         {:ok, %{params: param_types}} ->
@@ -2057,12 +2918,24 @@ defmodule BeamLang.Semantic do
     {{:call, %{name: name, args: args, span: span}}, nil}
   end
 
-  defp annotate_expr({:field, %{target: target, name: name, span: span}}, _expected, env, func_table, type_table) do
+  defp annotate_expr(
+         {:field, %{target: target, name: name, span: span}},
+         _expected,
+         env,
+         func_table,
+         type_table
+       ) do
     {target, _} = annotate_expr(target, nil, env, func_table, type_table)
     {{:field, %{target: target, name: name, span: span}}, nil}
   end
 
-  defp annotate_expr({:match, %{expr: expr, cases: cases, span: span}}, expected, env, func_table, type_table) do
+  defp annotate_expr(
+         {:match, %{expr: expr, cases: cases, span: span}},
+         expected,
+         env,
+         func_table,
+         type_table
+       ) do
     {expr, _} = annotate_expr(expr, nil, env, func_table, type_table)
 
     cases =
@@ -2089,25 +2962,51 @@ defmodule BeamLang.Semantic do
     {{:match, %{expr: expr, cases: cases, span: span}}, expected}
   end
 
-  defp annotate_expr({:if_expr, %{cond: cond, then_block: then_block, else_branch: else_branch, span: span}}, expected, env, func_table, type_table) do
+  defp annotate_expr(
+         {:if_expr, %{cond: cond, then_block: then_block, else_branch: else_branch, span: span}},
+         expected,
+         env,
+         func_table,
+         type_table
+       ) do
     {cond, _} = annotate_expr(cond, :bool, env, func_table, type_table)
     {then_block, _} = annotate_block(then_block, env, func_table, type_table, expected)
     else_branch = annotate_else_branch(else_branch, env, func_table, type_table, expected)
-    {{:if_expr, %{cond: cond, then_block: then_block, else_branch: else_branch, span: span}}, expected}
+
+    {{:if_expr, %{cond: cond, then_block: then_block, else_branch: else_branch, span: span}},
+     expected}
   end
 
-  defp annotate_expr({:block_expr, %{block: block, span: span}}, expected, env, func_table, type_table) do
+  defp annotate_expr(
+         {:block_expr, %{block: block, span: span}},
+         expected,
+         env,
+         func_table,
+         type_table
+       ) do
     {block, _} = annotate_block(block, env, func_table, type_table, expected)
     {{:block_expr, %{block: block, span: span}}, expected}
   end
 
-  defp annotate_expr({:binary, %{op: op, left: left, right: right, span: span}}, _expected, env, func_table, type_table) do
+  defp annotate_expr(
+         {:binary, %{op: op, left: left, right: right, span: span}},
+         _expected,
+         env,
+         func_table,
+         type_table
+       ) do
     {left, _} = annotate_expr(left, nil, env, func_table, type_table)
     {right, _} = annotate_expr(right, nil, env, func_table, type_table)
     {{:binary, %{op: op, left: left, right: right, span: span}}, nil}
   end
 
-  defp annotate_expr({:opt_some, %{expr: expr, span: span}}, expected, env, func_table, type_table) do
+  defp annotate_expr(
+         {:opt_some, %{expr: expr, span: span}},
+         expected,
+         env,
+         func_table,
+         type_table
+       ) do
     inner =
       case normalize_type(expected) do
         {:optional, inner} -> inner
@@ -2115,8 +3014,15 @@ defmodule BeamLang.Semantic do
       end
 
     {expr, _} = annotate_expr(expr, inner, env, func_table, type_table)
+
     inferred =
-      case type_of_expr({:opt_some, %{expr: expr, span: span}}, func_table, type_table, env, expected) do
+      case type_of_expr(
+             {:opt_some, %{expr: expr, span: span}},
+             func_table,
+             type_table,
+             env,
+             expected
+           ) do
         {:ok, type} -> type
         _ -> normalize_type(expected)
       end
@@ -2142,8 +3048,15 @@ defmodule BeamLang.Semantic do
       end
 
     {expr, _} = annotate_expr(expr, inner, env, func_table, type_table)
+
     inferred =
-      case type_of_expr({:res_ok, %{expr: expr, span: span}}, func_table, type_table, env, expected) do
+      case type_of_expr(
+             {:res_ok, %{expr: expr, span: span}},
+             func_table,
+             type_table,
+             env,
+             expected
+           ) do
         {:ok, type} -> type
         _ -> normalize_type(expected)
       end
@@ -2159,8 +3072,15 @@ defmodule BeamLang.Semantic do
       end
 
     {expr, _} = annotate_expr(expr, inner, env, func_table, type_table)
+
     inferred =
-      case type_of_expr({:res_err, %{expr: expr, span: span}}, func_table, type_table, env, expected) do
+      case type_of_expr(
+             {:res_err, %{expr: expr, span: span}},
+             func_table,
+             type_table,
+             env,
+             expected
+           ) do
         {:ok, type} -> type
         _ -> normalize_type(expected)
       end
@@ -2168,15 +3088,24 @@ defmodule BeamLang.Semantic do
     {{:res_err, %{expr: expr, span: span, type: inferred}}, inferred}
   end
 
-  defp annotate_expr({:method_call, %{target: target, name: name, args: args, span: span}}, _expected, env, func_table, type_table) do
+  defp annotate_expr(
+         {:method_call, %{target: target, name: name, args: args, span: span}},
+         _expected,
+         env,
+         func_table,
+         type_table
+       ) do
     {target, _} = annotate_expr(target, nil, env, func_table, type_table)
     {args, _} = annotate_expr_list(args, env, func_table, type_table)
+
     target_type =
       case type_of_expr(target, func_table, type_table, env, nil) do
         {:ok, type} -> normalize_type(type)
         _ -> :any
       end
-    {{:method_call, %{target: target, name: name, args: args, span: span, target_type: target_type}}, nil}
+
+    {{:method_call,
+      %{target: target, name: name, args: args, span: span, target_type: target_type}}, nil}
   end
 
   defp annotate_expr(expr, _expected, _env, _func_table, _type_table), do: {expr, nil}
@@ -2226,16 +3155,19 @@ defmodule BeamLang.Semantic do
         end
 
       {:generic, base, args} ->
-        {:generic, replace_type_params(base, type_params), Enum.map(args, &replace_type_params(&1, type_params))}
+        {:generic, replace_type_params(base, type_params),
+         Enum.map(args, &replace_type_params(&1, type_params))}
 
       {:optional, inner} ->
         {:optional, replace_type_params(inner, type_params)}
 
       {:result, ok_type, err_type} ->
-        {:result, replace_type_params(ok_type, type_params), replace_type_params(err_type, type_params)}
+        {:result, replace_type_params(ok_type, type_params),
+         replace_type_params(err_type, type_params)}
 
       {:fn, params, return_type} ->
-        {:fn, Enum.map(params, &replace_type_params(&1, type_params)), replace_type_params(return_type, type_params)}
+        {:fn, Enum.map(params, &replace_type_params(&1, type_params)),
+         replace_type_params(return_type, type_params)}
 
       _ ->
         type
@@ -2243,7 +3175,8 @@ defmodule BeamLang.Semantic do
   end
 
   defp infer_type_params(param_types, args, func_table, type_table, env) do
-    Enum.reduce_while(Enum.zip(param_types, args), {:ok, %{}}, fn {param_type, arg}, {:ok, mapping} ->
+    Enum.reduce_while(Enum.zip(param_types, args), {:ok, %{}}, fn {param_type, arg},
+                                                                  {:ok, mapping} ->
       case type_of_expr(arg, func_table, type_table, env, nil) do
         {:ok, inferred} ->
           case unify_types(param_type, inferred, mapping) do
@@ -2279,7 +3212,9 @@ defmodule BeamLang.Semantic do
 
       {:type_var, name} ->
         case Map.fetch(mapping, name) do
-          :error -> {:ok, Map.put(mapping, name, inferred)}
+          :error ->
+            {:ok, Map.put(mapping, name, inferred)}
+
           {:ok, bound} ->
             if type_compatible?(bound, inferred) do
               {:ok, mapping}
@@ -2395,7 +3330,8 @@ defmodule BeamLang.Semantic do
   end
 
   defp substitute_type({:fn, params, return_type}, param_map) do
-    {:fn, Enum.map(params, &substitute_type(&1, param_map)), substitute_type(return_type, param_map)}
+    {:fn, Enum.map(params, &substitute_type(&1, param_map)),
+     substitute_type(return_type, param_map)}
   end
 
   defp substitute_type(type, _param_map), do: type
@@ -2404,6 +3340,7 @@ defmodule BeamLang.Semantic do
   defp type_label({:generic, base, args}) do
     "#{type_label(base)}<#{Enum.map_join(args, ", ", &type_label/1)}>"
   end
+
   defp type_label({:type_var, name}), do: name
   defp type_label({:named, name}) when is_binary(name), do: name
   defp type_label(:any), do: "any"
@@ -2412,9 +3349,13 @@ defmodule BeamLang.Semantic do
   defp type_label(:integer), do: "number"
   defp type_label(:float), do: "number"
   defp type_label({:optional, inner}), do: "#{type_label(inner)}?"
-  defp type_label({:result, ok_type, err_type}), do: "#{type_label(ok_type)}!#{type_label(err_type)}"
+
+  defp type_label({:result, ok_type, err_type}),
+    do: "#{type_label(ok_type)}!#{type_label(err_type)}"
+
   defp type_label({:fn, params, return_type}) do
     "fn(#{Enum.map_join(params, ", ", &type_label/1)}) -> #{type_label(return_type)}"
   end
+
   defp type_label(type) when is_atom(type), do: Atom.to_string(type)
 end

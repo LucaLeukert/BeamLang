@@ -19,14 +19,14 @@ fn main() -> number {
         return 2;
     }
 
-    println(typeof(user->name->length()));
+    println("Hallo ${user->name->chars()}");
 
     return num;
 }
 
 fn test_user() -> User {
     let user: User = { 
-        age = 0, 
+        age = 10, 
         name = "Peter",
         login = fn() -> void {
             return;

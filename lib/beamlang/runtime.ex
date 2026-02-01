@@ -76,6 +76,57 @@ defmodule BeamLang.Runtime do
     Enum.map(value, fn ch -> {:char, ch} end)
   end
 
+  @spec string_add_or_numeric(term(), term()) :: term()
+  def string_add_or_numeric(left, right) do
+    cond do
+      string_map?(left) and string_map?(right) ->
+        # Both are String objects, call concat
+        data = string_concat_data(left.data, right.data)
+        %{left | data: data}
+
+      true ->
+        # Numeric addition
+        left + right
+    end
+  end
+
+  @spec any_to_string_data(term()) :: charlist()
+  def any_to_string_data(value) do
+    cond do
+      is_integer(value) ->
+        Integer.to_charlist(value)
+
+      is_float(value) ->
+        Float.to_charlist(value)
+
+      is_boolean(value) ->
+        if value, do: ~c"true", else: ~c"false"
+
+      value == :ok ->
+        ~c"void"
+
+      string_map?(value) ->
+        value.data
+
+      is_tuple(value) and tuple_size(value) == 2 and elem(value, 0) == :char ->
+        [elem(value, 1)]
+
+      is_list(value) ->
+        # Could be a charlist or list of values
+        if Enum.all?(value, &is_integer/1) do
+          value
+        else
+          inspect(value) |> String.to_charlist()
+        end
+
+      is_map(value) ->
+        inspect(value) |> String.to_charlist()
+
+      true ->
+        inspect(value) |> String.to_charlist()
+    end
+  end
+
   @spec iterator_next_data(list()) :: map()
   def iterator_next_data([]), do: %{tag: 0}
   def iterator_next_data([head | _]), do: %{tag: 1, value: head}
@@ -94,6 +145,40 @@ defmodule BeamLang.Runtime do
   def iterator_fold_data(list, initial, folder) do
     Enum.reduce(list, initial, folder)
   end
+
+  # List functions
+  @spec list_empty() :: list()
+  def list_empty(), do: []
+
+  @spec list_length(list()) :: non_neg_integer()
+  def list_length(list), do: length(list)
+
+  @spec list_get(list(), integer()) :: map()
+  def list_get(list, index) when index >= 0 and index < length(list) do
+    %{tag: 1, value: Enum.at(list, index)}
+  end
+  def list_get(_list, _index), do: %{tag: 0}
+
+  @spec list_push(list(), term()) :: list()
+  def list_push(list, item), do: list ++ [item]
+
+  @spec list_pop(list()) :: list()
+  def list_pop([]), do: []
+  def list_pop(list), do: Enum.drop(list, -1)
+
+  @spec list_first(list()) :: map()
+  def list_first([]), do: %{tag: 0}
+  def list_first([head | _]), do: %{tag: 1, value: head}
+
+  @spec list_last(list()) :: map()
+  def list_last([]), do: %{tag: 0}
+  def list_last(list), do: %{tag: 1, value: List.last(list)}
+
+  @spec list_reverse(list()) :: list()
+  def list_reverse(list), do: Enum.reverse(list)
+
+  @spec list_concat(list(), list()) :: list()
+  def list_concat(left, right), do: left ++ right
 
   @spec println(term()) :: :ok
   def println(value) do
