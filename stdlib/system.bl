@@ -15,9 +15,18 @@ fn file_exists_data(path: String) -> bool;
 @external(elixir, "BeamLang.Runtime", "get_env")
 fn get_env_data(name: String) -> any;
 
+internal fn make_io_error(msg: String) -> String!IoError {
+    let err: IoError = { kind = "read", message = msg };
+    return !err err;
+}
+
 /** Read a file and return its contents as a Result **/
-fn read_file(path: String) -> String!String {
-    return file_read_data(path);
+fn read_file(path: String) -> String!IoError {
+    let result = file_read_data(path);
+    return match (result) {
+        case!ok content => !ok content,
+        case!err msg => make_io_error(msg)
+    };
 }
 
 /** Check if a file exists **/

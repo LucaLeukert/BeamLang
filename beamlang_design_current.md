@@ -429,16 +429,16 @@ print<T>(value: T) -> void
 
 ### System
 
-The system module provides file and environment operations:
+The system module provides file and environment operations with proper error types:
 
 ```beamlang
-// Error type for IO operations (exported for custom error handling)
-error IoError {
+// Error type for IO operations
+export error IoError {
     kind: String,
     message: String
 }
 
-fn read_file(path: String) -> String!String
+fn read_file(path: String) -> String!IoError
 fn file_exists(path: String) -> bool
 fn get_env(name: String) -> String?
 ```
@@ -449,7 +449,7 @@ Example:
 let result = read_file("config.txt");
 match (result) {
     case!ok content => println(content),
-    case!err msg => println("Error: ${msg}")
+    case!err err => println("Error: ${err->message}")
 };
 ```
 

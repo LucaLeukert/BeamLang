@@ -1999,15 +1999,30 @@ defmodule BeamLang.Semantic do
   defp block_expr_type({:block, %{stmts: stmts}} = block, func_table, type_table, env) do
     {:ok, _env, stmt_errors} = validate_statements(block, func_table, type_table, env)
 
-    type =
+    # Find return statement anywhere in the block (not just last)
+    type = find_block_return_type(stmts, func_table, type_table, env)
+
+    {type, stmt_errors}
+  end
+
+  # Find the type from a return statement in the block
+  defp find_block_return_type(stmts, func_table, type_table, env) do
+    # First check for explicit return statements
+    return_type = Enum.find_value(stmts, fn
+      {:return, %{expr: nil}} -> :void
+      {:return, %{expr: expr}} -> type_or_unknown(expr, func_table, type_table, env)
+      _ -> nil
+    end)
+
+    if return_type do
+      return_type
+    else
+      # Fall back to last statement type
       case List.last(stmts) do
-        {:return, %{expr: nil}} -> :void
-        {:return, %{expr: expr}} -> type_or_unknown(expr, func_table, type_table, env)
         {:expr, %{expr: expr}} -> type_or_unknown(expr, func_table, type_table, env)
         _ -> :void
       end
-
-    {type, stmt_errors}
+    end
   end
 
   @spec case_body_type(BeamLang.AST.expr(), map(), map(), map()) ::
