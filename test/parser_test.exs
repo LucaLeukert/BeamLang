@@ -483,4 +483,19 @@ defmodule BeamLang.ParserTest do
     assert {:program, %{functions: [func]}} = ast
     assert {:function, %{name: "main", return_type: {:generic, {:named, "List"}, [{:generic, {:named, "List"}, [:number]}]}}} = func
   end
+
+  test "parses main with args parameter" do
+    source = """
+    fn main(args: [String]) -> number {
+        return 0;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{functions: [func]}} = ast
+    assert {:function, %{name: "main", params: [param], return_type: :number}} = func
+    assert %{name: "args", type: {:generic, {:named, "List"}, [:String]}} = param
+  end
 end

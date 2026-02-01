@@ -2,7 +2,7 @@ fn always_one(value: any) -> number {
     return 1;
 }
 
-fn main() -> number {
+fn main(args: [String]) -> number {
     let iter = "hi"->chars();
     let next_fn = iter->next;
     let first = next_fn(iter);

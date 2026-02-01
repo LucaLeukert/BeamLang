@@ -1,4 +1,4 @@
-fn main() -> number {
+fn main(args: [String]) -> number {
     println("debug");
     return 0;
 }

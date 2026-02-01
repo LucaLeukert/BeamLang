@@ -360,33 +360,92 @@ defmodule BeamLang.Codegen do
     {:fun, line, {:clauses, [clause]}}
   end
 
+  defp expr_form(line, {:method_call, %{target: target, name: name, args: args, target_type: target_type}}, env) do
+    # Check if target is a List type - if so, dispatch to Runtime functions
+    case target_type do
+      {:generic, {:named, "List"}, _} ->
+        list_method_form(line, target, name, args, env)
+
+      _ ->
+        fun_expr = expr_form(line, {:field, %{target: target, name: name}}, env)
+        all_args = [expr_form(line, target, env) | Enum.map(args, &expr_form(line, &1, env))]
+        {:call, line, fun_expr, all_args}
+    end
+  end
+
+  # Fallback for method_call without target_type (shouldn't happen after semantic analysis)
   defp expr_form(line, {:method_call, %{target: target, name: name, args: args}}, env) do
     fun_expr = expr_form(line, {:field, %{target: target, name: name}}, env)
-    args = [expr_form(line, target, env) | Enum.map(args, &expr_form(line, &1, env))]
-    {:call, line, fun_expr, args}
+    all_args = [expr_form(line, target, env) | Enum.map(args, &expr_form(line, &1, env))]
+    {:call, line, fun_expr, all_args}
+  end
+
+  defp list_method_form(line, target, name, args, env) do
+    target_form = expr_form(line, target, env)
+    arg_forms = Enum.map(args, &expr_form(line, &1, env))
+
+    runtime_fn =
+      case name do
+        "length" -> :list_length
+        "get" -> :list_get
+        "push" -> :list_push
+        "pop" -> :list_pop
+        "first" -> :list_first
+        "last" -> :list_last
+        "iter" -> :list_iter
+        "map" -> :list_map
+        "filter" -> :list_filter
+        "fold" -> :list_fold
+        "reverse" -> :list_reverse
+        "concat" -> :list_concat
+        _ -> raise "Unknown List method: #{name}"
+      end
+
+    {:call, line, {:remote, line, {:atom, line, BeamLang.Runtime}, {:atom, line, runtime_fn}},
+     [target_form | arg_forms]}
   end
 
   @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
   defp expr_form(line, {:binary, %{op: op, left: left, right: right}}, env) do
     case op do
       :add ->
-        case {left, right} do
-          {{:string, _}, {:string, _}} ->
-            left_form = expr_form(line, left, env)
-            fun_expr = expr_form(line, {:field, %{target: left, name: "concat"}}, env)
-            {:call, line, fun_expr, [left_form, expr_form(line, right, env)]}
+        left_type = get_expr_type(left)
+        right_type = get_expr_type(right)
 
-          _ ->
-            left_form = expr_form(line, left, env)
-            right_form = expr_form(line, right, env)
+        if is_string_type?(left_type) or is_string_type?(right_type) do
+          # String concatenation: convert both to strings and concat
+          left_form = ensure_string_form(line, left, left_type, env)
+          right_form = ensure_string_form(line, right, right_type, env)
 
-            {:call, line,
-             {:remote, line, {:atom, line, :"Elixir.BeamLang.Runtime"},
-              {:atom, line, :string_add_or_numeric}}, [left_form, right_form]}
+          fun_expr =
+            {:call, line, {:remote, line, {:atom, line, :maps}, {:atom, line, :get}},
+             [{:atom, line, :concat}, left_form]}
+
+          {:call, line, fun_expr, [left_form, right_form]}
+        else
+          # Numeric addition
+          {:op, line, :+, expr_form(line, left, env), expr_form(line, right, env)}
         end
 
       _ ->
         {:op, line, op_atom(op), expr_form(line, left, env), expr_form(line, right, env)}
+    end
+  end
+
+  defp get_expr_type({_tag, %{type: type}}), do: type
+  defp get_expr_type({:string, _}), do: :String
+  defp get_expr_type(_), do: nil
+
+  defp is_string_type?(:String), do: true
+  defp is_string_type?({:named, "String"}), do: true
+  defp is_string_type?(_), do: false
+
+  defp ensure_string_form(line, expr, type, env) do
+    if is_string_type?(type) do
+      expr_form(line, expr, env)
+    else
+      # Convert to string using to_string
+      {:call, line, {:atom, line, :to_string}, [expr_form(line, expr, env)]}
     end
   end
 

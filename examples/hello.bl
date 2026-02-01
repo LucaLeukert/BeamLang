@@ -4,7 +4,7 @@ type User {
     login: fn() -> void
 }
 
-fn main() -> number {
+fn main(args: [String]) -> number {
     let user = test_user();
     let num = match (user) {
         case User { age, name = "Peter" } => age,

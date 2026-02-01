@@ -6,7 +6,7 @@ fn find_name(id: number) -> String? {
     }
 }
 
-fn main() -> number {
+fn main(args: [String]) -> number {
     let name = find_name(1);
     let un = name->unwrap("Unknown");
     println(un);

@@ -31,10 +31,70 @@ defmodule BeamLang.Semantic do
         span = BeamLang.Span.new("<source>", 0, 0)
         {:error, [BeamLang.Error.new(:type, "Missing required function 'main'.", span)]}
 
-      _ ->
-        :ok
+      {:function, %{params: params, span: span}} ->
+        require_main_params(params, span)
     end
   end
+
+  @spec require_main_params([BeamLang.AST.func_param()], BeamLang.Span.t()) ::
+          :ok | {:error, [BeamLang.Error.t()]}
+  defp require_main_params([%{name: "args", type: type}], _span) do
+    if is_string_list_type?(type) do
+      :ok
+    else
+      span = BeamLang.Span.new("<source>", 0, 0)
+      {:error,
+       [
+         BeamLang.Error.new(
+           :type,
+           "main parameter 'args' must have type [String], got #{type_label(type)}.",
+           span
+         )
+       ]}
+    end
+  end
+
+  defp require_main_params(params, _span) do
+    span = BeamLang.Span.new("<source>", 0, 0)
+
+    cond do
+      length(params) == 0 ->
+        {:error,
+         [
+           BeamLang.Error.new(
+             :type,
+             "main must have exactly one parameter 'args: [String]'.",
+             span
+           )
+         ]}
+
+      length(params) > 1 ->
+        {:error,
+         [
+           BeamLang.Error.new(
+             :type,
+             "main must have exactly one parameter 'args: [String]', got #{length(params)} parameters.",
+             span
+           )
+         ]}
+
+      true ->
+        [%{name: name}] = params
+
+        {:error,
+         [
+           BeamLang.Error.new(
+             :type,
+             "main parameter must be named 'args', got '#{name}'.",
+             span
+           )
+         ]}
+    end
+  end
+
+  @spec is_string_list_type?(BeamLang.AST.type_name()) :: boolean()
+  defp is_string_list_type?({:generic, {:named, "List"}, [:String]}), do: true
+  defp is_string_list_type?(_), do: false
 
   @spec typecheck_return(BeamLang.AST.type_name(), BeamLang.AST.block(), map(), map(), map()) ::
           :ok | {:error, [BeamLang.Error.t()]}

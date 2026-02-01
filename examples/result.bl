@@ -5,7 +5,7 @@ fn divide(a: number, b: number) -> number!String {
     return!ok a / b;
 }
 
-fn main() -> number {
+fn main(args: [String]) -> number {
     let div = divide(10, 0);
     println(typeof(div));
     match (div) {

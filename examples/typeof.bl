@@ -10,7 +10,7 @@ type User {
     name: String
 }
 
-fn main() -> number {
+fn main(args: [String]) -> number {
     println(typeof(10));
     println(typeof("hi"));
 

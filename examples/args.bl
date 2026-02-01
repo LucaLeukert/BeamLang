@@ -1,0 +1,16 @@
+fn main(args: [String]) -> number {
+    let count = args->length();
+    println("Number of arguments:");
+    print_number(count);
+    
+    for (arg in args->iter()) {
+        println(arg);
+    }
+    
+    return 0;
+}
+
+fn print_number(n: number) -> void {
+    let s = to_string(n);
+    println(s);
+}

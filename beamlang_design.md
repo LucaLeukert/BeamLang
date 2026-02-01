@@ -210,7 +210,7 @@ export fn add(left: number, right: number) -> number {
 // use_math.bl
 import math.{Pair, add};
 
-fn main() -> number {
+fn main(args: [String]) -> number {
     let pair: Pair = { left = 2, right = 3 };
     return add(pair->left, pair->right);
 }
@@ -219,7 +219,7 @@ fn main() -> number {
 Namespace access is supported with `module::name`:
 
 ```beamlang
-fn main() -> number {
+fn main(args: [String]) -> number {
     return math::add(1, 2);
 }
 ```
@@ -235,7 +235,7 @@ You can also create aliases for modules:
 ```beamlang
 import math as m;
 
-fn main() -> number {
+fn main(args: [String]) -> number {
     return m::add(1, 2);
 }
 ```
@@ -432,7 +432,7 @@ fn helper() -> number {
 }
 
 // Main entry point
-fn main() -> number {
+fn main(args: [String]) -> number {
     println("Hello, BeamLang!");
     return 0;
 }

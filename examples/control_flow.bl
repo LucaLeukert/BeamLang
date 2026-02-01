@@ -1,4 +1,4 @@
-fn main() -> number {
+fn main(args: [String]) -> number {
     let value = 3;
 
     if (value == 1) {

@@ -14,10 +14,10 @@ defmodule BeamLang.Runtime do
     end
   end
 
-  @spec load_and_run(atom(), binary()) :: {:ok, term()} | {:error, map()}
-  def load_and_run(module, binary) do
+  @spec load_and_run(atom(), binary(), list()) :: {:ok, term()} | {:error, map()}
+  def load_and_run(module, binary, args \\ []) do
     case :code.load_binary(module, ~c"beamlang_program.beam", binary) do
-      {:module, ^module} -> {:ok, apply(module, :main, [])}
+      {:module, ^module} -> {:ok, apply(module, :main, [args])}
       {:error, reason} -> {:error, %{message: "Failed to load compiled module: #{inspect(reason)}"}}
     end
   end
@@ -179,6 +179,33 @@ defmodule BeamLang.Runtime do
 
   @spec list_concat(list(), list()) :: list()
   def list_concat(left, right), do: left ++ right
+
+  @spec list_iter(list()) :: map()
+  def list_iter(list) do
+    %{
+      data: list,
+      next: fn data -> iterator_next_data(data) end,
+      map: fn data, mapper -> iterator_map_data(data, mapper) end,
+      fold: fn data, init, folder -> iterator_fold_data(data, init, folder) end,
+      filter: fn data, predicate -> iterator_filter_data(data, predicate) end,
+      __beamlang_type__: ~c"Iterator<any>"
+    }
+  end
+
+  @spec list_map(list(), function()) :: list()
+  def list_map(list, mapper) do
+    Enum.map(list, mapper)
+  end
+
+  @spec list_filter(list(), function()) :: list()
+  def list_filter(list, predicate) do
+    Enum.filter(list, predicate)
+  end
+
+  @spec list_fold(list(), term(), function()) :: term()
+  def list_fold(list, initial, folder) do
+    Enum.reduce(list, initial, folder)
+  end
 
   @spec println(term()) :: :ok
   def println(value) do

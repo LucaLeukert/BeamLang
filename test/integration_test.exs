@@ -5,7 +5,7 @@ defmodule BeamLang.IntegrationTest do
 
   test "compiles and runs main" do
     source = """
-    fn main() -> number {
+    fn main(args: [String]) -> number {
         return 42;
     }
     """
@@ -19,7 +19,7 @@ defmodule BeamLang.IntegrationTest do
         return 1;
     }
 
-    fn main() -> number {
+    fn main(args: [String]) -> number {
         return helper(42);
     }
     """
@@ -33,7 +33,7 @@ defmodule BeamLang.IntegrationTest do
         return 7;
     }
 
-    fn main() -> number {
+    fn main(args: [String]) -> number {
         return helper(1);
     }
     """
@@ -43,7 +43,7 @@ defmodule BeamLang.IntegrationTest do
 
   test "runs stdlib println" do
     source = """
-    fn main() -> number {
+    fn main(args: [String]) -> number {
         println("hello");
         return 0;
     }
@@ -54,7 +54,7 @@ defmodule BeamLang.IntegrationTest do
 
   test "runs let-bound value" do
     source = """
-    fn main() -> number {
+    fn main(args: [String]) -> number {
         let value = 5;
         return value;
     }
@@ -65,7 +65,7 @@ defmodule BeamLang.IntegrationTest do
 
   test "supports mutable reassignment" do
     source = """
-    fn main() -> number {
+    fn main(args: [String]) -> number {
         let mut value = 1;
         value = 3;
         return value;
@@ -77,7 +77,7 @@ defmodule BeamLang.IntegrationTest do
 
   test "supports void return" do
     source = """
-    fn main() -> void {
+    fn main(args: [String]) -> void {
         return;
     }
     """
@@ -93,7 +93,7 @@ defmodule BeamLang.IntegrationTest do
         name: String
     }
 
-    fn main() -> number {
+    fn main(args: [String]) -> number {
         let user: User = { id = 1, name = "Peter" };
         return 1;
     }
@@ -109,7 +109,7 @@ defmodule BeamLang.IntegrationTest do
         name: String
     }
 
-    fn main() -> number {
+    fn main(args: [String]) -> number {
         let user: User = { id = 2, name = "Peter" };
         return user->id;
     }
@@ -125,7 +125,7 @@ defmodule BeamLang.IntegrationTest do
         name: String
     }
 
-    fn main() -> number {
+    fn main(args: [String]) -> number {
         let mut user: User = { id = 1, name = "Peter" };
         user->id = 3;
         return user->id;
@@ -137,7 +137,7 @@ defmodule BeamLang.IntegrationTest do
 
   test "rejects non-i32 main" do
     source = """
-    fn main() -> bool {
+    fn main(args: [String]) -> bool {
         return true;
     }
     """
@@ -148,7 +148,7 @@ defmodule BeamLang.IntegrationTest do
 
   test "runs match expression" do
     source = """
-    fn main() -> number {
+    fn main(args: [String]) -> number {
         return match (1) {
             case 1 if 1 == 1 => 4,
             case _ => 0
@@ -161,7 +161,7 @@ defmodule BeamLang.IntegrationTest do
 
   test "runs if expression" do
     source = """
-    fn main() -> number {
+    fn main(args: [String]) -> number {
         let value = if (true) { 1; } else { 2; };
         return value;
     }
@@ -172,7 +172,7 @@ defmodule BeamLang.IntegrationTest do
 
   test "runs loop with break" do
     source = """
-    fn main() -> number {
+    fn main(args: [String]) -> number {
         loop { break; }
         return 0;
     }
@@ -183,7 +183,7 @@ defmodule BeamLang.IntegrationTest do
 
   test "runs while with false condition" do
     source = """
-    fn main() -> number {
+    fn main(args: [String]) -> number {
         while (false) { break; }
         return 0;
     }
@@ -194,7 +194,7 @@ defmodule BeamLang.IntegrationTest do
 
   test "runs for over iterator" do
     source = """
-    fn main() -> number {
+    fn main(args: [String]) -> number {
         for (item in "hi"->chars()) { break; }
         return 0;
     }
@@ -205,7 +205,7 @@ defmodule BeamLang.IntegrationTest do
 
   test "typeof returns String struct" do
     source = """
-    fn main() -> number {
+    fn main(args: [String]) -> number {
         let t = typeof(10);
         return t->length();
     }

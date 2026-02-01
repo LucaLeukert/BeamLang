@@ -2,6 +2,6 @@ internal fn add(a: number, b: number) -> number {
     return a + b;
 }
 
-fn main() -> number {
+fn main(args: [String]) -> number {
     return add(1, 2);
 }

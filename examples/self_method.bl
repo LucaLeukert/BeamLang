@@ -7,7 +7,7 @@ fn box_get(self: Box) -> number {
     return self->value;
 }
 
-fn main() -> number {
+fn main(args: [String]) -> number {
     let box: Box = { value = 7, get = box_get };
     println(box->get());
     return box->get();

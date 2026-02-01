@@ -20,9 +20,9 @@ defmodule BeamLang.CLI do
       )
 
     case rest do
-      [path] when is_binary(path) ->
+      [path | program_args] when is_binary(path) ->
         if String.ends_with?(path, ".bl") do
-          run_file(path, opts)
+          run_file(path, opts, program_args)
         else
           :ok
         end
@@ -63,9 +63,11 @@ defmodule BeamLang.CLI do
     end
   end
 
-  @spec run_file(binary(), keyword()) :: :ok
-  defp run_file(path, opts) do
+  @spec run_file(binary(), keyword(), [binary()]) :: :ok
+  defp run_file(path, opts, program_args) do
     source = File.read!(path)
+    # Convert Elixir strings to BeamLang strings (charlists)
+    beamlang_args = Enum.map(program_args, &String.to_charlist/1)
 
     case BeamLang.compile_file(path) do
       {:ok, %{entry: entry_module, modules: modules}} ->
@@ -104,7 +106,7 @@ defmodule BeamLang.CLI do
         unless opts[:no_run] do
           case BeamLang.Runtime.load_modules(modules) do
             :ok ->
-              case BeamLang.Runtime.load_and_run(entry_module, elem(List.keyfind(modules, entry_module, 0), 1)) do
+              case BeamLang.Runtime.load_and_run(entry_module, elem(List.keyfind(modules, entry_module, 0), 1), beamlang_args) do
                 {:ok, value} -> IO.puts(value)
                 {:error, %{message: message}} ->
                   IO.puts(:stderr, "Error: #{message}")
