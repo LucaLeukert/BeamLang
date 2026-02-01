@@ -1,7 +1,7 @@
 type Result<Ok, Err> {
-    kind: number,
-    tag: number,
-    value: any,
+    internal kind: number,
+    internal tag: number,
+    internal value: any,
     unwrap: fn(Result<Ok, Err>, Ok) -> Ok,
     map: fn(Result<Ok, Err>, fn(Ok) -> any) -> Result<any, Err>,
     and_then: fn(Result<Ok, Err>, fn(Ok) -> Result<any, Err>) -> Result<any, Err>

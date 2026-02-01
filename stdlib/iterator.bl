@@ -1,5 +1,5 @@
 type Iterator<T> {
-    data: any,
+    internal data: any,
     next: fn(Iterator<T>) -> Optional<T>,
     map: fn(Iterator<T>, fn(T) -> any) -> Iterator<any>,
     filter: fn(Iterator<T>, fn(T) -> bool) -> Iterator<T>,

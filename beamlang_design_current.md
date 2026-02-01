@@ -99,7 +99,7 @@ let user: User = { name = "Ada", age = 30 };
 
 ### Internal Fields
 
-Fields can be marked as `internal` to prevent direct access from outside the type's methods. Internal fields can only be accessed through the type's method functions:
+Fields can be marked as `internal` to prevent direct access from outside the type's methods. Internal fields can only be accessed within method functions of the same type:
 
 ```beamlang
 type List<T> {
@@ -109,8 +109,9 @@ type List<T> {
 ```
 
 When a field is marked `internal`:
-- Direct field access (`list.data`) will result in a compile error
-- Methods defined on the type can access internal fields through the `self` parameter
+- Direct field access (`list.data`) from outside the type will result in a compile error
+- Methods defined on the type can access internal fields via `self` or any other variable of the same type
+- This allows methods like `concat(self, other)` to access `other->data` within the method
 - This enables encapsulation of implementation details in stdlib types
 
 ## Functions

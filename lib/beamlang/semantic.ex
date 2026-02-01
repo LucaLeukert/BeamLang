@@ -682,21 +682,26 @@ defmodule BeamLang.Semantic do
          env,
          _expected
        ) do
-    # Allow access to internal fields when accessing via 'self' (inside method functions)
-    is_self_access = match?({:identifier, %{name: "self"}}, target)
-
     case type_of_expr(target, func_table, type_table, env, nil) do
       {:ok, type} ->
         case struct_type_info(type) do
           {:ok, type_name, args} ->
+            # Allow internal field access if:
+            # 1. Accessing via 'self', OR
+            # 2. We're in a method of the same type (method_type_context matches target type)
+            is_self_access = match?({:identifier, %{name: "self"}}, target)
+            method_type = Map.get(env, :__method_type__)
+            is_same_type_method = method_type != nil and method_type == type_name
+
             case Map.fetch(type_table, type_name) do
               {:ok, %{params: params, fields: field_map}} ->
                 case type_arg_map(params, args) do
                   {:ok, param_map} ->
                     type_fields = substitute_field_types(field_map, param_map)
+                    can_access_internal = is_self_access or is_same_type_method
 
                     case Map.fetch(type_fields, name) do
-                      {:ok, %{type: _field_type, internal: true}} when not is_self_access ->
+                      {:ok, %{type: _field_type, internal: true}} when not can_access_internal ->
                         {:error, {:internal_field, name}}
 
                       {:ok, %{type: field_type, internal: _}} ->
@@ -967,6 +972,9 @@ defmodule BeamLang.Semantic do
         param_type = param_type |> normalize_type() |> replace_type_params(type_params)
         Map.put(acc, param_name, %{type: param_type, mutable: false})
       end)
+
+    # If first param is 'self', track the method type context for internal field access
+    param_env = add_method_type_context(param_env, params)
 
     return_type = return_type |> normalize_type() |> replace_type_params(type_params)
 
@@ -1428,7 +1436,8 @@ defmodule BeamLang.Semantic do
 
             {:ok, %{name: var_name, type: declared, mutable: true, field: field}} ->
               is_self_access = var_name == "self"
-              case resolve_field_type(declared, field, type_table, is_self_access) do
+              method_type = Map.get(acc_env, :__method_type__)
+              case resolve_field_type(declared, field, type_table, is_self_access, method_type) do
                 {:error, err} ->
                   {:cont, {:ok, acc_env, [err | errors]}}
 
@@ -2337,6 +2346,22 @@ defmodule BeamLang.Semantic do
     end)
   end
 
+  # Add method type context to env if first param is 'self'
+  # This allows internal field access for any variable of the same type within method functions
+  defp add_method_type_context(env, [%{name: "self", type: self_type} | _]) do
+    case base_type_name(self_type) do
+      {:ok, type_name} -> Map.put(env, :__method_type__, type_name)
+      :error -> env
+    end
+  end
+
+  defp add_method_type_context(env, _params), do: env
+
+  # Extract base type name from a type (handles generics like List<T>)
+  defp base_type_name({:named, name}), do: {:ok, name}
+  defp base_type_name({:generic, {:named, name}, _}), do: {:ok, name}
+  defp base_type_name(_), do: :error
+
   @spec guard_allowed?(BeamLang.AST.expr()) :: boolean()
   defp guard_allowed?({:binary, %{left: left, right: right}}) do
     guard_operand?(left) and guard_operand?(right)
@@ -2666,11 +2691,15 @@ defmodule BeamLang.Semantic do
      BeamLang.Error.new(:type, "Invalid assignment target.", BeamLang.Span.new("<source>", 0, 0))}
   end
 
-  @spec resolve_field_type(BeamLang.AST.type_name(), binary(), map(), boolean()) ::
+  @spec resolve_field_type(BeamLang.AST.type_name(), binary(), map(), boolean(), binary() | nil) ::
           {:ok, BeamLang.AST.type_name()} | {:error, BeamLang.Error.t()}
-  defp resolve_field_type(type, field, type_table, is_self_access) do
+  defp resolve_field_type(type, field, type_table, is_self_access, method_type) do
     case struct_type_info(type) do
       {:ok, type_name, args} ->
+        # Allow internal field access if accessing via self OR within a method of the same type
+        is_same_type_method = method_type != nil and method_type == type_name
+        can_access_internal = is_self_access or is_same_type_method
+
         case Map.fetch(type_table, type_name) do
           {:ok, %{params: params, fields: field_map}} ->
             case type_arg_map(params, args) do
@@ -2678,7 +2707,7 @@ defmodule BeamLang.Semantic do
                 type_fields = substitute_field_types(field_map, param_map)
 
                 case Map.fetch(type_fields, field) do
-                  {:ok, %{type: _field_type, internal: true}} when not is_self_access ->
+                  {:ok, %{type: _field_type, internal: true}} when not can_access_internal ->
                     {:error,
                      BeamLang.Error.new(
                        :type,

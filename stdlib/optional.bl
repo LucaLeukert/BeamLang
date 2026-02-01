@@ -1,7 +1,7 @@
 type Optional<T> {
-    kind: number,
-    tag: number,
-    value: any,
+    internal kind: number,
+    internal tag: number,
+    internal value: any,
     unwrap: fn(Optional<T>, T) -> T,
     map: fn(Optional<T>, fn(T) -> any) -> Optional<any>,
     and_then: fn(Optional<T>, fn(T) -> Optional<any>) -> Optional<any>,

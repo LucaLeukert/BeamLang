@@ -1,5 +1,5 @@
 type List<T> {
-    data: any,
+    internal data: any,
     length: fn(List<T>) -> number,
     get: fn(List<T>, number) -> T?,
     push: fn(List<T>, T) -> List<T>,
