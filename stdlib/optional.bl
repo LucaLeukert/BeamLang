@@ -8,7 +8,7 @@ type Optional<T> {
     is_present: fn(Optional<T>) -> bool
 }
 
-internal fn optional_some(value: any) -> Optional<any> {
+internal fn optional_some<T>(value: T) -> Optional<T> {
     return { 
         kind = 1, 
         tag = 1, 
@@ -20,7 +20,7 @@ internal fn optional_some(value: any) -> Optional<any> {
     };
 }
 
-internal fn optional_none() -> Optional<any> {
+internal fn optional_none<T>() -> Optional<T> {
     return { 
         kind = 1, 
         tag = 0, 

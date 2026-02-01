@@ -360,14 +360,36 @@ type Result<Ok, Err> {
 ### IO
 
 ```beamlang
-println(value: any) -> void
-print(value: any) -> void
+println<T>(value: T) -> void
+print<T>(value: T) -> void
 ```
 
 ### Type Inspection
 
 ```beamlang
-typeof(value: any) -> String
+typeof<T>(value: T) -> String
+to_string<T>(value: T) -> String
+```
+
+## Standard Library Generic Functions
+
+The stdlib uses generic functions for type-safe APIs:
+
+```beamlang
+// Create typed lists
+fn list_new<T>() -> List<T>
+fn list_of<T>(items: [T]) -> List<T>
+
+// Create typed iterators
+fn iterator_from_list<T>(data: any) -> Iterator<T>
+
+// Print any value
+fn println<T>(value: T) -> void
+fn print<T>(value: T) -> void
+
+// Convert any value to string
+fn to_string<T>(value: T) -> String
+fn typeof<T>(value: T) -> String
 ```
 
 ## External Functions

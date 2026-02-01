@@ -950,6 +950,7 @@ defmodule BeamLang.Codegen do
 
   defp type_label({:named, name}) when is_binary(name), do: name
   defp type_label({:optional, inner}), do: "#{type_label(inner)}?"
+  defp type_label({:type_var, name}) when is_binary(name), do: name
 
   defp type_label({:result, ok_type, err_type}),
     do: "#{type_label(ok_type)}!#{type_label(err_type)}"

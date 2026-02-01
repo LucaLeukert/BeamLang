@@ -7,11 +7,11 @@ type Result<Ok, Err> {
     and_then: fn(Result<Ok, Err>, fn(Ok) -> Result<any, Err>) -> Result<any, Err>
 }
 
-internal fn result_ok(value: any) -> Result<any, any> {
+internal fn result_ok<T, E>(value: T) -> Result<T, E> {
     return { kind = 2, tag = 1, value = value, unwrap = result_unwrap, map = result_map, and_then = result_and_then };
 }
 
-internal fn result_err(value: any) -> Result<any, any> {
+internal fn result_err<T, E>(value: E) -> Result<T, E> {
     return { kind = 2, tag = 0, value = value, unwrap = result_unwrap, map = result_map, and_then = result_and_then };
 }
 

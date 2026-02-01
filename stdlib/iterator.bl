@@ -18,7 +18,7 @@ fn iterator_filter_data(data: any, predicate: fn(any) -> bool) -> any;
 @external(elixir, "BeamLang.Runtime", "iterator_fold_data")
 fn iterator_fold_data(data: any, initial: any, folder: fn(any, any) -> any) -> any;
 
-fn iterator_from_list(data: any) -> Iterator<any> {
+fn iterator_from_list<T>(data: any) -> Iterator<T> {
     return { data = data, next = iterator_next, map = iterator_map, filter = iterator_filter, fold = iterator_fold };
 }
 

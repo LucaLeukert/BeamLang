@@ -41,11 +41,11 @@ fn list_concat_data(left: any, right: any) -> any;
 @external(elixir, "BeamLang.Runtime", "list_empty")
 fn list_empty_data() -> any;
 
-fn list_new() -> List<any> {
+fn list_new<T>() -> List<T> {
     return list_from_data(list_empty_data());
 }
 
-fn list_of(items: any) -> List<any> {
+fn list_of<T>(items: [T]) -> List<T> {
     return list_from_data(items);
 }
 
