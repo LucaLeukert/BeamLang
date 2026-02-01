@@ -529,7 +529,7 @@ defmodule BeamLang.LSP.Server do
       types: index_types(types),
       errors: index_errors(errors),
       methods: index_methods(types),
-      locals: index_locals(functions)
+      locals: index_locals(functions, index_functions(functions))
     }
   end
 
@@ -541,7 +541,7 @@ defmodule BeamLang.LSP.Server do
       types: index_types(types),
       errors: index_errors(errors),
       methods: index_methods(types),
-      locals: index_locals(functions)
+      locals: index_locals(functions, index_functions(functions))
     }
   end
 
@@ -588,7 +588,7 @@ defmodule BeamLang.LSP.Server do
     end)
   end
 
-  defp index_locals(functions) do
+  defp index_locals(functions, func_table) do
     Enum.flat_map(functions, fn {:function, %{params: params, body: body, span: func_span}} ->
       scope_span =
         case body do
@@ -601,7 +601,7 @@ defmodule BeamLang.LSP.Server do
           %{name: name, type: type, span: span, func_span: func_span, scope_span: scope_span, kind: :param}
         end)
 
-      param_entries ++ collect_lets(body, func_span)
+      param_entries ++ collect_lets(body, func_span, func_table)
     end)
   end
 
@@ -1120,88 +1120,119 @@ defmodule BeamLang.LSP.Server do
     end
   end
 
-  defp collect_lets(nil, _func_span), do: []
+  defp collect_lets(nil, _func_span, _func_table), do: []
 
-  defp collect_lets({:block, %{stmts: stmts, span: block_span}}, func_span) do
-    Enum.flat_map(stmts, &collect_from_stmt(&1, func_span, block_span))
+  defp collect_lets({:block, %{stmts: stmts, span: block_span}}, func_span, func_table) do
+    Enum.flat_map(stmts, &collect_from_stmt(&1, func_span, block_span, func_table))
   end
 
-  defp collect_from_stmt({:let, %{name: name, type: type, expr: expr, span: span} = info}, func_span, scope_span) do
+  defp collect_from_stmt({:let, %{name: name, type: type, expr: expr, span: span} = info}, func_span, scope_span, func_table) do
     inferred = Map.get(info, :inferred_type) || type || infer_expr_type(expr)
     [%{name: name, type: inferred, span: span, func_span: func_span, scope_span: scope_span, kind: :let}] ++
-      collect_from_expr(expr, func_span, scope_span)
+      collect_from_expr(expr, func_span, scope_span, func_table)
   end
 
-  defp collect_from_stmt({:for, %{name: name, body: body, span: span}}, func_span, scope_span) do
+  defp collect_from_stmt({:for, %{name: name, body: body, span: span}}, func_span, scope_span, func_table) do
     [%{name: name, type: nil, span: span, func_span: func_span, scope_span: scope_span, kind: :for}] ++
-      collect_lets(body, func_span)
+      collect_lets(body, func_span, func_table)
   end
 
-  defp collect_from_stmt({:if_stmt, %{then_block: then_block, else_branch: else_branch}}, func_span, _scope_span) do
-    collect_lets(then_block, func_span) ++ collect_from_else(else_branch, func_span)
+  defp collect_from_stmt({:if_stmt, %{then_block: then_block, else_branch: else_branch}}, func_span, _scope_span, func_table) do
+    collect_lets(then_block, func_span, func_table) ++ collect_from_else(else_branch, func_span, func_table)
   end
 
-  defp collect_from_stmt({:while, %{body: body}}, func_span, _scope_span), do: collect_lets(body, func_span)
-  defp collect_from_stmt({:loop, %{body: body}}, func_span, _scope_span), do: collect_lets(body, func_span)
-  defp collect_from_stmt({:guard, %{else_block: block}}, func_span, _scope_span), do: collect_lets(block, func_span)
-  defp collect_from_stmt({:expr, %{expr: expr}}, func_span, scope_span), do: collect_from_expr(expr, func_span, scope_span)
-  defp collect_from_stmt(_stmt, _func_span, _scope_span), do: []
+  defp collect_from_stmt({:while, %{body: body}}, func_span, _scope_span, func_table),
+    do: collect_lets(body, func_span, func_table)
 
-  defp collect_from_else(nil, _func_span), do: []
+  defp collect_from_stmt({:loop, %{body: body}}, func_span, _scope_span, func_table),
+    do: collect_lets(body, func_span, func_table)
 
-  defp collect_from_else({:else_block, %{block: block}}, func_span) do
-    collect_lets(block, func_span)
+  defp collect_from_stmt({:guard, %{else_block: block}}, func_span, _scope_span, func_table),
+    do: collect_lets(block, func_span, func_table)
+
+  defp collect_from_stmt({:expr, %{expr: expr}}, func_span, scope_span, func_table),
+    do: collect_from_expr(expr, func_span, scope_span, func_table)
+
+  defp collect_from_stmt(_stmt, _func_span, _scope_span, _func_table), do: []
+
+  defp collect_from_else(nil, _func_span, _func_table), do: []
+
+  defp collect_from_else({:else_block, %{block: block}}, func_span, func_table) do
+    collect_lets(block, func_span, func_table)
   end
 
-  defp collect_from_else({:else_if, %{if: if_stmt}}, func_span) do
-    collect_from_stmt(if_stmt, func_span, nil)
+  defp collect_from_else({:else_if, %{if: if_stmt}}, func_span, func_table) do
+    collect_from_stmt(if_stmt, func_span, nil, func_table)
   end
 
-  defp collect_from_expr(nil, _func_span, _scope_span), do: []
-  defp collect_from_expr({:block_expr, %{block: block}}, func_span, _scope_span), do: collect_lets(block, func_span)
-  defp collect_from_expr({:if_expr, %{then_block: then_block, else_branch: else_branch}}, func_span, _scope_span) do
-    collect_lets(then_block, func_span) ++ collect_from_else(else_branch, func_span)
+  defp collect_from_expr(nil, _func_span, _scope_span, _func_table), do: []
+  defp collect_from_expr({:block_expr, %{block: block}}, func_span, _scope_span, func_table),
+    do: collect_lets(block, func_span, func_table)
+
+  defp collect_from_expr({:if_expr, %{then_block: then_block, else_branch: else_branch}}, func_span, _scope_span, func_table) do
+    collect_lets(then_block, func_span, func_table) ++ collect_from_else(else_branch, func_span, func_table)
   end
 
-  defp collect_from_expr({:match, %{cases: cases}}, func_span, _scope_span) do
+  defp collect_from_expr({:match, %{expr: match_expr, cases: cases}}, func_span, _scope_span, func_table) do
+    match_type = infer_expr_type_with_functions(match_expr, func_table)
+
     Enum.flat_map(cases, fn %{pattern: pattern, body: body, span: case_span} ->
       pattern_locals =
         pattern
-        |> pattern_bindings()
-        |> Enum.map(fn {name, span} ->
-          %{name: name, type: nil, span: span, func_span: func_span, scope_span: case_span, kind: :let}
+        |> pattern_bindings_with_type(match_type)
+        |> Enum.map(fn {name, span, type} ->
+          %{name: name, type: type, span: span, func_span: func_span, scope_span: case_span, kind: :let}
         end)
 
-      pattern_locals ++ collect_from_expr(body, func_span, case_span)
+      pattern_locals ++ collect_from_expr(body, func_span, case_span, func_table)
     end)
   end
 
-  defp collect_from_expr({:call, %{args: args}}, func_span, scope_span) do
-    Enum.flat_map(args, &collect_from_expr(&1, func_span, scope_span))
+  defp collect_from_expr({:call, %{args: args}}, func_span, scope_span, func_table) do
+    Enum.flat_map(args, &collect_from_expr(&1, func_span, scope_span, func_table))
   end
 
-  defp collect_from_expr({:method_call, %{target: target, args: args}}, func_span, scope_span) do
-    collect_from_expr(target, func_span, scope_span) ++ Enum.flat_map(args, &collect_from_expr(&1, func_span, scope_span))
+  defp collect_from_expr({:method_call, %{target: target, args: args}}, func_span, scope_span, func_table) do
+    collect_from_expr(target, func_span, scope_span, func_table) ++
+      Enum.flat_map(args, &collect_from_expr(&1, func_span, scope_span, func_table))
   end
 
-  defp collect_from_expr({:binary, %{left: left, right: right}}, func_span, scope_span) do
-    collect_from_expr(left, func_span, scope_span) ++ collect_from_expr(right, func_span, scope_span)
+  defp collect_from_expr({:binary, %{left: left, right: right}}, func_span, scope_span, func_table) do
+    collect_from_expr(left, func_span, scope_span, func_table) ++
+      collect_from_expr(right, func_span, scope_span, func_table)
   end
 
-  defp collect_from_expr({:struct, %{fields: fields}}, func_span, scope_span) do
-    Enum.flat_map(fields, fn %{expr: expr} -> collect_from_expr(expr, func_span, scope_span) end)
+  defp collect_from_expr({:struct, %{fields: fields}}, func_span, scope_span, func_table) do
+    Enum.flat_map(fields, fn %{expr: expr} -> collect_from_expr(expr, func_span, scope_span, func_table) end)
   end
 
-  defp collect_from_expr(_expr, _func_span, _scope_span), do: []
+  defp collect_from_expr(_expr, _func_span, _scope_span, _func_table), do: []
 
-  defp pattern_bindings({:pat_identifier, %{name: name, span: span}}), do: [{name, span}]
-  defp pattern_bindings({:opt_some_pat, %{name: name, span: span}}), do: [{name, span}]
-  defp pattern_bindings({:res_ok_pat, %{name: name, span: span}}), do: [{name, span}]
-  defp pattern_bindings({:res_err_pat, %{name: name, span: span}}), do: [{name, span}]
-  defp pattern_bindings({:struct_pattern, %{fields: fields}}) do
-    Enum.flat_map(fields, fn %{pattern: pat} -> pattern_bindings(pat) end)
+  defp pattern_bindings_with_type({:pat_identifier, %{name: name, span: span}}, type),
+    do: [{name, span, type}]
+
+  defp pattern_bindings_with_type({:opt_some_pat, %{name: name, span: span}}, {:optional, inner}),
+    do: [{name, span, inner}]
+
+  defp pattern_bindings_with_type({:opt_some_pat, %{name: name, span: span}}, _),
+    do: [{name, span, nil}]
+
+  defp pattern_bindings_with_type({:res_ok_pat, %{name: name, span: span}}, {:result, ok_type, _err_type}),
+    do: [{name, span, ok_type}]
+
+  defp pattern_bindings_with_type({:res_ok_pat, %{name: name, span: span}}, _),
+    do: [{name, span, nil}]
+
+  defp pattern_bindings_with_type({:res_err_pat, %{name: name, span: span}}, {:result, _ok_type, err_type}),
+    do: [{name, span, err_type}]
+
+  defp pattern_bindings_with_type({:res_err_pat, %{name: name, span: span}}, _),
+    do: [{name, span, nil}]
+
+  defp pattern_bindings_with_type({:struct_pattern, %{name: type_name, fields: fields}}, _type) do
+    Enum.flat_map(fields, fn %{pattern: pat} -> pattern_bindings_with_type(pat, {:named, type_name}) end)
   end
-  defp pattern_bindings(_), do: []
+  defp pattern_bindings_with_type(_pattern, _type), do: []
 
   defp infer_expr_type({:integer, _}), do: :number
   defp infer_expr_type({:float, _}), do: :number
@@ -1233,6 +1264,15 @@ defmodule BeamLang.LSP.Server do
   end
 
   defp infer_expr_type(_expr), do: nil
+
+  defp infer_expr_type_with_functions({:call, %{name: name}}, func_table) do
+    case Map.get(func_table, name) do
+      nil -> nil
+      info -> info.return_type
+    end
+  end
+
+  defp infer_expr_type_with_functions(expr, _func_table), do: infer_expr_type(expr)
 
   defp span_contains?(nil, _offset), do: false
   defp span_contains?(%BeamLang.Span{start: start_pos, end: end_pos}, offset) do
