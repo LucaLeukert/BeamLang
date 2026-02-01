@@ -1135,7 +1135,12 @@ defmodule BeamLang.LSP.Server do
   end
 
   defp collect_stmt_locals({:let, %{name: name, type: type, expr: expr, span: span} = info}, func_span, scope_span, func_table, env) do
-    inferred = Map.get(info, :inferred_type) || type || infer_expr_type_with_env(expr, func_table, env)
+    inferred =
+      case Map.get(info, :inferred_type) do
+        nil -> type || infer_expr_type_with_env(expr, func_table, env)
+        :any -> type || infer_expr_type_with_env(expr, func_table, env) || :any
+        other -> other
+      end
     entry = %{name: name, type: inferred, span: span, func_span: func_span, scope_span: scope_span, kind: :let}
     expr_locals = collect_expr_locals(expr, func_span, scope_span, func_table, env)
     {expr_locals ++ [entry], Map.put(env, name, inferred)}
