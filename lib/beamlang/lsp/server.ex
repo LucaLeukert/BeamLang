@@ -998,8 +998,9 @@ defmodule BeamLang.LSP.Server do
           nil ->
             :no_interpolation
 
-          expr_str ->
+          {expr_str, expr_offset} ->
             expr_str = String.trim(expr_str)
+            expr_offset = max(expr_offset, 0)
 
             cond do
               expr_str == "" ->
@@ -1007,10 +1008,22 @@ defmodule BeamLang.LSP.Server do
 
               interpolation_field_access(expr_str) ->
                 {target, field} = interpolation_field_parts(expr_str)
+                arrow_idx =
+                  case :binary.match(expr_str, "->") do
+                    {idx, _} -> idx
+                    :nomatch -> 0
+                  end
 
-                case interpolation_field_info(doc, target, field, offset) do
-                  nil -> {:ok, expr_str}
-                  info -> {:ok, info}
+                if expr_offset <= arrow_idx do
+                  case lookup_hover(doc, target, offset) do
+                    {:ok, info} -> {:ok, info}
+                    _ -> {:ok, target}
+                  end
+                else
+                  case interpolation_field_info(doc, target, field, offset) do
+                    nil -> {:ok, expr_str}
+                    info -> {:ok, info}
+                  end
                 end
 
               identifier = interpolation_identifier(expr_str) ->
@@ -1120,7 +1133,7 @@ defmodule BeamLang.LSP.Server do
 
         cond do
           rel_offset >= expr_start and rel_offset <= expr_end ->
-            expr
+            {expr, rel_offset - expr_start}
 
           true ->
             consumed = byte_size(rest) - byte_size(remaining)
