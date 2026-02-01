@@ -402,9 +402,17 @@ defmodule BeamLang.Codegen do
     # Check if this is an overloaded operator
     case Map.get(info, :operator_info) do
       %{overloaded: true, func_name: func_name} ->
-        # Call the operator function directly
-        all_args = [expr_form(line, left, env), expr_form(line, right, env)]
-        {:call, line, {:atom, line, String.to_atom(func_name)}, all_args}
+        # Check if it's an __op_* field (instance method) or a regular function
+        if String.starts_with?(func_name, "__op_") do
+          # Call the operator method from the left operand's field
+          fun_expr = expr_form(line, {:field, %{target: left, name: func_name}}, env)
+          all_args = [expr_form(line, left, env), expr_form(line, right, env)]
+          {:call, line, fun_expr, all_args}
+        else
+          # Call the operator function directly (naming convention)
+          all_args = [expr_form(line, left, env), expr_form(line, right, env)]
+          {:call, line, {:atom, line, String.to_atom(func_name)}, all_args}
+        end
 
       _ ->
         # Standard operator handling

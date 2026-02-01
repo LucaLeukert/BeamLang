@@ -959,51 +959,51 @@ defmodule BeamLang.Semantic do
   @spec check_operator_overload(atom(), BeamLang.AST.type_name(), BeamLang.AST.type_name(), map(), map()) ::
           {:ok, BeamLang.AST.type_name(), binary()} | :no_overload
   defp check_operator_overload(op, left_type, right_type, type_table, func_table) do
+    # Check if the type has an __op_<opname> field (operator binding from struct literal)
     case get_type_name(left_type) do
       {:ok, type_name} ->
+        op_field_name = "__op_#{op}"
         case Map.fetch(type_table, type_name) do
-          {:ok, %{operators: operators}} when is_map(operators) ->
-            case Map.fetch(operators, op) do
-              {:ok, func_names} ->
-                # Find matching operator function
-                find_matching_operator(func_names, left_type, right_type, func_table)
-
-              :error ->
-                :no_overload
+          {:ok, %{fields: fields}} ->
+            case Map.fetch(fields, op_field_name) do
+              {:ok, %{type: {:fn, [param1, param2], return_type}}} ->
+                if types_match?(param1, normalize_type(left_type)) and
+                     types_match?(param2, normalize_type(right_type)) do
+                  {:ok, return_type, op_field_name}
+                else
+                  :no_overload
+                end
+              _ ->
+                # No operator field, try naming convention
+                check_operator_by_convention(op, left_type, right_type, type_name, func_table)
             end
-
           _ ->
             :no_overload
         end
-
       :error ->
         :no_overload
     end
   end
 
-  @spec find_matching_operator([binary()], BeamLang.AST.type_name(), BeamLang.AST.type_name(), map()) ::
-          {:ok, BeamLang.AST.type_name(), binary()} | :no_overload
-  defp find_matching_operator([], _left_type, _right_type, _func_table), do: :no_overload
-
-  defp find_matching_operator([func_name | rest], left_type, right_type, func_table) do
-    case Map.fetch(func_table, func_name) do
+  # Fallback: Look for operator function by naming convention: TypeName_op_opname
+  defp check_operator_by_convention(op, left_type, right_type, type_name, func_table) do
+    op_func_name = "#{type_name}_op_#{op}"
+    case Map.fetch(func_table, op_func_name) do
       {:ok, func_info} ->
-        # params is a list of normalized types, not maps
         params = func_info.params
         if length(params) == 2 do
           [param1_type, param2_type] = params
           if types_match?(param1_type, normalize_type(left_type)) and
                types_match?(param2_type, normalize_type(right_type)) do
-            {:ok, func_info.return, func_name}
+            {:ok, func_info.return, op_func_name}
           else
-            find_matching_operator(rest, left_type, right_type, func_table)
+            :no_overload
           end
         else
-          find_matching_operator(rest, left_type, right_type, func_table)
+          :no_overload
         end
-
       :error ->
-        find_matching_operator(rest, left_type, right_type, func_table)
+        :no_overload
     end
   end
 
@@ -2124,9 +2124,8 @@ defmodule BeamLang.Semantic do
   defp build_type_table(types) do
     table =
       types
-      |> Enum.reduce(%{}, fn {:type_def, %{name: name, params: params, fields: fields} = type_def}, acc ->
+      |> Enum.reduce(%{}, fn {:type_def, %{name: name, params: params, fields: fields}}, acc ->
         field_order = Enum.map(fields, & &1.name)
-        operators = Map.get(type_def, :operators, [])
 
         field_map =
           Enum.reduce(fields, %{}, fn %{name: fname, type: ftype} = field, f_acc ->
@@ -2134,13 +2133,7 @@ defmodule BeamLang.Semantic do
             Map.put(f_acc, fname, %{type: normalize_type(ftype), internal: internal})
           end)
 
-        operator_map =
-          Enum.reduce(operators, %{}, fn %{op: op, func: func_name}, op_acc ->
-            existing = Map.get(op_acc, op, [])
-            Map.put(op_acc, op, [func_name | existing])
-          end)
-
-        Map.put(acc, name, %{params: params, fields: field_map, field_order: field_order, operators: operator_map})
+        Map.put(acc, name, %{params: params, fields: field_map, field_order: field_order, operators: %{}})
       end)
 
     {:ok, table}

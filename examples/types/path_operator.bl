@@ -1,9 +1,10 @@
 // Example: Operator overloading with Path type
 // The / operator can be used to join path segments
+// Operator binding is defined in the struct literal construction
 
 type Path {
     path: String,
-    operator / = path_join
+    __op_div: fn(Path, String) -> Path
 }
 
 fn path_join(self: Path, segment: String) -> Path {
@@ -14,7 +15,7 @@ fn path_join(self: Path, segment: String) -> Path {
 }
 
 fn path_new(p: String) -> Path {
-    return { path = p };
+    return { path = p, operator / = path_join };
 }
 
 fn main(args: [String]) -> number {

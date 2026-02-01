@@ -104,41 +104,59 @@ let user: User = { name = "Ada", age = 30 };
 
 ### Operator Overloading
 
-Types can define custom behavior for operators using the `operator` keyword. Each operator definition maps an operator symbol to a function name. The function must take two arguments (the left and right operands) and return a result.
+Types can define custom behavior for operators. The operator implementation is bound during struct construction using the `operator` keyword. The type definition declares the operator field type, and the struct literal binds the implementation function.
 
 ```beamlang
 type Path {
     path: String,
-    operator / = path_join
+    __op_div: fn(Path, String) -> Path  // Operator field declaration
 }
 
 fn path_join(self: Path, segment: String) -> Path {
+    return { path = self->path + "/" + segment, operator / = path_join };
+}
+
+fn path_new(p: String) -> Path {
+    return { path = p, operator / = path_join };  // Bind operator implementation
+}
+```
+
+The `operator / = func_name` syntax in the struct literal binds the operator to an implementation function. Supported operators:
+
+| Operator | Field Name  | Description        |
+|----------|-------------|--------------------|
+| `+`      | `__op_add`  | Addition           |
+| `-`      | `__op_sub`  | Subtraction        |
+| `*`      | `__op_mul`  | Multiplication     |
+| `/`      | `__op_div`  | Division           |
+| `%`      | `__op_mod`  | Modulo             |
+| `==`     | `__op_eq`   | Equality           |
+| `!=`     | `__op_neq`  | Inequality         |
+| `<`      | `__op_lt`   | Less than          |
+| `>`      | `__op_gt`   | Greater than       |
+| `<=`     | `__op_lte`  | Less or equal      |
+| `>=`     | `__op_gte`  | Greater or equal   |
+
+**Alternative: Naming Convention**
+
+Instead of struct-level binding, you can use the naming convention `TypeName_op_opname`:
+
+```beamlang
+type Path {
+    path: String
+}
+
+fn Path_op_div(self: Path, segment: String) -> Path {
     return { path = self->path + "/" + segment };
 }
 ```
 
-The `operator` declaration specifies which function to call when the operator is used with the type as the left operand. Supported operators:
-
-| Operator | Description        |
-|----------|--------------------|
-| `+`      | Addition           |
-| `-`      | Subtraction        |
-| `*`      | Multiplication     |
-| `/`      | Division           |
-| `%`      | Modulo             |
-| `==`     | Equality           |
-| `!=`     | Inequality         |
-| `<`      | Less than          |
-| `>`      | Greater than       |
-| `<=`     | Less or equal      |
-| `>=`     | Greater or equal   |
-
-Example with Path type:
+Example usage:
 
 ```beamlang
 type Path {
     path: String,
-    operator / = path_join
+    __op_div: fn(Path, String) -> Path
 }
 
 fn path_join(self: Path, segment: String) -> Path {
@@ -149,7 +167,7 @@ fn path_join(self: Path, segment: String) -> Path {
 }
 
 fn path_new(p: String) -> Path {
-    return { path = p };
+    return { path = p, operator / = path_join };
 }
 
 fn main(args: [String]) -> number {

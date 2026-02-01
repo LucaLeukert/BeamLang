@@ -666,11 +666,11 @@ defmodule BeamLang.ParserTest do
     source = """
     type Path {
         path: String,
-        operator / = path_join
+        __op_div: fn(Path, String) -> Path
     }
 
     fn path_join(self: Path, segment: String) -> Path {
-        return { path = "test" };
+        return { path = "test", operator / = path_join };
     }
 
     fn main(args: [String]) -> number {
@@ -682,27 +682,19 @@ defmodule BeamLang.ParserTest do
     {:ok, ast} = Parser.parse(tokens)
 
     assert {:program, %{types: [type_def], functions: _}} = ast
-    assert {:type_def, %{name: "Path", fields: fields, operators: operators}} = type_def
-    assert length(fields) == 1
-    assert length(operators) == 1
-    [op] = operators
-    assert op.op == :div
-    assert op.func == "path_join"
+    assert {:type_def, %{name: "Path", fields: fields}} = type_def
+    assert length(fields) == 2  # path and __op_div
   end
 
-  test "parses type with multiple operator overloads" do
+  test "parses struct literal with operator binding" do
     source = """
     type Vec2 {
         x: number,
         y: number,
-        operator + = vec2_add,
-        operator - = vec2_sub,
-        operator * = vec2_mul
+        __op_add: fn(Vec2, Vec2) -> Vec2
     }
 
-    fn vec2_add(a: Vec2, b: Vec2) -> Vec2 { return { x = 0, y = 0 }; }
-    fn vec2_sub(a: Vec2, b: Vec2) -> Vec2 { return { x = 0, y = 0 }; }
-    fn vec2_mul(a: Vec2, b: number) -> Vec2 { return { x = 0, y = 0 }; }
+    fn vec2_add(a: Vec2, b: Vec2) -> Vec2 { return { x = 0, y = 0, operator + = vec2_add }; }
 
     fn main(args: [String]) -> number {
         return 0;
@@ -712,13 +704,15 @@ defmodule BeamLang.ParserTest do
     {:ok, tokens} = Lexer.tokenize(source)
     {:ok, ast} = Parser.parse(tokens)
 
-    assert {:program, %{types: [type_def], functions: _}} = ast
-    assert {:type_def, %{name: "Vec2", fields: fields, operators: operators}} = type_def
-    assert length(fields) == 2  # x, y
-    assert length(operators) == 3
-    ops_by_name = Enum.map(operators, & &1.op)
-    assert :add in ops_by_name
-    assert :sub in ops_by_name
-    assert :mul in ops_by_name
+    assert {:program, %{types: [type_def], functions: functions}} = ast
+    assert {:type_def, %{name: "Vec2", fields: fields}} = type_def
+    assert length(fields) == 3  # x, y, __op_add
+    
+    # Check that the struct literal has the operator binding
+    [{:function, %{body: {:block, %{stmts: [{:return, %{expr: {:struct, struct_info}}}]}}}}, _] = functions
+    assert length(struct_info.operators) == 1
+    [op] = struct_info.operators
+    assert op.op == :add
+    assert op.func == "vec2_add"
   end
 end
