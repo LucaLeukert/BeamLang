@@ -378,7 +378,7 @@ defmodule BeamLang.Runtime do
 
   @doc """
   Parses command line arguments into a struct.
-  
+
   fields: list of field names (as strings)
   field_types: list of field type atoms (:String, :number, :bool, :char)
   type_label: the BeamLang type name for the result struct
@@ -386,88 +386,89 @@ defmodule BeamLang.Runtime do
   """
   @spec parse_args(list(), list(), charlist(), map()) :: map()
   def parse_args(fields, field_types, type_label, args) do
-    usage = "Usage: " <> Enum.join(fields, " ")
     args_data = args.data
+    field_strs = Enum.map(fields, &to_string/1)
 
     if length(args_data) != length(fields) do
+      missing_fields = Enum.drop(field_strs, length(args_data))
       error_struct = %{
-        message: string_new("Expected #{length(fields)} arguments."),
-        usage: string_new(usage),
+        message: string_new("Expected #{length(fields)} arguments, got #{length(args_data)}."),
+        missing: wrap_as_beamlang_list(Enum.map(missing_fields, &string_new/1)),
         __beamlang_type__: ~c"ArgsError"
       }
       %{tag: 0, value: error_struct}
     else
-      parse_args_fields(fields, field_types, args_data, usage, type_label, %{})
+      parse_args_fields(fields, field_types, args_data, type_label, %{})
     end
   end
 
-  defp parse_args_fields([], [], _args, _usage, type_label, acc) do
+  defp parse_args_fields([], [], _args, type_label, acc) do
     result = Map.put(acc, :__beamlang_type__, type_label)
     %{tag: 1, value: result}
   end
 
-  defp parse_args_fields([field | rest_fields], [type | rest_types], [arg | rest_args], usage, type_label, acc) do
+  defp parse_args_fields([field | rest_fields], [type | rest_types], [arg | rest_args], type_label, acc) do
     # field comes as charlist from Erlang, convert to string then atom
     field_str = to_string(field)
-    case parse_arg_value(arg, type, field_str, usage) do
+    case parse_arg_value(arg, type, field_str) do
       {:ok, value} ->
         acc = Map.put(acc, String.to_atom(field_str), value)
-        parse_args_fields(rest_fields, rest_types, rest_args, usage, type_label, acc)
+        parse_args_fields(rest_fields, rest_types, rest_args, type_label, acc)
 
       {:error, error_struct} ->
         %{tag: 0, value: error_struct}
     end
   end
 
-  defp parse_arg_value(arg, :String, _field, _usage) do
+  defp parse_arg_value(arg, :String, _field) do
     {:ok, to_string_struct(arg)}
   end
 
-  defp parse_arg_value(arg, {:named, "String"}, field, usage) do
-    parse_arg_value(arg, :String, field, usage)
+  defp parse_arg_value(arg, {:named, "String"}, field) do
+    parse_arg_value(arg, :String, field)
   end
 
-  defp parse_arg_value(arg, :number, field, usage) do
+  defp parse_arg_value(arg, :number, field) do
     case parse_number_data(arg) do
       %{tag: 1, value: num} -> {:ok, num}
-      %{tag: 0} -> {:error, args_error_struct(field, usage, "number")}
+      %{tag: 0} -> {:error, args_error_struct(field, "number")}
     end
   end
 
-  defp parse_arg_value(arg, {:named, "number"}, field, usage) do
-    parse_arg_value(arg, :number, field, usage)
+  defp parse_arg_value(arg, {:named, "number"}, field) do
+    parse_arg_value(arg, :number, field)
   end
 
-  defp parse_arg_value(arg, :bool, field, usage) do
+  defp parse_arg_value(arg, :bool, field) do
     case parse_bool_data(arg) do
       %{tag: 1, value: b} -> {:ok, b}
-      %{tag: 0} -> {:error, args_error_struct(field, usage, "bool")}
+      %{tag: 0} -> {:error, args_error_struct(field, "bool")}
     end
   end
 
-  defp parse_arg_value(arg, {:named, "bool"}, field, usage) do
-    parse_arg_value(arg, :bool, field, usage)
+  defp parse_arg_value(arg, {:named, "bool"}, field) do
+    parse_arg_value(arg, :bool, field)
   end
 
-  defp parse_arg_value(arg, :char, field, usage) do
+  defp parse_arg_value(arg, :char, field) do
     case parse_char_data(arg) do
       %{tag: 1, value: ch} -> {:ok, ch}
-      %{tag: 0} -> {:error, args_error_struct(field, usage, "char")}
+      %{tag: 0} -> {:error, args_error_struct(field, "char")}
     end
   end
 
-  defp parse_arg_value(arg, {:named, "char"}, field, usage) do
-    parse_arg_value(arg, :char, field, usage)
+  defp parse_arg_value(arg, {:named, "char"}, field) do
+    parse_arg_value(arg, :char, field)
   end
 
-  defp parse_arg_value(_arg, _type, field, usage) do
-    {:error, args_error_struct(field, usage, "unknown")}
+  defp parse_arg_value(_arg, _type, field) do
+    {:error, args_error_struct(field, "unknown")}
   end
 
-  defp args_error_struct(field, usage, expected) do
+  defp args_error_struct(field, expected) do
     %{
       message: string_new("Invalid value for #{field} (expected #{expected})."),
-      usage: string_new(usage),
+      missing: wrap_as_beamlang_list([]),
       __beamlang_type__: ~c"ArgsError"
     }
   end

@@ -17,7 +17,7 @@ fn main(args: [String]) -> number {
         case!err err => {
             println("Usage: parse_args <path> <enabled>");
             println(err->message);
-            println(err->usage);
+            println("Missing fields: ${err->missing->length()}");
             1;
         }
     };

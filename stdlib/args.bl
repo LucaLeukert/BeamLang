@@ -2,7 +2,7 @@
 
 export error ArgsError {
     message: String,
-    usage: String
+    missing: [String],
 }
 
 // parse_args<T>(args) parses command line arguments into a struct T.
