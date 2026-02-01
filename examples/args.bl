@@ -1,8 +1,10 @@
+// Example demonstrating command-line arguments
 fn main(args: [String]) -> number {
     let count = args->length();
     println("Number of arguments:");
     print_number(count);
     
+    // Iterate over args and print each one
     for (arg in args->iter()) {
         println(arg);
     }
@@ -10,6 +12,10 @@ fn main(args: [String]) -> number {
     return 0;
 }
 
+/**
+ * Helper function to print a number
+ * Converts the number to a string and prints it
+ **/
 fn print_number(n: number) -> void {
     let s = to_string(n);
     println(s);

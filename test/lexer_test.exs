@@ -140,4 +140,53 @@ defmodule BeamLang.LexerTest do
     assert :in_kw in types
     assert :break_kw in types
   end
+
+  test "ignores single-line comments" do
+    source = """
+    // This is a comment
+    fn main(args: [String]) -> number {
+        // Another comment
+        return 42; // inline comment
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    types = Enum.map(tokens, & &1.type)
+
+    # Comments should be ignored, so we should only see the code tokens
+    assert :fn in types
+    assert :return in types
+    refute Enum.any?(tokens, fn t -> String.contains?(to_string(t.value), "comment") end)
+  end
+
+  test "ignores block comments" do
+    source = """
+    /** This is a block comment **/
+    fn main(args: [String]) -> number {
+        /**
+         * Multi-line
+         * block comment
+         **/
+        return 42;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    types = Enum.map(tokens, & &1.type)
+
+    assert :fn in types
+    assert :return in types
+    refute Enum.any?(tokens, fn t -> String.contains?(to_string(t.value), "comment") end)
+  end
+
+  test "reports unterminated block comment" do
+    source = """
+    /** Unterminated comment
+    fn main(args: [String]) -> number {
+        return 42;
+    }
+    """
+
+    assert {:error, %BeamLang.Error{message: "Unterminated block comment."}} = Lexer.tokenize(source)
+  end
 end

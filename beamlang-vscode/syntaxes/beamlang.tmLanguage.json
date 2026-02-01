@@ -21,8 +21,8 @@
         },
         {
           "name": "comment.block.beamlang",
-          "begin": "/\\*",
-          "end": "\\*/"
+          "begin": "/\\*\\*",
+          "end": "\\*\\*/"
         }
       ]
     },

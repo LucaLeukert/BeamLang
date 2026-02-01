@@ -158,6 +158,31 @@ Rules:
 - A method function must have its first parameter named `self`.
 - The name `self` is reserved and cannot be used for other bindings (variables, patterns, loop variables, assignments).
 
+## Comments
+
+BeamLang supports two styles of comments:
+
+### Single-line Comments
+
+```beamlang
+// This is a single-line comment
+let x = 42; // Inline comment
+```
+
+### Block Comments
+
+```beamlang
+/**
+ * This is a block comment.
+ * It can span multiple lines.
+ **/
+fn main(args: [String]) -> number {
+    return 0;
+}
+```
+
+Note: Block comments use `/**` to open and `**/` to close.
+
 ## Control Flow
 
 ### If Statements

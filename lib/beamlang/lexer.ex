@@ -86,6 +86,27 @@ defmodule BeamLang.Lexer do
     do_tokenize(rest, file, offset + 1, line, col + 1, acc)
   end
 
+  # Single-line comment: //
+  @spec do_tokenize(binary(), binary(), non_neg_integer(), non_neg_integer(), non_neg_integer(), [Token.t()]) ::
+          {:ok, [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp do_tokenize(<<"//", rest::binary>>, file, offset, line, _col, acc) do
+    {rest_after, width} = skip_line_comment(rest, 2)
+    do_tokenize(rest_after, file, offset + width, line, 1, acc)
+  end
+
+  # Multi-line comment: /** **/
+  @spec do_tokenize(binary(), binary(), non_neg_integer(), non_neg_integer(), non_neg_integer(), [Token.t()]) ::
+          {:ok, [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp do_tokenize(<<"/**", rest::binary>>, file, offset, line, col, acc) do
+    case skip_block_comment(rest, 3, line) do
+      {:ok, rest_after, width, new_line} ->
+        do_tokenize(rest_after, file, offset + width, new_line, col + width, acc)
+
+      {:error, message} ->
+        {:error, error(message, file, offset, line, col)}
+    end
+  end
+
   @spec do_tokenize(binary(), binary(), non_neg_integer(), non_neg_integer(), non_neg_integer(), [Token.t()]) ::
           {:ok, [Token.t()]} | {:error, BeamLang.Error.t()}
   defp do_tokenize(<<"->", rest::binary>>, file, offset, line, col, acc) do
@@ -308,6 +329,20 @@ defmodule BeamLang.Lexer do
   defp take_while(<<>>, _predicate, acc) do
     {acc, <<>>}
   end
+
+  # Skip single-line comment until newline or EOF
+  @spec skip_line_comment(binary(), non_neg_integer()) :: {binary(), non_neg_integer()}
+  defp skip_line_comment(<<"\n", rest::binary>>, width), do: {rest, width + 1}
+  defp skip_line_comment(<<>>, width), do: {<<>>, width}
+  defp skip_line_comment(<<_, rest::binary>>, width), do: skip_line_comment(rest, width + 1)
+
+  # Skip multi-line comment until **/ or EOF (error)
+  @spec skip_block_comment(binary(), non_neg_integer(), non_neg_integer()) ::
+          {:ok, binary(), non_neg_integer(), non_neg_integer()} | {:error, binary()}
+  defp skip_block_comment(<<"**/", rest::binary>>, width, line), do: {:ok, rest, width + 3, line}
+  defp skip_block_comment(<<>>, _width, _line), do: {:error, "Unterminated block comment."}
+  defp skip_block_comment(<<"\n", rest::binary>>, width, line), do: skip_block_comment(rest, width + 1, line + 1)
+  defp skip_block_comment(<<_, rest::binary>>, width, line), do: skip_block_comment(rest, width + 1, line)
 
   @spec error(binary(), binary(), non_neg_integer(), non_neg_integer(), non_neg_integer()) :: BeamLang.Error.t()
   defp error(message, file, offset, line, col) do
