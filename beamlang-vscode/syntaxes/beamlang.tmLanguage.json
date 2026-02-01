@@ -131,6 +131,29 @@
             {
               "name": "constant.character.escape.beamlang",
               "match": "\\\\(n|r|t|\\\\|\"|')"
+            },
+            {
+              "name": "meta.interpolation.beamlang",
+              "begin": "\\$\\{",
+              "beginCaptures": {
+                "0": { "name": "punctuation.section.interpolation.begin.beamlang" }
+              },
+              "end": "\\}",
+              "endCaptures": {
+                "0": { "name": "punctuation.section.interpolation.end.beamlang" }
+              },
+              "patterns": [
+                { "include": "#keywords" },
+                { "include": "#operators" },
+                { "include": "#types" },
+                { "include": "#functions" },
+                { "include": "#literals" },
+                { "include": "#punctuation" },
+                {
+                  "name": "variable.other.beamlang",
+                  "match": "\\b[a-z_][a-zA-Z0-9_]*\\b"
+                }
+              ]
             }
           ]
         },
