@@ -1200,7 +1200,10 @@ defmodule BeamLang.LSP.Server do
   end
 
   defp collect_expr_locals({:match, %{expr: match_expr, cases: cases}}, func_span, _scope_span, func_table, env) do
-    match_type = infer_expr_type_with_env(match_expr, func_table, env)
+    match_type =
+      match_expr
+      |> infer_expr_type_with_env(func_table, env)
+      |> normalize_match_type()
 
     Enum.flat_map(cases, fn %{pattern: pattern, body: body, span: case_span} ->
       pattern_locals =
@@ -1259,6 +1262,14 @@ defmodule BeamLang.LSP.Server do
     Enum.flat_map(fields, fn %{pattern: pat} -> pattern_bindings_with_type(pat, {:named, type_name}) end)
   end
   defp pattern_bindings_with_type(_pattern, _type), do: []
+
+  defp normalize_match_type({:generic, {:named, "Result"}, [ok_type, err_type]}),
+    do: {:result, ok_type, err_type}
+
+  defp normalize_match_type({:generic, {:named, "Optional"}, [inner]}),
+    do: {:optional, inner}
+
+  defp normalize_match_type(other), do: other
 
   defp infer_expr_type({:integer, _}), do: :number
   defp infer_expr_type({:float, _}), do: :number
