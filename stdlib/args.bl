@@ -1,0 +1,4 @@
+// Argument parsing helpers
+
+@external(elixir, "BeamLang.Runtime", "parse_args")
+fn parse_args<T>(args: [String]) -> T!String;

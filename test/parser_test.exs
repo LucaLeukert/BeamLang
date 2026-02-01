@@ -411,6 +411,23 @@ defmodule BeamLang.ParserTest do
     assert %{guard: {:binary, %{op: :lt}}} = hd(cases)
   end
 
+  test "parses call with type arguments" do
+    source = """
+    fn main(args: [String]) -> number {
+        let parsed = parse_args<Args>(args);
+        return 0;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{functions: [func]}} = ast
+    assert {:function, %{body: {:block, %{stmts: [stmt, _]}}}} = func
+    assert {:let, %{expr: {:call, %{name: "parse_args", type_args: [type_arg], args: [_]}}}} = stmt
+    assert {:named, "Args"} = type_arg
+  end
+
   test "parses if statement" do
     source = """
     fn main() -> number {

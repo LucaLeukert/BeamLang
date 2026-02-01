@@ -25,7 +25,14 @@ defmodule BeamLang.AST do
 
   @type expr ::
           literal()
-          | {:call, %{name: binary(), args: [expr()], span: BeamLang.Span.t()}}
+          | {:call,
+             %{
+               name: binary(),
+               args: [expr()],
+               span: BeamLang.Span.t(),
+               type_args: [type_name()] | nil,
+               type_info: map() | nil
+             }}
           | {:identifier, %{name: binary(), span: BeamLang.Span.t()}}
           | {:lambda, %{params: [func_param()], return_type: type_name(), body: block(), span: BeamLang.Span.t()}}
           | {:method_call, %{target: expr(), name: binary(), args: [expr()], span: BeamLang.Span.t(), target_type: type_name() | nil}}

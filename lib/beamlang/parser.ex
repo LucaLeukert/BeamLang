@@ -922,22 +922,79 @@ defmodule BeamLang.Parser do
 
   @spec parse_call([Token.t()]) ::
           {:ok, BeamLang.AST.expr(), [Token.t()]} | {:error, BeamLang.Error.t()}
-  defp parse_call([%Token{type: :identifier} = mod_tok, %Token{type: :double_colon}, %Token{type: :identifier} = name_tok, %Token{type: :lparen} | rest]) do
-    with {:ok, args, rest1} <- parse_args(rest, []),
-         {:ok, rparen, rest2} <- expect(rest1, :rparen) do
-      span = BeamLang.Span.merge(mod_tok.span, rparen.span)
-      {:ok, {:call, %{name: "#{mod_tok.value}::#{name_tok.value}", args: args, span: span}}, rest2}
+  defp parse_call(
+         [
+           %Token{type: :identifier} = mod_tok,
+           %Token{type: :double_colon},
+           %Token{type: :identifier} = name_tok
+           | rest
+         ]
+       ) do
+    case rest do
+      [%Token{type: :lt} | _] = rest1 ->
+        if call_type_args?(rest1) do
+          with {:ok, type_args, rest2} <- parse_call_type_args(rest1),
+               {:ok, _lparen, rest3} <- expect(rest2, :lparen),
+               {:ok, args, rest4} <- parse_args(rest3, []),
+               {:ok, rparen, rest5} <- expect(rest4, :rparen) do
+            span = BeamLang.Span.merge(mod_tok.span, rparen.span)
+
+            {:ok,
+             {:call,
+              %{name: "#{mod_tok.value}::#{name_tok.value}", args: args, span: span, type_args: type_args}},
+             rest5}
+          end
+        else
+          {:error, error("Expected function call.", mod_tok)}
+        end
+
+      [%Token{type: :lparen} | rest1] ->
+        with {:ok, args, rest2} <- parse_args(rest1, []),
+             {:ok, rparen, rest3} <- expect(rest2, :rparen) do
+          span = BeamLang.Span.merge(mod_tok.span, rparen.span)
+
+          {:ok,
+           {:call,
+            %{name: "#{mod_tok.value}::#{name_tok.value}", args: args, span: span, type_args: []}},
+           rest3}
+        end
+
+      _ ->
+        {:error, error("Expected function call.", mod_tok)}
     end
   end
 
   @spec parse_call([Token.t()]) ::
           {:ok, BeamLang.AST.expr(), [Token.t()]} | {:error, BeamLang.Error.t()}
-  defp parse_call([%Token{type: :identifier} = name_tok, %Token{type: :lparen} = lparen | rest]) do
-    with {:ok, args, rest1} <- parse_args(rest, []),
-         {:ok, rparen, rest2} <- expect(rest1, :rparen) do
-      span = BeamLang.Span.merge(name_tok.span, lparen.span)
-      span = BeamLang.Span.merge(span, rparen.span)
-      {:ok, {:call, %{name: name_tok.value, args: args, span: span}}, rest2}
+  defp parse_call([%Token{type: :identifier} = name_tok | rest]) do
+    case rest do
+      [%Token{type: :lt} | _] = rest1 ->
+        if call_type_args?(rest1) do
+          with {:ok, type_args, rest2} <- parse_call_type_args(rest1),
+               {:ok, _lparen, rest3} <- expect(rest2, :lparen),
+               {:ok, args, rest4} <- parse_args(rest3, []),
+               {:ok, rparen, rest5} <- expect(rest4, :rparen) do
+            span = BeamLang.Span.merge(name_tok.span, rparen.span)
+
+            {:ok,
+             {:call, %{name: name_tok.value, args: args, span: span, type_args: type_args}},
+             rest5}
+          end
+        else
+          {:error, error("Expected function call.", name_tok)}
+        end
+
+      [%Token{type: :lparen} = lparen | rest1] ->
+        with {:ok, args, rest2} <- parse_args(rest1, []),
+             {:ok, rparen, rest3} <- expect(rest2, :rparen) do
+          span = BeamLang.Span.merge(name_tok.span, lparen.span)
+          span = BeamLang.Span.merge(span, rparen.span)
+
+          {:ok, {:call, %{name: name_tok.value, args: args, span: span, type_args: []}}, rest3}
+        end
+
+      _ ->
+        {:error, error("Expected function call.", name_tok)}
     end
   end
 
@@ -946,6 +1003,31 @@ defmodule BeamLang.Parser do
   defp parse_call([%Token{} = tok | _]) do
     {:error, error("Expected function call.", tok)}
   end
+
+  defp parse_call_type_args([%Token{type: :lt} | rest]) do
+    with {:ok, args, rest1} <- parse_type_args(rest, []),
+         {:ok, _gt, rest2} <- expect(rest1, :gt) do
+      {:ok, args, rest2}
+    end
+  end
+
+  defp call_type_args?([%Token{type: :lt} | rest]), do: call_type_args?(rest, 1)
+  defp call_type_args?(_), do: false
+
+  defp call_type_args?([], _depth), do: false
+
+  defp call_type_args?([%Token{type: :lt} | rest], depth), do: call_type_args?(rest, depth + 1)
+
+  defp call_type_args?([%Token{type: :gt} | rest], 1) do
+    case rest do
+      [%Token{type: :lparen} | _] -> true
+      _ -> false
+    end
+  end
+
+  defp call_type_args?([%Token{type: :gt} | rest], depth), do: call_type_args?(rest, depth - 1)
+
+  defp call_type_args?([_ | rest], depth), do: call_type_args?(rest, depth)
 
   @spec parse_params([Token.t()], [BeamLang.AST.func_param()]) ::
           {:ok, [BeamLang.AST.func_param()], [Token.t()]} | {:error, BeamLang.Error.t()}

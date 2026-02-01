@@ -369,98 +369,170 @@ defmodule BeamLang.Semantic do
   end
 
   defp type_of_expr(
-         {:call, %{name: name, args: args, span: call_span}},
+         {:call, %{name: name, args: args, span: call_span} = info},
          func_table,
          type_table,
          env,
          _expected
        ) do
-    case Map.fetch(func_table, name) do
-      {:ok,
-       %{
-         params: param_types,
-         return: return_type,
-         internal: internal,
-         span: func_span,
-         type_params: type_params
-       }} ->
-        if internal_call?(internal, func_span, call_span) do
-          {:error, :internal_function}
-        else
-          if length(param_types) != length(args) do
-            {:error, :wrong_arity}
+    type_args = Map.get(info, :type_args, [])
+
+    parse_args_errors =
+      if name == "parse_args" do
+        parse_args_type_errors(type_args, type_table, call_span)
+      else
+        []
+      end
+
+    if parse_args_errors != [] do
+      {:error, {:call, parse_args_errors}}
+    else
+      case Map.fetch(func_table, name) do
+        {:ok,
+         %{
+           params: param_types,
+           return: return_type,
+           internal: internal,
+           span: func_span,
+           type_params: type_params
+         }} ->
+          if internal_call?(internal, func_span, call_span) do
+            {:error, :internal_function}
           else
-            if type_params != [] do
-              case infer_type_params(param_types, args, func_table, type_table, env) do
-                {:ok, mapping} ->
-                  {:ok, resolved} = substitute_type_vars(return_type, mapping, call_span)
-                  {:ok, resolved}
-
-                {:error, errors} ->
-                  {:error, {:call, errors}}
-              end
-            else
-              errors =
-                Enum.zip(args, param_types)
-                |> Enum.flat_map(fn {arg, expected_type} ->
-                  case type_of_expr(arg, func_table, type_table, env, expected_type) do
-                    {:ok, inferred} ->
-                      if type_compatible?(expected_type, inferred) do
-                        []
-                      else
-                        [
-                          BeamLang.Error.new(
-                            :type,
-                            "Argument type mismatch. Expected #{type_label(expected_type)}, got #{type_label(inferred)}.",
-                            expr_span(arg)
-                          )
-                        ]
-                      end
-
-                    {:error, reason} ->
-                      expr_error(reason, arg)
-                  end
-                end)
-
-              if errors == [], do: {:ok, return_type}, else: {:error, {:call, errors}}
-            end
-          end
-        end
-
-      :error ->
-        case Map.fetch(env, name) do
-          {:ok, %{type: {:fn, param_types, return_type}}} ->
             if length(param_types) != length(args) do
               {:error, :wrong_arity}
             else
-              errors =
-                Enum.zip(args, param_types)
-                |> Enum.flat_map(fn {arg, expected_type} ->
-                  case type_of_expr(arg, func_table, type_table, env, expected_type) do
-                    {:ok, inferred} ->
-                      if type_compatible?(expected_type, inferred) do
-                        []
-                      else
-                        [
-                          BeamLang.Error.new(
-                            :type,
-                            "Argument type mismatch. Expected #{type_label(expected_type)}, got #{type_label(inferred)}.",
-                            expr_span(arg)
-                          )
-                        ]
-                      end
+              case type_args do
+                [] ->
+                  if type_params != [] do
+                    case infer_type_params(param_types, args, func_table, type_table, env) do
+                      {:ok, mapping} ->
+                        {:ok, resolved} = substitute_type_vars(return_type, mapping, call_span)
+                        {:ok, resolved}
 
-                    {:error, reason} ->
-                      expr_error(reason, arg)
+                      {:error, errors} ->
+                        {:error, {:call, errors}}
+                    end
+                  else
+                    errors =
+                      Enum.zip(args, param_types)
+                      |> Enum.flat_map(fn {arg, expected_type} ->
+                        case type_of_expr(arg, func_table, type_table, env, expected_type) do
+                          {:ok, inferred} ->
+                            if type_compatible?(expected_type, inferred) do
+                              []
+                            else
+                              [
+                                BeamLang.Error.new(
+                                  :type,
+                                  "Argument type mismatch. Expected #{type_label(expected_type)}, got #{type_label(inferred)}.",
+                                  expr_span(arg)
+                                )
+                              ]
+                            end
+
+                          {:error, reason} ->
+                            expr_error(reason, arg)
+                        end
+                      end)
+
+                    if errors == [], do: {:ok, return_type}, else: {:error, {:call, errors}}
                   end
-                end)
 
-              if errors == [], do: {:ok, return_type}, else: {:error, {:call, errors}}
+                _ ->
+                  if type_params == [] do
+                    {:error,
+                     {:call,
+                      [
+                        BeamLang.Error.new(
+                          :type,
+                          "Type arguments provided to non-generic function.",
+                          call_span
+                        )
+                      ]}}
+                  else
+                    normalized_args = Enum.map(type_args, &normalize_type/1)
+
+                    case type_arg_map(type_params, normalized_args) do
+                      :error ->
+                        {:error,
+                         {:call,
+                          [
+                            BeamLang.Error.new(
+                              :type,
+                              "Type argument count mismatch. Expected #{length(type_params)}, got #{length(normalized_args)}.",
+                              call_span
+                            )
+                          ]}}
+
+                      {:ok, mapping} ->
+                        param_types = Enum.map(param_types, &substitute_type(&1, mapping))
+                        return_type = substitute_type(return_type, mapping)
+
+                        errors =
+                          Enum.zip(args, param_types)
+                          |> Enum.flat_map(fn {arg, expected_type} ->
+                            case type_of_expr(arg, func_table, type_table, env, expected_type) do
+                              {:ok, inferred} ->
+                                if type_compatible?(expected_type, inferred) do
+                                  []
+                                else
+                                  [
+                                    BeamLang.Error.new(
+                                      :type,
+                                      "Argument type mismatch. Expected #{type_label(expected_type)}, got #{type_label(inferred)}.",
+                                      expr_span(arg)
+                                    )
+                                  ]
+                                end
+
+                              {:error, reason} ->
+                                expr_error(reason, arg)
+                            end
+                          end)
+
+                        if errors == [], do: {:ok, return_type}, else: {:error, {:call, errors}}
+                    end
+                  end
+              end
             end
+          end
 
-          _ ->
-            {:error, :unknown_function}
-        end
+        :error ->
+          case Map.fetch(env, name) do
+            {:ok, %{type: {:fn, param_types, return_type}}} ->
+              if length(param_types) != length(args) do
+                {:error, :wrong_arity}
+              else
+                errors =
+                  Enum.zip(args, param_types)
+                  |> Enum.flat_map(fn {arg, expected_type} ->
+                    case type_of_expr(arg, func_table, type_table, env, expected_type) do
+                      {:ok, inferred} ->
+                        if type_compatible?(expected_type, inferred) do
+                          []
+                        else
+                          [
+                            BeamLang.Error.new(
+                              :type,
+                              "Argument type mismatch. Expected #{type_label(expected_type)}, got #{type_label(inferred)}.",
+                              expr_span(arg)
+                            )
+                          ]
+                        end
+
+                      {:error, reason} ->
+                        expr_error(reason, arg)
+                    end
+                  end)
+
+                if errors == [], do: {:ok, return_type}, else: {:error, {:call, errors}}
+              end
+
+            _ ->
+              {:error, :unknown_function}
+          end
+      end
     end
   end
 
@@ -914,6 +986,99 @@ defmodule BeamLang.Semantic do
   end
 
   defp match_exhaustive_for_type?(_type, _patterns), do: false
+
+  defp parse_args_type_errors(type_args, type_table, span) do
+    case parse_args_type_info(type_args, type_table, span) do
+      {:ok, _info} -> []
+      {:error, errors} -> errors
+    end
+  end
+
+  defp parse_args_type_info([type_arg], type_table, span) do
+    case struct_type_info(type_arg) do
+      {:ok, type_name, type_args} ->
+        case Map.fetch(type_table, type_name) do
+          {:ok, %{params: params, fields: fields, field_order: field_order}} ->
+            case type_arg_map(params, type_args) do
+              :error ->
+                {:error,
+                 [
+                   BeamLang.Error.new(
+                     :type,
+                     "Type argument count mismatch. Expected #{length(params)}, got #{length(type_args)}.",
+                     span
+                   )
+                 ]}
+
+              {:ok, param_map} ->
+                field_types =
+                  Enum.map(field_order, fn name ->
+                    %{type: type} = Map.fetch!(fields, name)
+                    substitute_type(type, param_map)
+                  end)
+
+                if Enum.all?(field_types, &string_type?/1) do
+                  {:ok, %{type: type_arg, fields: field_order}}
+                else
+                  {:error,
+                   [
+                     BeamLang.Error.new(
+                       :type,
+                       "parse_args only supports String fields.",
+                       span
+                     )
+                   ]}
+                end
+            end
+
+          :error ->
+            {:error,
+             [
+               BeamLang.Error.new(
+                 :type,
+                 "Unknown type in parse_args.",
+                 span
+               )
+             ]}
+        end
+
+      _ ->
+        {:error,
+         [
+           BeamLang.Error.new(
+             :type,
+             "parse_args requires a struct type argument.",
+             span
+           )
+         ]}
+    end
+  end
+
+  defp parse_args_type_info([], _type_table, span) do
+    {:error,
+     [
+       BeamLang.Error.new(
+         :type,
+         "parse_args requires a type argument.",
+         span
+       )
+     ]}
+  end
+
+  defp parse_args_type_info(_other, _type_table, span) do
+    {:error,
+     [
+       BeamLang.Error.new(
+         :type,
+         "parse_args expects a single type argument.",
+         span
+       )
+     ]}
+  end
+
+  defp string_type?(:String), do: true
+  defp string_type?({:named, "String"}), do: true
+  defp string_type?(_), do: false
 
   defp method_call_type(target_type, name, args, func_table, type_table, env) do
     error_span =
@@ -1878,13 +2043,15 @@ defmodule BeamLang.Semantic do
     table =
       types
       |> Enum.reduce(%{}, fn {:type_def, %{name: name, params: params, fields: fields}}, acc ->
+        field_order = Enum.map(fields, & &1.name)
+
         field_map =
           Enum.reduce(fields, %{}, fn %{name: fname, type: ftype} = field, f_acc ->
             internal = Map.get(field, :internal, false)
             Map.put(f_acc, fname, %{type: normalize_type(ftype), internal: internal})
           end)
 
-        Map.put(acc, name, %{params: params, fields: field_map})
+        Map.put(acc, name, %{params: params, fields: field_map, field_order: field_order})
       end)
 
     {:ok, table}
@@ -3175,12 +3342,14 @@ defmodule BeamLang.Semantic do
   end
 
   defp annotate_expr(
-         {:call, %{name: name, args: args, span: span}},
+         {:call, %{name: name, args: args, span: span} = info},
          _expected,
          env,
          func_table,
          type_table
        ) do
+    type_args = Map.get(info, :type_args, [])
+
     args =
       case Map.fetch(func_table, name) do
         {:ok, %{params: param_types}} ->
@@ -3198,7 +3367,17 @@ defmodule BeamLang.Semantic do
           end)
       end
 
-    {{:call, %{name: name, args: args, span: span}}, nil}
+    type_info =
+      if name == "parse_args" do
+        case parse_args_type_info(type_args, type_table, span) do
+          {:ok, info} -> info
+          {:error, _} -> nil
+        end
+      else
+        nil
+      end
+
+    {{:call, %{name: name, args: args, span: span, type_args: type_args, type_info: type_info}}, nil}
   end
 
   defp annotate_expr(

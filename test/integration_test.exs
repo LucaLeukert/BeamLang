@@ -185,6 +185,25 @@ defmodule BeamLang.IntegrationTest do
     assert error.message == "Non-exhaustive match. Add a 'case _' or cover all variants."
   end
 
+  test "parse_args returns err on argument mismatch" do
+    source = """
+    type Args {
+        path: String
+    }
+
+    fn main(args: [String]) -> number {
+        let parsed = parse_args<Args>(args);
+
+        return match (parsed) {
+            case!ok _ => 1,
+            case!err _ => 0
+        };
+    }
+    """
+
+    assert {:ok, 0} == BeamLang.run_source(source)
+  end
+
   test "runs if expression" do
     source = """
     fn main(args: [String]) -> number {

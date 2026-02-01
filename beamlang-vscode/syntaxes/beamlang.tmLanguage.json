@@ -75,7 +75,7 @@
       "patterns": [
         {
           "name": "entity.name.function.beamlang",
-          "match": "\\b[a-z_][a-zA-Z0-9_]*(?=\\s*\\()"
+          "match": "\\b[a-z_][a-zA-Z0-9_]*(?=\\s*(<[^>]*>)?\\s*\\()"
         },
         {
           "name": "meta.function.definition.beamlang",

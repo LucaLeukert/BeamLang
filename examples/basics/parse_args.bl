@@ -1,0 +1,21 @@
+// Example demonstrating parse_args<T>(args)
+
+type Args {
+    path: String
+}
+
+fn main(args: [String]) -> number {
+    let parsed = parse_args<Args>(args);
+
+    return match (parsed) {
+        case!ok opts => {
+            println("Path: ${opts->path}");
+            0;
+        },
+        case!err msg => {
+            println("Usage: parse_args <path>");
+            println(msg);
+            1;
+        }
+    };
+}

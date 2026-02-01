@@ -331,6 +331,15 @@ The MVP standard library exposes global functions:
 ```beamlang
 println(message: String) -> void
 print(message: String) -> void
+parse_args<T>(args: [String]) -> T!String
+```
+
+`parse_args` expects a struct type with `String` fields and returns `!err` if the argument count does not match.
+
+Generic functions can be called with explicit type arguments, for example:
+
+```beamlang
+let parsed = parse_args<Args>(args);
 ```
 
 

@@ -391,6 +391,11 @@ type List<T> {
 }
 ```
 
+### Args
+
+`parse_args<T>(args: [String]) -> T!String` parses command-line arguments into a struct literal of `T`.
+For now, `T` must be a struct type with `String` fields, and the argument count must match exactly.
+
 Type alias: `[T]` is equivalent to `List<T>`.
 
 List literal syntax:
@@ -510,6 +515,12 @@ fn print<T>(value: T) -> void
 // Convert any value to string
 fn to_string<T>(value: T) -> String
 fn typeof<T>(value: T) -> String
+```
+
+Generic functions can be called with explicit type arguments:
+
+```beamlang
+let parsed = parse_args<Args>(args);
 ```
 
 ## External Functions

@@ -248,9 +248,13 @@ defmodule BeamLang.ASTPrinter do
   defp format_node({:identifier, %{name: name}}, indent),
     do: [indent_line(indent, "Id #{name}")]
 
-  defp format_node({:call, %{name: name, args: args}}, indent) do
+  defp format_node({:call, %{name: name, args: args} = info}, indent) do
+    type_args = Map.get(info, :type_args, [])
+    type_line = if type_args == [], do: [], else: [indent_line(indent + 2, "TypeArgs #{format_type_args(type_args)}")]
+
     [
       indent_line(indent, "Call #{name}"),
+      type_line,
       args |> Enum.flat_map(&format_node(&1, indent + 2))
     ]
   end
@@ -430,6 +434,10 @@ defmodule BeamLang.ASTPrinter do
     "fn(#{Enum.map_join(params, ", ", &format_type/1)}) -> #{format_type(return_type)}"
   end
   defp format_type(type) when is_atom(type), do: Atom.to_string(type)
+
+  defp format_type_args(args) do
+    Enum.map_join(args, ", ", &format_type/1)
+  end
 
   defp indent_line(indent, text) do
     String.duplicate(" ", indent) <> text

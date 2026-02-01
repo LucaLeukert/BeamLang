@@ -310,6 +310,42 @@ defmodule BeamLang.Codegen do
   end
 
   @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
+  defp expr_form(
+         line,
+         {:call, %{name: "parse_args", args: [args_expr], type_info: %{fields: fields, type: type}}},
+         env
+       ) do
+    span = BeamLang.Span.new("<generated>", 0, 0)
+
+    length_expr =
+      {:method_call, %{target: args_expr, name: "length", args: [], span: span}}
+
+    ok_fields =
+      fields
+      |> Enum.with_index()
+      |> Enum.map(fn {field, index} ->
+        index_expr = {:integer, %{value: index, span: span}}
+
+        get_expr =
+          {:method_call, %{target: args_expr, name: "get", args: [index_expr], span: span}}
+
+        value_expr = {:field, %{target: get_expr, name: "value", span: span}}
+
+        %{name: field, expr: value_expr, span: span}
+      end)
+
+    ok_struct = {:struct, %{fields: ok_fields, type: type, span: span}}
+    ok_expr = {:res_ok, %{expr: ok_struct, span: span, type: nil}}
+    err_expr = {:res_err, %{expr: {:string, %{value: "Invalid arguments.", span: span}}, span: span, type: nil}}
+
+    ok_case = %{pattern: {:integer, %{value: length(fields), span: span}}, guard: nil, body: ok_expr, span: span}
+    err_case = %{pattern: {:wildcard, %{span: span}}, guard: nil, body: err_expr, span: span}
+    match_expr = {:match, %{expr: length_expr, cases: [ok_case, err_case], span: span}}
+
+    expr_form(line, match_expr, env)
+  end
+
+  @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
   defp expr_form(line, {:call, %{name: name, args: args}}, env) do
     case external_call(name, args, line, env) do
       {:ok, form} ->
