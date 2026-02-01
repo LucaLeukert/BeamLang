@@ -2,34 +2,34 @@ type Result<Ok, Err> {
     internal kind: number,
     internal tag: number,
     internal value: any,
-    unwrap: fn(Result<Ok, Err>, Ok) -> Ok,
-    map: fn(Result<Ok, Err>, fn(Ok) -> any) -> Result<any, Err>,
-    and_then: fn(Result<Ok, Err>, fn(Ok) -> Result<any, Err>) -> Result<any, Err>
+    unwrap: fn(Ok!Err, Ok) -> Ok,
+    map: fn(Ok!Err, fn(Ok) -> any) -> any!Err,
+    and_then: fn(Ok!Err, fn(Ok) -> any!Err) -> any!Err
 }
 
-internal fn result_ok<T, E>(value: T) -> Result<T, E> {
+internal fn result_ok<T, E>(value: T) -> T!E {
     return { kind = 2, tag = 1, value = value, unwrap = result_unwrap, map = result_map, and_then = result_and_then };
 }
 
-internal fn result_err<T, E>(value: E) -> Result<T, E> {
+internal fn result_err<T, E>(value: E) -> T!E {
     return { kind = 2, tag = 0, value = value, unwrap = result_unwrap, map = result_map, and_then = result_and_then };
 }
 
-internal fn result_unwrap<T, E>(self: Result<T, E>, fallback: T) -> T {
+internal fn result_unwrap<T, E>(self: T!E, fallback: T) -> T {
     return match (self) {
         case!ok inner => inner,
         case!err _ => fallback
     };
 }
 
-internal fn result_map<T, E, U>(self: Result<T, E>, mapper: fn(T) -> U) -> Result<U, E> {
+internal fn result_map<T, E, U>(self: T!E, mapper: fn(T) -> U) -> U!E {
     return match (self) {
         case!ok inner => result_ok(mapper(inner)),
         case!err err => result_err(err)
     };
 }
 
-internal fn result_and_then<T, E, U>(self: Result<T, E>, mapper: fn(T) -> Result<U, E>) -> Result<U, E> {
+internal fn result_and_then<T, E, U>(self: T!E, mapper: fn(T) -> U!E) -> U!E {
     return match (self) {
         case!ok inner => mapper(inner),
         case!err err => result_err(err)

@@ -13,14 +13,14 @@ error ParseError {
 }
 
 // A function that returns a Result with a custom error type
-fn parse_number(s: String) -> Result<number, ParseError> {
+fn parse_number(s: String) -> number!ParseError {
     // For this example, just return an error
     // In real code, this would parse the string
     return !err { line = 1, message = "Invalid number format" };
 }
 
 // A function that demonstrates error handling
-fn process_file(path: String) -> Result<String, FileError> {
+fn process_file(path: String) -> String!FileError {
     // Simulating a file operation that could fail
     if (path == "") {
         return !err { path = path, message = "Empty path provided" };

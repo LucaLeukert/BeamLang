@@ -1,13 +1,13 @@
 type Iterator<T> {
     internal data: any,
-    next: fn(Iterator<T>) -> Optional<T>,
+    next: fn(Iterator<T>) -> T?,
     map: fn(Iterator<T>, fn(T) -> any) -> Iterator<any>,
     filter: fn(Iterator<T>, fn(T) -> bool) -> Iterator<T>,
     fold: fn(Iterator<T>, any, fn(any, T) -> any) -> any
 }
 
 @external(elixir, "BeamLang.Runtime", "iterator_next_data")
-fn iterator_next_data(data: any) -> Optional<any>;
+fn iterator_next_data(data: any) -> any?;
 
 @external(elixir, "BeamLang.Runtime", "iterator_map_data")
 fn iterator_map_data(data: any, mapper: fn(any) -> any) -> any;
@@ -22,7 +22,7 @@ fn iterator_from_list<T>(data: any) -> Iterator<T> {
     return { data = data, next = iterator_next, map = iterator_map, filter = iterator_filter, fold = iterator_fold };
 }
 
-fn iterator_next<T>(self: Iterator<T>) -> Optional<T> {
+fn iterator_next<T>(self: Iterator<T>) -> T? {
     let raw = iterator_next_data(self->data);
     return match (raw) {
         case?some inner => ?some inner,

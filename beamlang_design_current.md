@@ -54,17 +54,17 @@ type Pair<T> {
 Function definitions:
 
 ```beamlang
-fn test<T>(opt: Optional<T>) -> T {
+fn test<T>(opt: T?) -> T {
     return opt->unwrap(0);
 }
 ```
 
 ### Optional and Result
 
-- Optional syntax: `T?`
-- Result syntax: `Ok!Err`
+- Optional syntax: `T?` (preferred) or `Optional<T>`
+- Result syntax: `Ok!Err` (preferred) or `Result<Ok, Err>`
 
-These are normalized to `Optional<T>` and `Result<Ok, Err>`.
+The shorthand forms are preferred in BeamLang code. They are normalized internally.
 
 Optional literals:
 
@@ -143,8 +143,8 @@ export error IoError {
 Error types are internally converted to regular type definitions with no generic parameters. They can be instantiated using struct literal syntax with type annotation or in a Result error context:
 
 ```beamlang
-// Using error in a Result
-fn parse_number(s: String) -> Result<number, ParseError> {
+// Using error in a Result (prefer Ok!Err syntax)
+fn parse_number(s: String) -> number!ParseError {
     if (/* invalid */) {
         return !err ParseError { line = 1, column = 0, message = "Invalid" };
     }
@@ -330,8 +330,8 @@ The stdlib is split into multiple `.bl` files under `stdlib/`.
 
 ```beamlang
 type Iterator<T> {
-    data: any,
-    next: fn(Iterator<T>) -> Optional<T>,
+    internal data: any,
+    next: fn(Iterator<T>) -> T?,
     map: fn(Iterator<T>, fn(T) -> any) -> Iterator<any>,
     filter: fn(Iterator<T>, fn(T) -> bool) -> Iterator<T>,
     fold: fn(Iterator<T>, any, fn(any, T) -> any) -> any
@@ -353,13 +353,13 @@ type String {
 
 ```beamlang
 type Optional<T> {
-    kind: number,
-    tag: number,
-    value: any,
-    unwrap: fn(Optional<T>, T) -> T,
-    map: fn(Optional<T>, fn(T) -> any) -> Optional<any>,
-    and_then: fn(Optional<T>, fn(T) -> Optional<any>) -> Optional<any>,
-    is_present: fn(Optional<T>) -> bool
+    internal kind: number,
+    internal tag: number,
+    internal value: any,
+    unwrap: fn(T?, T) -> T,
+    map: fn(T?, fn(T) -> any) -> any?,
+    and_then: fn(T?, fn(T) -> any?) -> any?,
+    is_present: fn(T?) -> bool
 }
 ```
 
@@ -367,7 +367,7 @@ type Optional<T> {
 
 ```beamlang
 type List<T> {
-    data: any,
+    internal data: any,
     length: fn(List<T>) -> number,
     get: fn(List<T>, number) -> T?,
     push: fn(List<T>, T) -> List<T>,
@@ -378,6 +378,7 @@ type List<T> {
     map: fn(List<T>, fn(T) -> any) -> List<any>,
     filter: fn(List<T>, fn(T) -> bool) -> List<T>,
     fold: fn(List<T>, any, fn(any, T) -> any) -> any,
+    for_each: fn(List<T>, fn(T) -> void) -> void,
     reverse: fn(List<T>) -> List<T>,
     concat: fn(List<T>, List<T>) -> List<T>
 }
@@ -410,12 +411,12 @@ match (nums->first()) {
 
 ```beamlang
 type Result<Ok, Err> {
-    kind: number,
-    tag: number,
-    value: any,
-    unwrap: fn(Result<Ok, Err>, Ok) -> Ok,
-    map: fn(Result<Ok, Err>, fn(Ok) -> any) -> Result<any, Err>,
-    and_then: fn(Result<Ok, Err>, fn(Ok) -> Result<any, Err>) -> Result<any, Err>
+    internal kind: number,
+    internal tag: number,
+    internal value: any,
+    unwrap: fn(Ok!Err, Ok) -> Ok,
+    map: fn(Ok!Err, fn(Ok) -> any) -> any!Err,
+    and_then: fn(Ok!Err, fn(Ok) -> any!Err) -> any!Err
 }
 ```
 
@@ -424,6 +425,32 @@ type Result<Ok, Err> {
 ```beamlang
 println<T>(value: T) -> void
 print<T>(value: T) -> void
+```
+
+### System
+
+The system module provides file and environment operations:
+
+```beamlang
+// Error type for IO operations (exported for custom error handling)
+error IoError {
+    kind: String,
+    message: String
+}
+
+fn read_file(path: String) -> String!String
+fn file_exists(path: String) -> bool
+fn get_env(name: String) -> String?
+```
+
+Example:
+
+```beamlang
+let result = read_file("config.txt");
+match (result) {
+    case!ok content => println(content),
+    case!err msg => println("Error: ${msg}")
+};
 ```
 
 ### Type Inspection
@@ -448,25 +475,26 @@ fn list_push_method<T>(self: List<T>, item: T) -> List<T>
 fn list_map_method<T, U>(self: List<T>, mapper: fn(T) -> U) -> List<U>
 fn list_filter_method<T>(self: List<T>, predicate: fn(T) -> bool) -> List<T>
 fn list_fold_method<T, U>(self: List<T>, initial: U, folder: fn(U, T) -> U) -> U
+fn list_for_each_method<T>(self: List<T>, callback: fn(T) -> void) -> void
 
 // Iterator methods are generic
 fn iterator_from_list<T>(data: any) -> Iterator<T>
-fn iterator_next<T>(self: Iterator<T>) -> Optional<T>
+fn iterator_next<T>(self: Iterator<T>) -> T?
 fn iterator_map<T, U>(self: Iterator<T>, mapper: fn(T) -> U) -> Iterator<U>
 fn iterator_filter<T>(self: Iterator<T>, predicate: fn(T) -> bool) -> Iterator<T>
 fn iterator_fold<T, U>(self: Iterator<T>, initial: U, folder: fn(U, T) -> U) -> U
 
 // Optional methods are generic
-fn optional_some<T>(value: T) -> Optional<T>
-fn optional_none<T>() -> Optional<T>
-fn optional_unwrap<T>(self: Optional<T>, fallback: T) -> T
-fn optional_map<T, U>(self: Optional<T>, mapper: fn(T) -> U) -> Optional<U>
+fn optional_some<T>(value: T) -> T?
+fn optional_none<T>() -> T?
+fn optional_unwrap<T>(self: T?, fallback: T) -> T
+fn optional_map<T, U>(self: T?, mapper: fn(T) -> U) -> U?
 
 // Result methods are generic
-fn result_ok<T, E>(value: T) -> Result<T, E>
-fn result_err<T, E>(value: E) -> Result<T, E>
-fn result_unwrap<T, E>(self: Result<T, E>, fallback: T) -> T
-fn result_map<T, E, U>(self: Result<T, E>, mapper: fn(T) -> U) -> Result<U, E>
+fn result_ok<T, E>(value: T) -> T!E
+fn result_err<T, E>(value: E) -> T!E
+fn result_unwrap<T, E>(self: T!E, fallback: T) -> T
+fn result_map<T, E, U>(self: T!E, mapper: fn(T) -> U) -> U!E
 
 // IO functions are generic
 fn println<T>(value: T) -> void

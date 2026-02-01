@@ -1,5 +1,11 @@
 // System utilities for file and process operations
 
+// Error type for IO operations
+export error IoError {
+    kind: String,
+    message: String
+}
+
 @external(elixir, "BeamLang.Runtime", "file_read")
 fn file_read_data(path: String) -> String!String;
 

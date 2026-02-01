@@ -2,13 +2,13 @@ type Optional<T> {
     internal kind: number,
     internal tag: number,
     internal value: any,
-    unwrap: fn(Optional<T>, T) -> T,
-    map: fn(Optional<T>, fn(T) -> any) -> Optional<any>,
-    and_then: fn(Optional<T>, fn(T) -> Optional<any>) -> Optional<any>,
-    is_present: fn(Optional<T>) -> bool
+    unwrap: fn(T?, T) -> T,
+    map: fn(T?, fn(T) -> any) -> any?,
+    and_then: fn(T?, fn(T) -> any?) -> any?,
+    is_present: fn(T?) -> bool
 }
 
-internal fn optional_some<T>(value: T) -> Optional<T> {
+internal fn optional_some<T>(value: T) -> T? {
     return { 
         kind = 1, 
         tag = 1, 
@@ -20,7 +20,7 @@ internal fn optional_some<T>(value: T) -> Optional<T> {
     };
 }
 
-internal fn optional_none<T>() -> Optional<T> {
+internal fn optional_none<T>() -> T? {
     return { 
         kind = 1, 
         tag = 0, 
@@ -32,25 +32,25 @@ internal fn optional_none<T>() -> Optional<T> {
     };
 }
 
-internal fn optional_is_present<T>(self: Optional<T>) -> bool {
+internal fn optional_is_present<T>(self: T?) -> bool {
     return self->tag == 1;
 }
 
-internal fn optional_unwrap<T>(self: Optional<T>, fallback: T) -> T {
+internal fn optional_unwrap<T>(self: T?, fallback: T) -> T {
     return match (self) {
         case?some inner => inner,
         case?none => fallback
     };
 }
 
-internal fn optional_map<T, U>(self: Optional<T>, mapper: fn(T) -> U) -> Optional<U> {
+internal fn optional_map<T, U>(self: T?, mapper: fn(T) -> U) -> U? {
     return match (self) {
         case?some inner => optional_some(mapper(inner)),
         case?none => optional_none()
     };
 }
 
-internal fn optional_and_then<T, U>(self: Optional<T>, mapper: fn(T) -> Optional<U>) -> Optional<U> {
+internal fn optional_and_then<T, U>(self: T?, mapper: fn(T) -> U?) -> U? {
     return match (self) {
         case?some inner => mapper(inner),
         case?none => optional_none()
