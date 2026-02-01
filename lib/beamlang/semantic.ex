@@ -3349,82 +3349,92 @@ defmodule BeamLang.Semantic do
     expected = normalize_type(expected)
     inferred = normalize_type(inferred)
 
-    case expected do
-      :any ->
+    # any is compatible with everything - allow type inference to proceed
+    cond do
+      expected == :any ->
         {:ok, mapping}
 
-      {:type_var, name} ->
-        case Map.fetch(mapping, name) do
-          :error ->
-            {:ok, Map.put(mapping, name, inferred)}
+      inferred == :any ->
+        {:ok, mapping}
 
-          {:ok, bound} ->
-            if type_compatible?(bound, inferred) do
-              {:ok, mapping}
-            else
-              {:error, {:type_mismatch, bound, inferred}}
-            end
-        end
+      true ->
+        do_unify_types(expected, inferred, mapping)
+    end
+  end
 
-      {:optional, exp_inner} ->
-        case inferred do
-          {:optional, inf_inner} -> unify_types(exp_inner, inf_inner, mapping)
-          _ -> {:error, {:type_mismatch, expected, inferred}}
-        end
+  defp do_unify_types({:type_var, name}, inferred, mapping) do
+    case Map.fetch(mapping, name) do
+      :error ->
+        {:ok, Map.put(mapping, name, inferred)}
 
-      {:result, exp_ok, exp_err} ->
-        case inferred do
-          {:result, inf_ok, inf_err} ->
-            with {:ok, mapping} <- unify_types(exp_ok, inf_ok, mapping),
-                 {:ok, mapping} <- unify_types(exp_err, inf_err, mapping) do
-              {:ok, mapping}
-            end
-
-          _ ->
-            {:error, {:type_mismatch, expected, inferred}}
-        end
-
-      {:generic, exp_base, exp_args} ->
-        case inferred do
-          {:generic, inf_base, inf_args} when length(exp_args) == length(inf_args) ->
-            with {:ok, mapping} <- unify_types(exp_base, inf_base, mapping) do
-              Enum.zip(exp_args, inf_args)
-              |> Enum.reduce_while({:ok, mapping}, fn {exp_arg, inf_arg}, {:ok, acc} ->
-                case unify_types(exp_arg, inf_arg, acc) do
-                  {:ok, next} -> {:cont, {:ok, next}}
-                  {:error, reason} -> {:halt, {:error, reason}}
-                end
-              end)
-            end
-
-          _ ->
-            {:error, {:type_mismatch, expected, inferred}}
-        end
-
-      {:fn, exp_params, exp_ret} ->
-        case inferred do
-          {:fn, inf_params, inf_ret} when length(exp_params) == length(inf_params) ->
-            with {:ok, mapping} <-
-                   Enum.zip(exp_params, inf_params)
-                   |> Enum.reduce_while({:ok, mapping}, fn {exp_param, inf_param}, {:ok, acc} ->
-                     case unify_types(exp_param, inf_param, acc) do
-                       {:ok, next} -> {:cont, {:ok, next}}
-                       {:error, reason} -> {:halt, {:error, reason}}
-                     end
-                   end) do
-              unify_types(exp_ret, inf_ret, mapping)
-            end
-
-          _ ->
-            {:error, {:type_mismatch, expected, inferred}}
-        end
-
-      _ ->
-        if type_compatible?(expected, inferred) do
+      {:ok, bound} ->
+        if type_compatible?(bound, inferred) do
           {:ok, mapping}
         else
-          {:error, {:type_mismatch, expected, inferred}}
+          {:error, {:type_mismatch, bound, inferred}}
         end
+    end
+  end
+
+  defp do_unify_types({:optional, exp_inner}, {:optional, inf_inner}, mapping) do
+    unify_types(exp_inner, inf_inner, mapping)
+  end
+
+  defp do_unify_types({:optional, _} = expected, inferred, _mapping) do
+    {:error, {:type_mismatch, expected, inferred}}
+  end
+
+  defp do_unify_types({:result, exp_ok, exp_err}, {:result, inf_ok, inf_err}, mapping) do
+    with {:ok, mapping} <- unify_types(exp_ok, inf_ok, mapping),
+         {:ok, mapping} <- unify_types(exp_err, inf_err, mapping) do
+      {:ok, mapping}
+    end
+  end
+
+  defp do_unify_types({:result, _, _} = expected, inferred, _mapping) do
+    {:error, {:type_mismatch, expected, inferred}}
+  end
+
+  defp do_unify_types({:generic, exp_base, exp_args}, {:generic, inf_base, inf_args}, mapping)
+       when length(exp_args) == length(inf_args) do
+    with {:ok, mapping} <- unify_types(exp_base, inf_base, mapping) do
+      Enum.zip(exp_args, inf_args)
+      |> Enum.reduce_while({:ok, mapping}, fn {exp_arg, inf_arg}, {:ok, acc} ->
+        case unify_types(exp_arg, inf_arg, acc) do
+          {:ok, next} -> {:cont, {:ok, next}}
+          {:error, reason} -> {:halt, {:error, reason}}
+        end
+      end)
+    end
+  end
+
+  defp do_unify_types({:generic, _, _} = expected, inferred, _mapping) do
+    {:error, {:type_mismatch, expected, inferred}}
+  end
+
+  defp do_unify_types({:fn, exp_params, exp_ret}, {:fn, inf_params, inf_ret}, mapping)
+       when length(exp_params) == length(inf_params) do
+    with {:ok, mapping} <-
+           Enum.zip(exp_params, inf_params)
+           |> Enum.reduce_while({:ok, mapping}, fn {exp_param, inf_param}, {:ok, acc} ->
+             case unify_types(exp_param, inf_param, acc) do
+               {:ok, next} -> {:cont, {:ok, next}}
+               {:error, reason} -> {:halt, {:error, reason}}
+             end
+           end) do
+      unify_types(exp_ret, inf_ret, mapping)
+    end
+  end
+
+  defp do_unify_types({:fn, _, _} = expected, inferred, _mapping) do
+    {:error, {:type_mismatch, expected, inferred}}
+  end
+
+  defp do_unify_types(expected, inferred, mapping) do
+    if type_compatible?(expected, inferred) do
+      {:ok, mapping}
+    else
+      {:error, {:type_mismatch, expected, inferred}}
     end
   end
 

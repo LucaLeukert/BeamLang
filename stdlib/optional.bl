@@ -32,25 +32,25 @@ internal fn optional_none<T>() -> Optional<T> {
     };
 }
 
-internal fn optional_is_present(self: Optional<T>) -> bool {
+internal fn optional_is_present<T>(self: Optional<T>) -> bool {
     return self->tag == 1;
 }
 
-internal fn optional_unwrap(self: Optional<any>, fallback: any) -> any {
+internal fn optional_unwrap<T>(self: Optional<T>, fallback: T) -> T {
     return match (self) {
         case?some inner => inner,
         case?none => fallback
     };
 }
 
-internal fn optional_map(self: Optional<any>, mapper: fn(any) -> any) -> Optional<any> {
+internal fn optional_map<T, U>(self: Optional<T>, mapper: fn(T) -> U) -> Optional<U> {
     return match (self) {
         case?some inner => optional_some(mapper(inner)),
         case?none => optional_none()
     };
 }
 
-internal fn optional_and_then(self: Optional<any>, mapper: fn(any) -> Optional<any>) -> Optional<any> {
+internal fn optional_and_then<T, U>(self: Optional<T>, mapper: fn(T) -> Optional<U>) -> Optional<U> {
     return match (self) {
         case?some inner => mapper(inner),
         case?none => optional_none()

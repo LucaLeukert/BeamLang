@@ -373,17 +373,40 @@ to_string<T>(value: T) -> String
 
 ## Standard Library Generic Functions
 
-The stdlib uses generic functions for type-safe APIs:
+The stdlib is fully generic - all internal methods preserve type information:
 
 ```beamlang
 // Create typed lists
 fn list_new<T>() -> List<T>
 fn list_of<T>(items: [T]) -> List<T>
 
-// Create typed iterators
-fn iterator_from_list<T>(data: any) -> Iterator<T>
+// List methods are generic
+fn list_get_method<T>(self: List<T>, index: number) -> T?
+fn list_push_method<T>(self: List<T>, item: T) -> List<T>
+fn list_map_method<T, U>(self: List<T>, mapper: fn(T) -> U) -> List<U>
+fn list_filter_method<T>(self: List<T>, predicate: fn(T) -> bool) -> List<T>
+fn list_fold_method<T, U>(self: List<T>, initial: U, folder: fn(U, T) -> U) -> U
 
-// Print any value
+// Iterator methods are generic
+fn iterator_from_list<T>(data: any) -> Iterator<T>
+fn iterator_next<T>(self: Iterator<T>) -> Optional<T>
+fn iterator_map<T, U>(self: Iterator<T>, mapper: fn(T) -> U) -> Iterator<U>
+fn iterator_filter<T>(self: Iterator<T>, predicate: fn(T) -> bool) -> Iterator<T>
+fn iterator_fold<T, U>(self: Iterator<T>, initial: U, folder: fn(U, T) -> U) -> U
+
+// Optional methods are generic
+fn optional_some<T>(value: T) -> Optional<T>
+fn optional_none<T>() -> Optional<T>
+fn optional_unwrap<T>(self: Optional<T>, fallback: T) -> T
+fn optional_map<T, U>(self: Optional<T>, mapper: fn(T) -> U) -> Optional<U>
+
+// Result methods are generic
+fn result_ok<T, E>(value: T) -> Result<T, E>
+fn result_err<T, E>(value: E) -> Result<T, E>
+fn result_unwrap<T, E>(self: Result<T, E>, fallback: T) -> T
+fn result_map<T, E, U>(self: Result<T, E>, mapper: fn(T) -> U) -> Result<U, E>
+
+// IO functions are generic
 fn println<T>(value: T) -> void
 fn print<T>(value: T) -> void
 

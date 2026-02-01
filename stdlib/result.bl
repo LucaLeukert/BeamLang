@@ -15,21 +15,21 @@ internal fn result_err<T, E>(value: E) -> Result<T, E> {
     return { kind = 2, tag = 0, value = value, unwrap = result_unwrap, map = result_map, and_then = result_and_then };
 }
 
-internal fn result_unwrap(self: Result<any, any>, fallback: any) -> any {
+internal fn result_unwrap<T, E>(self: Result<T, E>, fallback: T) -> T {
     return match (self) {
         case!ok inner => inner,
         case!err _ => fallback
     };
 }
 
-internal fn result_map(self: Result<any, any>, mapper: fn(any) -> any) -> Result<any, any> {
+internal fn result_map<T, E, U>(self: Result<T, E>, mapper: fn(T) -> U) -> Result<U, E> {
     return match (self) {
         case!ok inner => result_ok(mapper(inner)),
         case!err err => result_err(err)
     };
 }
 
-internal fn result_and_then(self: Result<any, any>, mapper: fn(any) -> Result<any, any>) -> Result<any, any> {
+internal fn result_and_then<T, E, U>(self: Result<T, E>, mapper: fn(T) -> Result<U, E>) -> Result<U, E> {
     return match (self) {
         case!ok inner => mapper(inner),
         case!err err => result_err(err)

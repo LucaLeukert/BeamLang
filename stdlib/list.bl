@@ -49,7 +49,7 @@ fn list_of<T>(items: [T]) -> List<T> {
     return list_from_data(items);
 }
 
-internal fn list_from_data(data: any) -> List<any> {
+internal fn list_from_data<T>(data: any) -> List<T> {
     return {
         data = data,
         length = list_length_method,
@@ -67,56 +67,56 @@ internal fn list_from_data(data: any) -> List<any> {
     };
 }
 
-internal fn list_length_method(self: List<any>) -> number {
+internal fn list_length_method<T>(self: List<T>) -> number {
     return list_length_data(self->data);
 }
 
-internal fn list_get_method(self: List<any>, index: number) -> any? {
+internal fn list_get_method<T>(self: List<T>, index: number) -> T? {
     return list_get_data(self->data, index);
 }
 
-internal fn list_push_method(self: List<any>, item: any) -> List<any> {
+internal fn list_push_method<T>(self: List<T>, item: T) -> List<T> {
     let new_data = list_push_data(self->data, item);
     return list_from_data(new_data);
 }
 
-internal fn list_pop_method(self: List<any>) -> List<any> {
+internal fn list_pop_method<T>(self: List<T>) -> List<T> {
     let new_data = list_pop_data(self->data);
     return list_from_data(new_data);
 }
 
-internal fn list_first_method(self: List<any>) -> any? {
+internal fn list_first_method<T>(self: List<T>) -> T? {
     return list_first_data(self->data);
 }
 
-internal fn list_last_method(self: List<any>) -> any? {
+internal fn list_last_method<T>(self: List<T>) -> T? {
     return list_last_data(self->data);
 }
 
-internal fn list_iter_method(self: List<any>) -> Iterator<any> {
+internal fn list_iter_method<T>(self: List<T>) -> Iterator<T> {
     return iterator_from_list(self->data);
 }
 
-internal fn list_map_method(self: List<any>, mapper: fn(any) -> any) -> List<any> {
+internal fn list_map_method<T, U>(self: List<T>, mapper: fn(T) -> U) -> List<U> {
     let mapped = iterator_map_data(self->data, mapper);
     return list_from_data(mapped);
 }
 
-internal fn list_filter_method(self: List<any>, predicate: fn(any) -> bool) -> List<any> {
+internal fn list_filter_method<T>(self: List<T>, predicate: fn(T) -> bool) -> List<T> {
     let filtered = iterator_filter_data(self->data, predicate);
     return list_from_data(filtered);
 }
 
-internal fn list_fold_method(self: List<any>, initial: any, folder: fn(any, any) -> any) -> any {
+internal fn list_fold_method<T, U>(self: List<T>, initial: U, folder: fn(U, T) -> U) -> U {
     return iterator_fold_data(self->data, initial, folder);
 }
 
-internal fn list_reverse_method(self: List<any>) -> List<any> {
+internal fn list_reverse_method<T>(self: List<T>) -> List<T> {
     let reversed = list_reverse_data(self->data);
     return list_from_data(reversed);
 }
 
-internal fn list_concat_method(self: List<any>, other: List<any>) -> List<any> {
+internal fn list_concat_method<T>(self: List<T>, other: List<T>) -> List<T> {
     let concatenated = list_concat_data(self->data, other->data);
     return list_from_data(concatenated);
 }
