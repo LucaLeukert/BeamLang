@@ -1,0 +1,14 @@
+fn main(args: [String]) -> number {
+    // Iterate over a list literal
+    for (i in [1, 2, 3, 4, 5]) {
+        println(i);
+    }
+    
+    println("---");
+    
+    // Iterate over a range
+    for (i in 1..5) {
+        println(i);
+    }
+    return 0;
+}

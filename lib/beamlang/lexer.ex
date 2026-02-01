@@ -242,6 +242,14 @@ defmodule BeamLang.Lexer do
 
   @spec do_tokenize(binary(), binary(), non_neg_integer(), non_neg_integer(), non_neg_integer(), [Token.t()]) ::
           {:ok, [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp do_tokenize(<<"..", rest::binary>>, file, offset, line, col, acc) do
+    span = BeamLang.Span.new(file, offset, offset + 2)
+    token = %Token{type: :dotdot, value: "..", line: line, col: col, span: span}
+    do_tokenize(rest, file, offset + 2, line, col + 2, [token | acc])
+  end
+
+  @spec do_tokenize(binary(), binary(), non_neg_integer(), non_neg_integer(), non_neg_integer(), [Token.t()]) ::
+          {:ok, [Token.t()]} | {:error, BeamLang.Error.t()}
   defp do_tokenize(<<c, rest::binary>>, file, offset, line, col, acc) do
     case Map.get(@symbols, c) do
       nil ->
@@ -260,8 +268,9 @@ defmodule BeamLang.Lexer do
     {digits, rest} = take_while(binary, fn c -> c in ?0..?9 end)
 
     case rest do
-      <<".", rest2::binary>> ->
-        {frac, rest3} = take_while(rest2, fn c -> c in ?0..?9 end)
+      # Check for float: must be "." followed by digit, not ".." (range)
+      <<".", next, rest2::binary>> when next in ?0..?9 ->
+        {frac, rest3} = take_while(<<next, rest2::binary>>, fn c -> c in ?0..?9 end)
         number = String.to_float("#{digits}.#{frac}") * sign
         width = byte_size(digits) + 1 + byte_size(frac)
         {:float, number, rest3, width}

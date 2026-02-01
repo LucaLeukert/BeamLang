@@ -30,9 +30,8 @@ fn main(args: [String]) -> number {
     return match (parsed) {
         case!ok opts => cat_file(opts->file),
         case!err err => {
-            println("Usage: cat <file>");
-            println(err->message);
-            println(err->usage);
+            let missing  = err->missing->join(", ");
+            println("Missing fields: ${missing}");
             1;
         }
     };

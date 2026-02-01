@@ -589,4 +589,42 @@ defmodule BeamLang.ParserTest do
     assert %{name: "column", type: :number} = Enum.at(fields, 1)
     assert %{name: "message", type: :String} = Enum.at(fields, 2)
   end
+
+  test "parses range expression" do
+    source = """
+    fn main() -> number {
+        for (i in 1..10) {
+            println(i);
+        }
+        return 0;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{functions: [func]}} = ast
+    assert {:function, %{body: {:block, %{stmts: [for_stmt | _]}}}} = func
+    assert {:for, %{name: "i", collection: collection}} = for_stmt
+    assert {:range, %{start: {:integer, %{value: 1}}, end: {:integer, %{value: 10}}}} = collection
+  end
+
+  test "parses for loop over list literal" do
+    source = """
+    fn main() -> number {
+        for (x in [1, 2, 3]) {
+            println(x);
+        }
+        return 0;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{functions: [func]}} = ast
+    assert {:function, %{body: {:block, %{stmts: [for_stmt | _]}}}} = func
+    assert {:for, %{name: "x", collection: {:list_literal, %{elements: elements}}}} = for_stmt
+    assert length(elements) == 3
+  end
 end

@@ -763,6 +763,17 @@ defmodule BeamLang.Semantic do
     end
   end
 
+  defp type_of_expr({:range, %{start: start_expr, end: end_expr, span: span}}, func_table, type_table, env, _expected) do
+    with {:ok, start_type} <- type_of_expr(start_expr, func_table, type_table, env, :number),
+         {:ok, end_type} <- type_of_expr(end_expr, func_table, type_table, env, :number) do
+      if start_type == :number and end_type == :number do
+        {:ok, :range}
+      else
+        {:error, BeamLang.Error.new(:type, "Range bounds must be numbers.", span)}
+      end
+    end
+  end
+
   defp type_of_expr(
          {:field, %{target: target, name: name}},
          func_table,
@@ -2805,6 +2816,8 @@ defmodule BeamLang.Semantic do
   defp iterator_item_type_from_type(type) do
     case normalize_type(type) do
       {:generic, {:named, "Iterator"}, [item_type]} -> {:ok, item_type}
+      {:generic, {:named, "List"}, [item_type]} -> {:ok, item_type}
+      :range -> {:ok, :number}
       _ -> :error
     end
   end
@@ -2831,6 +2844,7 @@ defmodule BeamLang.Semantic do
   defp expr_span({:lambda, %{span: span}}), do: span
   defp expr_span({:method_call, %{span: span}}), do: span
   defp expr_span({:list_literal, %{span: span}}), do: span
+  defp expr_span({:range, %{span: span}}), do: span
 
   @spec type_compatible?(BeamLang.AST.type_name(), BeamLang.AST.type_name()) :: boolean()
   defp type_compatible?(expected, inferred) do

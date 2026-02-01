@@ -588,14 +588,32 @@ defmodule BeamLang.Codegen do
     match_fun = {:match, line, {:var, line, fun_var}, fun_expr}
 
     collection_form =
-      if iterator_type?(collection_type) do
-        expr_form(line, {:field, %{target: collection, name: "data"}}, env)
-      else
-        expr_form(line, collection, env)
+      cond do
+        iterator_type?(collection_type) ->
+          # Iterator: access .data field
+          expr_form(line, {:field, %{target: collection, name: "data"}}, env)
+
+        list_type?(collection_type) ->
+          # List: access .data field
+          expr_form(line, {:field, %{target: collection, name: "data"}}, env)
+
+        collection_type == :range ->
+          # Range: generate list with :lists.seq
+          range_to_list_form(line, collection, env)
+
+        true ->
+          # Raw list or other iterable
+          expr_form(line, collection, env)
       end
 
     call_fun = {:call, line, {:var, line, fun_var}, [collection_form]}
     {{:block, line, [match_fun, call_fun]}, env, counter}
+  end
+
+  defp range_to_list_form(line, {:range, %{start: start_expr, end: end_expr}}, env) do
+    start_form = expr_form(line, start_expr, env)
+    end_form = expr_form(line, end_expr, env)
+    {:call, line, {:remote, line, {:atom, line, :lists}, {:atom, line, :seq}}, [start_form, end_form]}
   end
 
   @spec loop_fun_expr(
@@ -916,6 +934,10 @@ defmodule BeamLang.Codegen do
   defp iterator_type?({:generic, {:named, "Iterator"}, _}), do: true
   defp iterator_type?({:named, "Iterator"}), do: true
   defp iterator_type?(_), do: false
+
+  defp list_type?({:generic, {:named, "List"}, _}), do: true
+  defp list_type?({:named, "List"}), do: true
+  defp list_type?(_), do: false
 
   defp lambda_params_form(params, line) do
     Enum.reduce(params, {[], %{}}, fn %{name: name}, {forms, env} ->

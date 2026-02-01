@@ -673,8 +673,20 @@ defmodule BeamLang.Parser do
   @spec parse_expression([Token.t()]) ::
           {:ok, BeamLang.AST.expr(), [Token.t()]} | {:error, BeamLang.Error.t()}
   defp parse_expression(tokens) do
-    parse_comparison(tokens)
+    with {:ok, left, rest} <- parse_comparison(tokens) do
+      parse_range_tail(left, rest)
+    end
   end
+
+  @spec parse_range_tail(BeamLang.AST.expr(), [Token.t()]) ::
+          {:ok, BeamLang.AST.expr(), [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_range_tail(left, [%Token{type: :dotdot} | rest]) do
+    with {:ok, right, rest2} <- parse_comparison(rest) do
+      span = BeamLang.Span.merge(expr_span(left), expr_span(right))
+      {:ok, {:range, %{start: left, end: right, span: span}}, rest2}
+    end
+  end
+  defp parse_range_tail(left, tokens), do: {:ok, left, tokens}
 
   @spec parse_comparison([Token.t()]) ::
           {:ok, BeamLang.AST.expr(), [Token.t()]} | {:error, BeamLang.Error.t()}
@@ -1518,6 +1530,7 @@ defmodule BeamLang.Parser do
   defp expr_span({:lambda, %{span: span}}), do: span
   defp expr_span({:method_call, %{span: span}}), do: span
   defp expr_span({:list_literal, %{span: span}}), do: span
+  defp expr_span({:range, %{span: span}}), do: span
 
   @spec pattern_span(BeamLang.AST.pattern()) :: BeamLang.Span.t()
   defp pattern_span({:integer, %{span: span}}), do: span
