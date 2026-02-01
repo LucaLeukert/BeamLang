@@ -27,12 +27,18 @@ defmodule BeamLang.Codegen do
     ]
   end
 
+  # Internal stdlib constructors that need to be exported for Runtime use
+  @runtime_required_internals ~w(
+    string_new list_from_data iterator_from_list
+    result_ok result_err optional_some optional_none
+  )
+
   @spec exports([BeamLang.AST.func()]) :: list()
   defp exports(functions) do
     functions
     |> Enum.filter(&function_has_body?/1)
     |> Enum.filter(fn {:function, %{name: name, exported: exported, internal: internal}} ->
-      name == "main" or (exported and not internal)
+      name == "main" or (exported and not internal) or name in @runtime_required_internals
     end)
     |> Enum.map(fn {:function, %{name: name, params: params}} ->
       {String.to_atom(name), length(params)}

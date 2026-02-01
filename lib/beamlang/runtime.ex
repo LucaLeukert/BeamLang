@@ -27,42 +27,12 @@ defmodule BeamLang.Runtime do
 
   @doc """
   Wraps a raw Erlang list into a BeamLang List struct.
-  This mirrors the structure created by stdlib/list.bl's list_from_data.
+  Delegates to the compiled stdlib's list_from_data function.
   """
   @spec wrap_as_beamlang_list(list()) :: map()
   def wrap_as_beamlang_list(data) when is_list(data) do
-    %{
-      data: data,
-      length: &list_length_method/1,
-      get: &list_get_method/2,
-      push: &list_push_method/2,
-      pop: &list_pop_method/1,
-      first: &list_first_method/1,
-      last: &list_last_method/1,
-      iter: &list_iter_method/1,
-      map: &list_map_method/2,
-      filter: &list_filter_method/2,
-      fold: &list_fold_method/3,
-      for_each: &list_for_each_method/2,
-      reverse: &list_reverse_method/1,
-      concat: &list_concat_method/2,
-      __beamlang_type__: ~c"List"
-    }
+    apply(:beamlang_program, :list_from_data, [data])
   end
-
-  defp list_length_method(self), do: list_length(self.data)
-  defp list_get_method(self, index), do: list_get(self.data, index)
-  defp list_push_method(self, item), do: wrap_as_beamlang_list(list_push(self.data, item))
-  defp list_pop_method(self), do: wrap_as_beamlang_list(list_pop(self.data))
-  defp list_first_method(self), do: list_first(self.data)
-  defp list_last_method(self), do: list_last(self.data)
-  defp list_iter_method(self), do: list_iter(self.data)
-  defp list_map_method(self, mapper), do: wrap_as_beamlang_list(list_map(self.data, mapper))
-  defp list_filter_method(self, pred), do: wrap_as_beamlang_list(list_filter(self.data, pred))
-  defp list_fold_method(self, init, folder), do: list_fold(self.data, init, folder)
-  defp list_for_each_method(self, callback), do: list_for_each(self.data, callback)
-  defp list_reverse_method(self), do: wrap_as_beamlang_list(list_reverse(self.data))
-  defp list_concat_method(self, other), do: wrap_as_beamlang_list(list_concat(self.data, other.data))
 
   @spec load_modules([{atom(), binary()}]) :: :ok | {:error, map()}
   def load_modules(modules) when is_list(modules) do
@@ -259,16 +229,22 @@ defmodule BeamLang.Runtime do
   @spec list_concat(list(), list()) :: list()
   def list_concat(left, right), do: left ++ right
 
+  def list_join(lists, separator) do
+    sep_data = string_data(separator) |> to_string()
+    joined =
+      lists
+      |> Enum.map(fn lst ->
+        lst_data = string_data(lst) |> to_string()
+        lst_data
+      end)
+      |> Enum.join(sep_data)
+
+    stdlib_string_new(joined)
+  end
+
   @spec list_iter(list()) :: map()
   def list_iter(list) do
-    %{
-      data: list,
-      next: fn data -> iterator_next_data(data) end,
-      map: fn data, mapper -> iterator_map_data(data, mapper) end,
-      fold: fn data, init, folder -> iterator_fold_data(data, init, folder) end,
-      filter: fn data, predicate -> iterator_filter_data(data, predicate) end,
-      __beamlang_type__: ~c"Iterator<any>"
-    }
+    apply(:beamlang_program, :iterator_from_list, [list])
   end
 
   @spec list_map(list(), function()) :: list()
@@ -306,31 +282,25 @@ defmodule BeamLang.Runtime do
     :ok
   end
 
+  @spec println_raw(term()) :: :ok
+  def println_raw(value) do
+    IO.inspect(value, limit: :infinity)
+    :ok
+  end
+
   # File system operations
   @spec file_read(term()) :: map()
   def file_read(path) do
     path_str = string_data(path) |> to_string()
     case File.read(path_str) do
       {:ok, content} ->
-        # Return Result.ok with String struct (tag=1 for ok)
-        string_struct = %{
-          data: String.to_charlist(content),
-          length: &string_length_data/1,
-          concat: &string_concat_data/2,
-          chars: &string_chars_data/1,
-          __beamlang_type__: ~c"String"
-        }
-        %{kind: 2, tag: 1, value: string_struct}
+        # Return Result.ok with String struct using stdlib functions
+        string_struct = stdlib_string_new(content)
+        apply(:beamlang_program, :result_ok, [string_struct])
       {:error, reason} ->
-        # Return Result.err (tag=0 for err, value contains error)
-        error_msg = %{
-          data: String.to_charlist(to_string(reason)),
-          length: &string_length_data/1,
-          concat: &string_concat_data/2,
-          chars: &string_chars_data/1,
-          __beamlang_type__: ~c"String"
-        }
-        %{kind: 2, tag: 0, value: error_msg}
+        # Return Result.err using stdlib functions
+        error_msg = stdlib_string_new(to_string(reason))
+        apply(:beamlang_program, :result_err, [error_msg])
     end
   end
 
@@ -344,16 +314,10 @@ defmodule BeamLang.Runtime do
   def get_env(name) do
     name_str = string_data(name) |> to_string()
     case System.get_env(name_str) do
-      nil -> %{tag: 0}
+      nil -> apply(:beamlang_program, :optional_none, [])
       value ->
-        string_struct = %{
-          data: String.to_charlist(value),
-          length: &string_length_data/1,
-          concat: &string_concat_data/2,
-          chars: &string_chars_data/1,
-          __beamlang_type__: ~c"String"
-        }
-        %{tag: 1, value: string_struct}
+        string_struct = stdlib_string_new(value)
+        apply(:beamlang_program, :optional_some, [string_struct])
     end
   end
 
@@ -392,11 +356,11 @@ defmodule BeamLang.Runtime do
     if length(args_data) != length(fields) do
       missing_fields = Enum.drop(field_strs, length(args_data))
       error_struct = %{
-        message: string_new("Expected #{length(fields)} arguments, got #{length(args_data)}."),
-        missing: wrap_as_beamlang_list(Enum.map(missing_fields, &string_new/1)),
+        message: stdlib_string_new("Expected #{length(fields)} arguments, got #{length(args_data)}."),
+        missing: wrap_as_beamlang_list(Enum.map(missing_fields, &stdlib_string_new/1)),
         __beamlang_type__: ~c"ArgsError"
       }
-      %{tag: 0, value: error_struct}
+      apply(:beamlang_program, :optional_none, []) |> Map.put(:value, error_struct)
     else
       parse_args_fields(fields, field_types, args_data, type_label, %{})
     end
@@ -467,31 +431,26 @@ defmodule BeamLang.Runtime do
 
   defp args_error_struct(field, expected) do
     %{
-      message: string_new("Invalid value for #{field} (expected #{expected})."),
+      message: stdlib_string_new("Invalid value for #{field} (expected #{expected})."),
       missing: wrap_as_beamlang_list([]),
       __beamlang_type__: ~c"ArgsError"
     }
   end
 
   defp to_string_struct(value) when is_map(value) do
-    if string_map?(value), do: value, else: string_new(inspect(value))
+    if string_map?(value), do: value, else: stdlib_string_new(inspect(value))
   end
 
   defp to_string_struct(value) do
-    string_new(any_to_string_data(value))
+    stdlib_string_new(any_to_string_data(value))
   end
 
-  defp string_new(data) when is_list(data) do
-    %{
-      data: data,
-      length: &string_length_data/1,
-      concat: &string_concat_data/2,
-      chars: &string_chars_data/1,
-      __beamlang_type__: ~c"String"
-    }
+  # Delegates to the compiled stdlib's string_new function
+  defp stdlib_string_new(data) when is_list(data) do
+    apply(:beamlang_program, :string_new, [data])
   end
 
-  defp string_new(data) when is_binary(data) do
-    string_new(String.to_charlist(data))
+  defp stdlib_string_new(data) when is_binary(data) do
+    stdlib_string_new(String.to_charlist(data))
   end
 end
