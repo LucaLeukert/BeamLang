@@ -515,4 +515,48 @@ defmodule BeamLang.ParserTest do
     assert {:function, %{name: "main", params: [param], return_type: :number}} = func
     assert %{name: "args", type: {:generic, {:named, "List"}, [:String]}} = param
   end
+
+  test "parses error definition" do
+    source = """
+    error FileError {
+        path: String,
+        message: String
+    }
+
+    fn main() -> number {
+        return 0;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{errors: [error], functions: [_]}} = ast
+    assert {:error_def, %{name: "FileError", fields: fields, exported: false}} = error
+    assert [%{name: "path", type: :String}, %{name: "message", type: :String}] = fields
+  end
+
+  test "parses exported error definition" do
+    source = """
+    export error ParseError {
+        line: number,
+        column: number,
+        message: String
+    }
+
+    fn main() -> number {
+        return 0;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{errors: [error], functions: [_]}} = ast
+    assert {:error_def, %{name: "ParseError", exported: true, fields: fields}} = error
+    assert length(fields) == 3
+    assert %{name: "line", type: :number} = Enum.at(fields, 0)
+    assert %{name: "column", type: :number} = Enum.at(fields, 1)
+    assert %{name: "message", type: :String} = Enum.at(fields, 2)
+  end
 end

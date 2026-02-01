@@ -18,30 +18,31 @@ defmodule BeamLang.Parser do
   @spec parse_program([Token.t()]) ::
           {:ok, BeamLang.AST.t(), [Token.t()]} | {:error, BeamLang.Error.t()}
   defp parse_program(tokens) do
-    parse_decls(tokens, [], [], [])
+    parse_decls(tokens, [], [], [], [])
   end
 
-  @spec parse_decls([Token.t()], [BeamLang.AST.import()], [BeamLang.AST.type_def()], [BeamLang.AST.func()]) ::
+  @spec parse_decls([Token.t()], [BeamLang.AST.import()], [BeamLang.AST.type_def()], [BeamLang.AST.error_def()], [BeamLang.AST.func()]) ::
           {:ok, BeamLang.AST.t(), [Token.t()]} | {:error, BeamLang.Error.t()}
-  defp parse_decls([], [], [], []) do
+  defp parse_decls([], [], [], [], []) do
     {:error, BeamLang.Error.new(:parser, "Expected at least one declaration.", eof_span("<source>"))}
   end
 
-  defp parse_decls([], imports, types, functions) do
+  defp parse_decls([], imports, types, errors, functions) do
     imports = Enum.reverse(imports)
     types = Enum.reverse(types)
+    errors = Enum.reverse(errors)
     functions = Enum.reverse(functions)
     span = program_span(imports, types, functions)
-    {:ok, {:program, %{module: nil, imports: imports, types: types, functions: functions, span: span}}, []}
+    {:ok, {:program, %{module: nil, imports: imports, types: types, errors: errors, functions: functions, span: span}}, []}
   end
 
-  defp parse_decls([%Token{type: :import_kw} | _] = tokens, imports, types, functions) do
+  defp parse_decls([%Token{type: :import_kw} | _] = tokens, imports, types, errors, functions) do
     with {:ok, import_stmt, rest} <- parse_import(tokens) do
-      parse_decls(rest, [import_stmt | imports], types, functions)
+      parse_decls(rest, [import_stmt | imports], types, errors, functions)
     end
   end
 
-  defp parse_decls([%Token{type: :export_kw} | rest] = tokens, imports, types, functions) do
+  defp parse_decls([%Token{type: :export_kw} | rest] = tokens, imports, types, errors, functions) do
     case rest do
       [%Token{type: :internal_kw} | _] ->
         {:error, error("Internal functions cannot be exported.", hd(rest))}
@@ -49,28 +50,34 @@ defmodule BeamLang.Parser do
       [%Token{type: :type_kw} | _] ->
         with {:ok, _export_tok, rest1} <- expect(tokens, :export_kw),
              {:ok, type_def, rest2} <- parse_type_def(rest1, true) do
-          parse_decls(rest2, imports, [type_def | types], functions)
+          parse_decls(rest2, imports, [type_def | types], errors, functions)
+        end
+
+      [%Token{type: :error_kw} | _] ->
+        with {:ok, _export_tok, rest1} <- expect(tokens, :export_kw),
+             {:ok, error_def, rest2} <- parse_error_def(rest1, true) do
+          parse_decls(rest2, imports, types, [error_def | errors], functions)
         end
 
       [%Token{type: :at} | _] ->
         with {:ok, _export_tok, rest1} <- expect(tokens, :export_kw),
              {:ok, external, rest2} <- parse_external_attr(rest1),
              {:ok, func, rest3} <- parse_function(rest2, external, true, false) do
-          parse_decls(rest3, imports, types, [func | functions])
+          parse_decls(rest3, imports, types, errors, [func | functions])
         end
 
       [%Token{type: :fn} | _] ->
         with {:ok, _export_tok, rest1} <- expect(tokens, :export_kw),
              {:ok, func, rest2} <- parse_function(rest1, nil, true, false) do
-          parse_decls(rest2, imports, types, [func | functions])
+          parse_decls(rest2, imports, types, errors, [func | functions])
         end
 
       _ ->
-        {:error, error("Expected type or fn after export.", hd(tokens))}
+        {:error, error("Expected type, error, or fn after export.", hd(tokens))}
     end
   end
 
-  defp parse_decls([%Token{type: :internal_kw} | rest] = tokens, imports, types, functions) do
+  defp parse_decls([%Token{type: :internal_kw} | rest] = tokens, imports, types, errors, functions) do
     case rest do
       [%Token{type: :type_kw} | _] ->
         {:error, error("Expected fn after internal.", hd(rest))}
@@ -82,13 +89,13 @@ defmodule BeamLang.Parser do
         with {:ok, _internal_tok, rest1} <- expect(tokens, :internal_kw),
              {:ok, external, rest2} <- parse_external_attr(rest1),
              {:ok, func, rest3} <- parse_function(rest2, external, false, true) do
-          parse_decls(rest3, imports, types, [func | functions])
+          parse_decls(rest3, imports, types, errors, [func | functions])
         end
 
       [%Token{type: :fn} | _] ->
         with {:ok, _internal_tok, rest1} <- expect(tokens, :internal_kw),
              {:ok, func, rest2} <- parse_function(rest1, nil, false, true) do
-          parse_decls(rest2, imports, types, [func | functions])
+          parse_decls(rest2, imports, types, errors, [func | functions])
         end
 
       _ ->
@@ -96,22 +103,28 @@ defmodule BeamLang.Parser do
     end
   end
 
-  defp parse_decls([%Token{type: :type_kw} | _] = tokens, imports, types, functions) do
+  defp parse_decls([%Token{type: :type_kw} | _] = tokens, imports, types, errors, functions) do
     with {:ok, type_def, rest} <- parse_type_def(tokens, false) do
-      parse_decls(rest, imports, [type_def | types], functions)
+      parse_decls(rest, imports, [type_def | types], errors, functions)
     end
   end
 
-  defp parse_decls([%Token{type: :at} | _] = tokens, imports, types, functions) do
+  defp parse_decls([%Token{type: :error_kw} | _] = tokens, imports, types, errors, functions) do
+    with {:ok, error_def, rest} <- parse_error_def(tokens, false) do
+      parse_decls(rest, imports, types, [error_def | errors], functions)
+    end
+  end
+
+  defp parse_decls([%Token{type: :at} | _] = tokens, imports, types, errors, functions) do
     with {:ok, external, rest1} <- parse_external_attr(tokens),
          {:ok, func, rest2} <- parse_function(rest1, external, false, false) do
-      parse_decls(rest2, imports, types, [func | functions])
+      parse_decls(rest2, imports, types, errors, [func | functions])
     end
   end
 
-  defp parse_decls(tokens, imports, types, functions) do
+  defp parse_decls(tokens, imports, types, errors, functions) do
     with {:ok, func, rest} <- parse_function(tokens, nil, false, false) do
-      parse_decls(rest, imports, types, [func | functions])
+      parse_decls(rest, imports, types, errors, [func | functions])
     end
   end
 
@@ -1517,6 +1530,42 @@ defmodule BeamLang.Parser do
       span = BeamLang.Span.merge(span, rbrace_span(rest5, rest6))
       {:ok, {:type_def, %{name: name_tok.value, params: params, fields: fields, exported: exported, span: span}}, rest6}
     end
+  end
+
+  @spec parse_error_def([Token.t()], boolean()) ::
+          {:ok, BeamLang.AST.error_def(), [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_error_def(tokens, exported) do
+    with {:ok, error_tok, rest1} <- expect(tokens, :error_kw),
+         {:ok, name_tok, rest2} <- parse_type_def_name(rest1),
+         {:ok, _lbrace, rest3} <- expect(rest2, :lbrace),
+         {:ok, fields, rest4} <- parse_error_fields(rest3, []),
+         {:ok, _rbrace, rest5} <- expect(rest4, :rbrace) do
+      span = BeamLang.Span.merge(error_tok.span, rbrace_span(rest4, rest5))
+      {:ok, {:error_def, %{name: name_tok.value, fields: fields, exported: exported, span: span}}, rest5}
+    end
+  end
+
+  @spec parse_error_fields([Token.t()], [BeamLang.AST.field_def()]) ::
+          {:ok, [BeamLang.AST.field_def()], [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_error_fields([%Token{type: :rbrace} | _] = rest, acc) do
+    {:ok, Enum.reverse(acc), rest}
+  end
+
+  defp parse_error_fields([%Token{type: :identifier} = name_tok | rest], acc) do
+    with {:ok, _colon, rest1} <- expect(rest, :colon),
+         {:ok, {type, type_span}, rest2} <- parse_type_name(rest1) do
+      span = BeamLang.Span.merge(name_tok.span, type_span)
+      field = %{name: name_tok.value, type: type, internal: false, span: span}
+
+      case rest2 do
+        [%Token{type: :comma} | rest3] -> parse_error_fields(rest3, [field | acc])
+        _ -> parse_error_fields(rest2, [field | acc])
+      end
+    end
+  end
+
+  defp parse_error_fields([%Token{} = tok | _], _acc) do
+    {:error, error("Expected field name or '}'.", tok)}
   end
 
   defp parse_type_def_name([%Token{type: :identifier} = tok | rest]), do: {:ok, tok, rest}

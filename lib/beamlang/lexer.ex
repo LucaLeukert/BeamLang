@@ -8,6 +8,7 @@ defmodule BeamLang.Lexer do
   @keywords %{
     "fn" => :fn,
     "type" => :type_kw,
+    "error" => :error_kw,
     "import" => :import_kw,
     "export" => :export_kw,
     "internal" => :internal_kw,

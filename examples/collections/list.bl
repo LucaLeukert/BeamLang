@@ -32,19 +32,15 @@ fn main(args: [String]) -> number {
     let combined = nums->concat(more);
     println("Combined length: ${combined->length()}");
     
-    // for_each - iterate with side effects
     println("For each:");
-    nums->for_each(print_num);
+    nums->for_each(fn(n: number) -> void {
+        println("  - ${n}");
+    });
     
     let empty: [number] = [];
     println("Empty length: ${empty->length()}");
     
     return 0;
-}
-
-fn print_num(n: number) -> void {
-    println("  - ${n}");
-    return;
 }
 
 fn add_nums(acc: number, x: number) -> number {

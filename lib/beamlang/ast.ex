@@ -112,6 +112,15 @@ defmodule BeamLang.AST do
              span: BeamLang.Span.t()
            }}
 
+  @type error_def ::
+          {:error_def,
+           %{
+             name: binary(),
+             fields: [field_def()],
+             exported: boolean(),
+             span: BeamLang.Span.t()
+           }}
+
   @type field_def ::
           %{name: binary(), type: type_name(), internal: boolean(), span: BeamLang.Span.t()}
 
@@ -132,6 +141,7 @@ defmodule BeamLang.AST do
              module: binary() | nil,
              imports: [import()],
              types: [type_def()],
+             errors: [error_def()],
              functions: [func()],
              span: BeamLang.Span.t()
            }}

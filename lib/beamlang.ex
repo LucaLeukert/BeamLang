@@ -123,29 +123,43 @@ defmodule BeamLang do
        module: nil,
        imports: [],
        types: [],
+       errors: [],
        functions: [],
        span: BeamLang.Span.new("<stdlib>", 0, 0)
      }}
   end
 
   defp merge_programs_simple(
-         {:program, %{types: acc_types, functions: acc_funcs} = acc},
-         {:program, %{types: types, functions: funcs}}
+         {:program, %{types: acc_types, errors: acc_errors, functions: acc_funcs} = acc},
+         {:program, %{types: types, errors: errors, functions: funcs}}
        ) do
-    {:program, %{acc | types: acc_types ++ types, functions: acc_funcs ++ funcs}}
+    {:program, %{acc | types: acc_types ++ types, errors: acc_errors ++ errors, functions: acc_funcs ++ funcs}}
+  end
+
+  # Handle programs without errors field for backwards compatibility
+  defp merge_programs_simple(
+         {:program, %{types: acc_types, functions: acc_funcs} = acc},
+         {:program, %{types: types, functions: funcs} = prog2}
+       ) when not is_map_key(acc, :errors) or not is_map_key(prog2, :errors) do
+    acc_errors = Map.get(acc, :errors, [])
+    errors = Map.get(prog2, :errors, [])
+    {:program, %{acc | types: acc_types ++ types, errors: acc_errors ++ errors, functions: acc_funcs ++ funcs}}
   end
 
   defp merge_programs(
-         {:program, %{types: std_types, functions: std_funcs}},
+         {:program, %{types: std_types, functions: std_funcs} = std_prog},
          {:program,
-          %{module: module, imports: imports, types: types, functions: functions, span: span}}
+          %{module: module, imports: imports, types: types, functions: functions, span: span} = user_prog}
        ) do
+    std_errors = Map.get(std_prog, :errors, [])
+    user_errors = Map.get(user_prog, :errors, [])
     {:ok,
      {:program,
       %{
         module: module,
         imports: imports,
         types: std_types ++ types,
+        errors: std_errors ++ user_errors,
         functions: std_funcs ++ functions,
         span: span
       }}}
@@ -255,11 +269,12 @@ defmodule BeamLang do
   end
 
   defp set_program_module(
-         {:program, %{imports: imports, types: types, functions: functions, span: span}},
+         {:program, %{imports: imports, types: types, functions: functions, span: span} = prog},
          module
        ) do
+    errors = Map.get(prog, :errors, [])
     {:program,
-     %{module: module, imports: imports, types: types, functions: functions, span: span}}
+     %{module: module, imports: imports, types: types, errors: errors, functions: functions, span: span}}
   end
 
   defp program_imports({:program, %{imports: imports}}) do
@@ -335,10 +350,11 @@ defmodule BeamLang do
 
   defp resolve_imports_and_qualify(
          {:program,
-          %{module: module, imports: imports, types: types, functions: functions, span: span}},
+          %{module: module, imports: imports, types: types, functions: functions, span: span} = prog},
          exports,
          module_name
        ) do
+    errors_list = Map.get(prog, :errors, [])
     local_types = MapSet.new(Enum.map(types, fn {:type_def, %{name: name}} -> name end))
     local_funcs = MapSet.new(Enum.map(functions, fn {:function, %{name: name}} -> name end))
     alias_map = import_alias_map(imports)
@@ -410,7 +426,7 @@ defmodule BeamLang do
 
       {:ok,
        {:program,
-        %{module: module, imports: imports, types: types, functions: functions, span: span}}}
+        %{module: module, imports: imports, types: types, errors: errors_list, functions: functions, span: span}}}
     end
   end
 

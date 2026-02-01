@@ -114,6 +114,51 @@ When a field is marked `internal`:
 - This allows methods like `concat(self, other)` to access `other->data` within the method
 - This enables encapsulation of implementation details in stdlib types
 
+### Error Types
+
+Error types are special struct types designed to represent error conditions. They are defined using the `error` keyword and are typically used as the error type in `Result<Ok, Err>`:
+
+```beamlang
+error FileError {
+    path: String,
+    message: String
+}
+
+error ParseError {
+    line: number,
+    column: number,
+    message: String
+}
+```
+
+Error types can be exported:
+
+```beamlang
+export error IoError {
+    kind: String,
+    message: String
+}
+```
+
+Error types are internally converted to regular type definitions with no generic parameters. They can be instantiated using struct literal syntax with type annotation or in a Result error context:
+
+```beamlang
+// Using error in a Result
+fn parse_number(s: String) -> Result<number, ParseError> {
+    if (/* invalid */) {
+        return !err ParseError { line = 1, column = 0, message = "Invalid" };
+    }
+    return !ok 42;
+}
+
+// Pattern matching on error types
+let result = parse_number("abc");
+match (result) {
+    case!ok n => println(n),
+    case!err err => println(err.message)
+}
+```
+
 ## Functions
 
 ```beamlang

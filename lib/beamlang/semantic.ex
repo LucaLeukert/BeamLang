@@ -5,21 +5,37 @@ defmodule BeamLang.Semantic do
 
   @spec validate(BeamLang.AST.t(), keyword()) ::
           {:ok, BeamLang.AST.t()} | {:error, [BeamLang.Error.t()]}
-  def validate({:program, %{types: types, functions: functions}} = ast, opts \\ [])
+  def validate(ast, opts \\ [])
+
+  def validate({:program, %{types: types, errors: errors, functions: functions}} = ast, opts)
       when is_list(functions) do
     require_main = Keyword.get(opts, :require_main, true)
     {:ok, func_table} = build_function_table(functions)
-    {:ok, type_table} = build_type_table(types)
+    # Convert error_def to type_def for type checking (errors are just structs)
+    error_types = Enum.map(errors, &error_def_to_type_def/1)
+    all_types = types ++ error_types
+    {:ok, type_table} = build_type_table(all_types)
 
-    errors =
+    validation_errors =
       if(require_main, do: collect_main_error(functions), else: []) ++
         collect_type_errors(types, type_table) ++
         collect_function_errors(functions, func_table, type_table)
 
-    case errors do
+    case validation_errors do
       [] -> {:ok, annotate_program(ast, func_table, type_table)}
-      _ -> {:error, errors}
+      _ -> {:error, validation_errors}
     end
+  end
+
+  # Also handle programs without errors field (for backwards compatibility)
+  def validate({:program, %{functions: functions} = prog}, opts)
+      when is_list(functions) and not is_map_key(prog, :errors) do
+    validate({:program, Map.put(prog, :errors, [])}, opts)
+  end
+
+  # Convert error_def to type_def for type checking purposes
+  defp error_def_to_type_def({:error_def, %{name: name, fields: fields, exported: exported, span: span}}) do
+    {:type_def, %{name: name, params: [], fields: fields, exported: exported, span: span}}
   end
 
   @spec require_main_exists([BeamLang.AST.func()]) :: :ok | {:error, [BeamLang.Error.t()]}
