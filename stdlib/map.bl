@@ -1,0 +1,102 @@
+// Map (dictionary) type
+
+type Map<K, V> {
+    internal data: any,
+    get: fn(Map<K, V>, K) -> V?,
+    put: fn(Map<K, V>, K, V) -> Map<K, V>,
+    remove: fn(Map<K, V>, K) -> Map<K, V>,
+    contains: fn(Map<K, V>, K) -> bool,
+    size: fn(Map<K, V>) -> number,
+    keys: fn(Map<K, V>) -> List<K>,
+    values: fn(Map<K, V>) -> List<V>,
+    entries: fn(Map<K, V>) -> List<Pair<K, V>>
+}
+
+type Pair<A, B> {
+    first: A,
+    second: B
+}
+
+@external(elixir, "BeamLang.Runtime", "map_new")
+fn map_new_data() -> any;
+
+@external(elixir, "BeamLang.Runtime", "map_get")
+fn map_get_data(data: any, key: any) -> any?;
+
+@external(elixir, "BeamLang.Runtime", "map_put")
+fn map_put_data(data: any, key: any, value: any) -> any;
+
+@external(elixir, "BeamLang.Runtime", "map_remove")
+fn map_remove_data(data: any, key: any) -> any;
+
+@external(elixir, "BeamLang.Runtime", "map_contains")
+fn map_contains_data(data: any, key: any) -> bool;
+
+@external(elixir, "BeamLang.Runtime", "map_size_data")
+fn map_size_data(data: any) -> number;
+
+@external(elixir, "BeamLang.Runtime", "map_keys")
+fn map_keys_data(data: any) -> any;
+
+@external(elixir, "BeamLang.Runtime", "map_values")
+fn map_values_data(data: any) -> any;
+
+@external(elixir, "BeamLang.Runtime", "map_entries")
+fn map_entries_data(data: any) -> any;
+
+fn map_new<K, V>() -> Map<K, V> {
+    return map_from_data(map_new_data());
+}
+
+internal fn map_from_data<K, V>(data: any) -> Map<K, V> {
+    return {
+        data = data,
+        get = map_get_method,
+        put = map_put_method,
+        remove = map_remove_method,
+        contains = map_contains_method,
+        size = map_size_method,
+        keys = map_keys_method,
+        values = map_values_method,
+        entries = map_entries_method
+    };
+}
+
+internal fn map_get_method<K, V>(self: Map<K, V>, key: K) -> V? {
+    return map_get_data(self->data, key);
+}
+
+internal fn map_put_method<K, V>(self: Map<K, V>, key: K, value: V) -> Map<K, V> {
+    return map_from_data(map_put_data(self->data, key, value));
+}
+
+internal fn map_remove_method<K, V>(self: Map<K, V>, key: K) -> Map<K, V> {
+    return map_from_data(map_remove_data(self->data, key));
+}
+
+internal fn map_contains_method<K, V>(self: Map<K, V>, key: K) -> bool {
+    return map_contains_data(self->data, key);
+}
+
+internal fn map_size_method<K, V>(self: Map<K, V>) -> number {
+    return map_size_data(self->data);
+}
+
+internal fn map_keys_method<K, V>(self: Map<K, V>) -> List<K> {
+    let data = map_keys_data(self->data);
+    return list_of(data);
+}
+
+internal fn map_values_method<K, V>(self: Map<K, V>) -> List<V> {
+    let data = map_values_data(self->data);
+    return list_of(data);
+}
+
+internal fn map_entries_method<K, V>(self: Map<K, V>) -> List<Pair<K, V>> {
+    let data = map_entries_data(self->data);
+    return list_of(data);
+}
+
+fn pair<A, B>(first: A, second: B) -> Pair<A, B> {
+    return { first = first, second = second };
+}

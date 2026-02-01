@@ -1,0 +1,61 @@
+// Range type for iteration
+
+type Range {
+    internal start: number,
+    internal end: number,
+    internal step: number,
+    iter: fn(Range) -> Iterator<number>,
+    contains: fn(Range, number) -> bool,
+    length: fn(Range) -> number
+}
+
+@external(elixir, "BeamLang.Runtime", "range_to_list")
+fn range_to_list_data(start: number, end: number, step: number) -> any;
+
+@external(elixir, "BeamLang.Runtime", "math_abs")
+fn abs(n: number) -> number;
+
+@external(elixir, "BeamLang.Runtime", "math_floor")
+fn floor(n: number) -> number;
+
+fn range(start: number, end: number) -> Range {
+    return {
+        start = start,
+        end = end,
+        step = 1,
+        iter = range_iter,
+        contains = range_contains,
+        length = range_length
+    };
+}
+
+fn range_step(start: number, end: number, step: number) -> Range {
+    return {
+        start = start,
+        end = end,
+        step = step,
+        iter = range_iter,
+        contains = range_contains,
+        length = range_length
+    };
+}
+
+fn range_iter(self: Range) -> Iterator<number> {
+    let data = range_to_list_data(self->start, self->end, self->step);
+    return iterator_from_list(data);
+}
+
+fn range_contains(self: Range, n: number) -> bool {
+    return match (n >= self->start) {
+        case true => n < self->end,
+        case false => false
+    };
+}
+
+fn range_length(self: Range) -> number {
+    let diff = self->end - self->start;
+    return match (diff <= 0) {
+        case true => 0,
+        case false => floor(diff / self->step)
+    };
+}

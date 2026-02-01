@@ -615,6 +615,111 @@ fn to_string<T>(value: T) -> String
 fn typeof<T>(value: T) -> String
 ```
 
+### Vec2 (2D Vector with Operators)
+
+```beamlang
+type Vec2 {
+    x: number,
+    y: number,
+    length: fn(Vec2) -> number,
+    normalize: fn(Vec2) -> Vec2,
+    dot: fn(Vec2, Vec2) -> number,
+    operator +: fn(Vec2, Vec2) -> Vec2,
+    operator -: fn(Vec2, Vec2) -> Vec2,
+    operator *: fn(Vec2, number) -> Vec2,
+    operator /: fn(Vec2, number) -> Vec2,
+    operator ==: fn(Vec2, Vec2) -> bool,
+    operator !=: fn(Vec2, Vec2) -> bool
+}
+
+fn vec2(x: number, y: number) -> Vec2
+fn vec2_zero() -> Vec2
+fn vec2_one() -> Vec2
+fn vec2_distance(a: Vec2, b: Vec2) -> number
+fn vec2_lerp(a: Vec2, b: Vec2, t: number) -> Vec2
+```
+
+### Range (Iteration Support)
+
+```beamlang
+type Range {
+    internal start: number,
+    internal end: number,
+    internal step: number,
+    iter: fn(Range) -> Iterator<number>,
+    contains: fn(Range, number) -> bool,
+    length: fn(Range) -> number
+}
+
+fn range(start: number, end: number) -> Range
+fn range_step(start: number, end: number, step: number) -> Range
+```
+
+### Map (Key-Value Dictionary)
+
+```beamlang
+type Map<K, V> {
+    internal data: any,
+    get: fn(Map<K, V>, K) -> V?,
+    put: fn(Map<K, V>, K, V) -> Map<K, V>,
+    remove: fn(Map<K, V>, K) -> Map<K, V>,
+    contains: fn(Map<K, V>, K) -> bool,
+    size: fn(Map<K, V>) -> number,
+    keys: fn(Map<K, V>) -> List<K>,
+    values: fn(Map<K, V>) -> List<V>
+}
+
+fn map_new<K, V>() -> Map<K, V>
+```
+
+### Set (Unique Elements)
+
+```beamlang
+type Set<T> {
+    internal data: any,
+    add: fn(Set<T>, T) -> Set<T>,
+    remove: fn(Set<T>, T) -> Set<T>,
+    contains: fn(Set<T>, T) -> bool,
+    size: fn(Set<T>) -> number,
+    to_list: fn(Set<T>) -> List<T>,
+    union: fn(Set<T>, Set<T>) -> Set<T>,
+    intersection: fn(Set<T>, Set<T>) -> Set<T>,
+    difference: fn(Set<T>, Set<T>) -> Set<T>
+}
+
+fn set_new<T>() -> Set<T>
+```
+
+### Math Functions
+
+```beamlang
+fn sqrt(n: number) -> number
+fn abs(n: number) -> number
+fn floor(n: number) -> number
+fn ceil(n: number) -> number
+fn round(n: number) -> number
+fn sin(n: number) -> number
+fn cos(n: number) -> number
+fn tan(n: number) -> number
+fn asin(n: number) -> number
+fn acos(n: number) -> number
+fn atan(n: number) -> number
+fn atan2(y: number, x: number) -> number
+fn pow(base: number, exp: number) -> number
+fn log(n: number) -> number
+fn log10(n: number) -> number
+fn exp(n: number) -> number
+fn pi() -> number
+fn e() -> number
+fn min(a: number, b: number) -> number
+fn max(a: number, b: number) -> number
+fn clamp(value: number, min_val: number, max_val: number) -> number
+fn lerp(a: number, b: number, t: number) -> number
+fn deg_to_rad(deg: number) -> number
+fn rad_to_deg(rad: number) -> number
+fn sign(n: number) -> number
+```
+
 Generic functions can be called with explicit type arguments:
 
 ```beamlang

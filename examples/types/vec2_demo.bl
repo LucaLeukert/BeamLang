@@ -1,0 +1,67 @@
+// Demonstrate Vec2 operator overloading
+
+fn main(args: List<String>) -> number {
+    let a = vec2(3.0, 4.0);
+    let b = vec2(1.0, 2.0);
+    
+    // Addition with + operator
+    println("Testing Vec2 addition:");
+    let sum = a + b;
+    println(to_string(sum->x));
+    println(to_string(sum->y));
+    
+    // Subtraction with - operator
+    println("Testing Vec2 subtraction:");
+    let diff = a - b;
+    println(to_string(diff->x));
+    println(to_string(diff->y));
+    
+    // Scaling with * operator
+    println("Testing Vec2 scaling:");
+    let scaled = a * 2.0;
+    println(to_string(scaled->x));
+    println(to_string(scaled->y));
+    
+    // Division with / operator
+    println("Testing Vec2 division:");
+    let halved = a / 2.0;
+    println(to_string(halved->x));
+    println(to_string(halved->y));
+    
+    // Length method
+    println("Testing Vec2 length:");
+    let len = a->length();
+    println(to_string(len));
+    
+    // Normalize
+    println("Testing Vec2 normalize:");
+    let normalized = a->normalize();
+    println(to_string(normalized->x));
+    println(to_string(normalized->y));
+    
+    // Dot product
+    println("Testing Vec2 dot product:");
+    let dot = a->dot(b);
+    println(to_string(dot));
+    
+    // Distance
+    println("Testing Vec2 distance:");
+    let dist = vec2_distance(a, b);
+    println(to_string(dist));
+    
+    // Lerp (linear interpolation)
+    println("Testing Vec2 lerp:");
+    let mid = vec2_lerp(a, b, 0.5);
+    println(to_string(mid->x));
+    println(to_string(mid->y));
+    
+    // Equality check
+    println("Testing Vec2 equality:");
+    let eq = a == vec2(3.0, 4.0);
+    println(to_string(eq));
+    
+    let neq = a != b;
+    println(to_string(neq));
+    
+    return 0;
+}

@@ -1,0 +1,55 @@
+// Demonstrate math library functions
+
+fn main(args: List<String>) -> number {
+    // Basic math
+    println("sqrt(16):");
+    println(to_string(sqrt(16.0)));
+    
+    println("abs(-5):");
+    println(to_string(abs(0.0 - 5.0)));
+    
+    println("floor(3.7):");
+    println(to_string(floor(3.7)));
+    
+    println("ceil(3.2):");
+    println(to_string(ceil(3.2)));
+    
+    println("round(3.5):");
+    println(to_string(round(3.5)));
+    
+    // Trigonometry
+    println("sin(pi/2):");
+    println(to_string(sin(pi() / 2.0)));
+    
+    println("cos(0):");
+    println(to_string(cos(0.0)));
+    
+    // Powers and logarithms
+    println("pow(2, 8):");
+    println(to_string(pow(2.0, 8.0)));
+    
+    println("exp(1):");
+    println(to_string(exp(1.0)));
+    
+    // Utility functions
+    println("min(3, 7):");
+    println(to_string(min(3, 7)));
+    
+    println("max(3, 7):");
+    println(to_string(max(3, 7)));
+    
+    println("clamp(10, 0, 5):");
+    println(to_string(clamp(10, 0, 5)));
+    
+    println("lerp(0, 100, 0.25):");
+    println(to_string(lerp(0.0, 100.0, 0.25)));
+    
+    // Angle conversion
+    println("deg_to_rad(90):");
+    println(to_string(deg_to_rad(90.0)));
+    
+    println("rad_to_deg(pi):");
+    println(to_string(rad_to_deg(pi())));
+    
+    return 0;
+}

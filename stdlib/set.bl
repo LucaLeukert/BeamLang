@@ -1,0 +1,100 @@
+// Set type (unique elements)
+
+type Set<T> {
+    internal data: any,
+    add: fn(Set<T>, T) -> Set<T>,
+    remove: fn(Set<T>, T) -> Set<T>,
+    contains: fn(Set<T>, T) -> bool,
+    size: fn(Set<T>) -> number,
+    to_list: fn(Set<T>) -> List<T>,
+    union: fn(Set<T>, Set<T>) -> Set<T>,
+    intersection: fn(Set<T>, Set<T>) -> Set<T>,
+    difference: fn(Set<T>, Set<T>) -> Set<T>
+}
+
+@external(elixir, "BeamLang.Runtime", "set_new")
+fn set_new_data() -> any;
+
+@external(elixir, "BeamLang.Runtime", "set_add")
+fn set_add_data(data: any, item: any) -> any;
+
+@external(elixir, "BeamLang.Runtime", "set_remove")
+fn set_remove_data(data: any, item: any) -> any;
+
+@external(elixir, "BeamLang.Runtime", "set_contains")
+fn set_contains_data(data: any, item: any) -> bool;
+
+@external(elixir, "BeamLang.Runtime", "set_size")
+fn set_size_data(data: any) -> number;
+
+@external(elixir, "BeamLang.Runtime", "set_to_list")
+fn set_to_list_data(data: any) -> any;
+
+@external(elixir, "BeamLang.Runtime", "set_union")
+fn set_union_data(a: any, b: any) -> any;
+
+@external(elixir, "BeamLang.Runtime", "set_intersection")
+fn set_intersection_data(a: any, b: any) -> any;
+
+@external(elixir, "BeamLang.Runtime", "set_difference")
+fn set_difference_data(a: any, b: any) -> any;
+
+fn set_new<T>() -> Set<T> {
+    return set_from_data(set_new_data());
+}
+
+fn set_of<T>(items: [T]) -> Set<T> {
+    return set_from_list(items);
+}
+
+internal fn set_from_data<T>(data: any) -> Set<T> {
+    return {
+        data = data,
+        add = set_add_method,
+        remove = set_remove_method,
+        contains = set_contains_method,
+        size = set_size_method,
+        to_list = set_to_list_method,
+        union = set_union_method,
+        intersection = set_intersection_method,
+        difference = set_difference_method
+    };
+}
+
+internal fn set_from_list<T>(items: [T]) -> Set<T> {
+    // TODO: fold over items to build set
+    return set_from_data(set_new_data());
+}
+
+internal fn set_add_method<T>(self: Set<T>, item: T) -> Set<T> {
+    return set_from_data(set_add_data(self->data, item));
+}
+
+internal fn set_remove_method<T>(self: Set<T>, item: T) -> Set<T> {
+    return set_from_data(set_remove_data(self->data, item));
+}
+
+internal fn set_contains_method<T>(self: Set<T>, item: T) -> bool {
+    return set_contains_data(self->data, item);
+}
+
+internal fn set_size_method<T>(self: Set<T>) -> number {
+    return set_size_data(self->data);
+}
+
+internal fn set_to_list_method<T>(self: Set<T>) -> List<T> {
+    let data = set_to_list_data(self->data);
+    return list_of(data);
+}
+
+internal fn set_union_method<T>(self: Set<T>, other: Set<T>) -> Set<T> {
+    return set_from_data(set_union_data(self->data, other->data));
+}
+
+internal fn set_intersection_method<T>(self: Set<T>, other: Set<T>) -> Set<T> {
+    return set_from_data(set_intersection_data(self->data, other->data));
+}
+
+internal fn set_difference_method<T>(self: Set<T>, other: Set<T>) -> Set<T> {
+    return set_from_data(set_difference_data(self->data, other->data));
+}

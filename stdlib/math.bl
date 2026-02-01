@@ -1,0 +1,95 @@
+// Math utilities
+
+@external(elixir, "BeamLang.Runtime", "math_sqrt")
+fn sqrt(n: number) -> number;
+
+@external(elixir, "BeamLang.Runtime", "math_abs")
+fn abs(n: number) -> number;
+
+@external(elixir, "BeamLang.Runtime", "math_floor")
+fn floor(n: number) -> number;
+
+@external(elixir, "BeamLang.Runtime", "math_ceil")
+fn ceil(n: number) -> number;
+
+@external(elixir, "BeamLang.Runtime", "math_round")
+fn round(n: number) -> number;
+
+@external(elixir, "BeamLang.Runtime", "math_sin")
+fn sin(n: number) -> number;
+
+@external(elixir, "BeamLang.Runtime", "math_cos")
+fn cos(n: number) -> number;
+
+@external(elixir, "BeamLang.Runtime", "math_tan")
+fn tan(n: number) -> number;
+
+@external(elixir, "BeamLang.Runtime", "math_asin")
+fn asin(n: number) -> number;
+
+@external(elixir, "BeamLang.Runtime", "math_acos")
+fn acos(n: number) -> number;
+
+@external(elixir, "BeamLang.Runtime", "math_atan")
+fn atan(n: number) -> number;
+
+@external(elixir, "BeamLang.Runtime", "math_atan2")
+fn atan2(y: number, x: number) -> number;
+
+@external(elixir, "BeamLang.Runtime", "math_pow")
+fn pow(base: number, exp: number) -> number;
+
+@external(elixir, "BeamLang.Runtime", "math_log")
+fn log(n: number) -> number;
+
+@external(elixir, "BeamLang.Runtime", "math_log10")
+fn log10(n: number) -> number;
+
+@external(elixir, "BeamLang.Runtime", "math_exp")
+fn exp(n: number) -> number;
+
+@external(elixir, "BeamLang.Runtime", "math_pi")
+fn pi() -> number;
+
+@external(elixir, "BeamLang.Runtime", "math_e")
+fn e() -> number;
+
+fn min(a: number, b: number) -> number {
+    return match (a < b) {
+        case true => a,
+        case false => b
+    };
+}
+
+fn max(a: number, b: number) -> number {
+    return match (a > b) {
+        case true => a,
+        case false => b
+    };
+}
+
+fn clamp(value: number, min_val: number, max_val: number) -> number {
+    return min(max(value, min_val), max_val);
+}
+
+fn lerp(a: number, b: number, t: number) -> number {
+    return a + (b - a) * t;
+}
+
+fn deg_to_rad(deg: number) -> number {
+    return deg * pi() / 180.0;
+}
+
+fn rad_to_deg(rad: number) -> number {
+    return rad * 180.0 / pi();
+}
+
+fn sign(n: number) -> number {
+    return match (n > 0) {
+        case true => 1,
+        case false => match (n < 0) {
+            case true => 0 - 1,
+            case false => 0
+        }
+    };
+}

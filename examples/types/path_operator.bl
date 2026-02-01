@@ -28,5 +28,7 @@ fn main(args: [String]) -> number {
     println("User path: ${user_path->path}");
     println("Full path: ${full_path->path}");
     
+    println_raw(full_path);
+
     return 0;
 }

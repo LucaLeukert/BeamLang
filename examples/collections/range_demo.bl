@@ -1,0 +1,32 @@
+// Demonstrate range iteration
+
+fn main(args: List<String>) -> number {
+    // Basic range
+    println("Range 0 to 5:");
+    let r = range(0, 5);
+    
+    for (i in r->iter()) {
+        println(to_string(i));
+    }
+    
+    // Range with custom step
+    println("Range 0 to 10 step 2:");
+    let r2 = range_step(0, 10, 2);
+    
+    for (i in r2->iter()) {
+        println(to_string(i));
+    }
+    
+    // Check contains
+    println("range(0,5) contains 3:");
+    println(to_string(r->contains(3)));
+    
+    println("range(0,5) contains 5:");
+    println(to_string(r->contains(5)));
+    
+    // Length
+    println("length of range(0,5):");
+    println(to_string(r->length()));
+    
+    return 0;
+}

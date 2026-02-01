@@ -451,4 +451,132 @@ defmodule BeamLang.Runtime do
   defp stdlib_string_new(data) when is_binary(data) do
     stdlib_string_new(String.to_charlist(data))
   end
+
+  # Math functions
+  @spec math_sqrt(number()) :: number()
+  def math_sqrt(n), do: :math.sqrt(n)
+
+  @spec math_abs(number()) :: number()
+  def math_abs(n), do: abs(n)
+
+  @spec math_floor(number()) :: number()
+  def math_floor(n), do: :math.floor(n)
+
+  @spec math_ceil(number()) :: number()
+  def math_ceil(n), do: :math.ceil(n)
+
+  @spec math_round(number()) :: number()
+  def math_round(n), do: round(n)
+
+  @spec math_sin(number()) :: number()
+  def math_sin(n), do: :math.sin(n)
+
+  @spec math_cos(number()) :: number()
+  def math_cos(n), do: :math.cos(n)
+
+  @spec math_tan(number()) :: number()
+  def math_tan(n), do: :math.tan(n)
+
+  @spec math_asin(number()) :: number()
+  def math_asin(n), do: :math.asin(n)
+
+  @spec math_acos(number()) :: number()
+  def math_acos(n), do: :math.acos(n)
+
+  @spec math_atan(number()) :: number()
+  def math_atan(n), do: :math.atan(n)
+
+  @spec math_atan2(number(), number()) :: number()
+  def math_atan2(y, x), do: :math.atan2(y, x)
+
+  @spec math_pow(number(), number()) :: number()
+  def math_pow(base, exp), do: :math.pow(base, exp)
+
+  @spec math_log(number()) :: number()
+  def math_log(n), do: :math.log(n)
+
+  @spec math_log10(number()) :: number()
+  def math_log10(n), do: :math.log10(n)
+
+  @spec math_exp(number()) :: number()
+  def math_exp(n), do: :math.exp(n)
+
+  @spec math_pi() :: number()
+  def math_pi(), do: :math.pi()
+
+  @spec math_e() :: number()
+  def math_e(), do: :math.exp(1)
+
+  # Range functions
+  @spec range_to_list(number(), number(), number()) :: list()
+  def range_to_list(start, stop, step) when step > 0 do
+    Enum.take_while(Stream.iterate(start, &(&1 + step)), &(&1 < stop))
+  end
+  def range_to_list(start, stop, step) when step < 0 do
+    Enum.take_while(Stream.iterate(start, &(&1 + step)), &(&1 > stop))
+  end
+  def range_to_list(start, _stop, 0), do: [start]
+
+  # Map functions
+  @spec map_new() :: map()
+  def map_new(), do: %{}
+
+  @spec map_get(map(), term()) :: map()
+  def map_get(data, key) do
+    case Map.fetch(data, key) do
+      {:ok, value} -> %{tag: 1, value: value}
+      :error -> %{tag: 0}
+    end
+  end
+
+  @spec map_put(map(), term(), term()) :: map()
+  def map_put(data, key, value), do: Map.put(data, key, value)
+
+  @spec map_remove(map(), term()) :: map()
+  def map_remove(data, key), do: Map.delete(data, key)
+
+  @spec map_contains(map(), term()) :: boolean()
+  def map_contains(data, key), do: Map.has_key?(data, key)
+
+  @spec map_size_data(map()) :: non_neg_integer()
+  def map_size_data(data), do: Kernel.map_size(data)
+
+  @spec map_keys(map()) :: list()
+  def map_keys(data), do: Map.keys(data)
+
+  @spec map_values(map()) :: list()
+  def map_values(data), do: Map.values(data)
+
+  @spec map_entries(map()) :: list()
+  def map_entries(data) do
+    Enum.map(data, fn {k, v} -> %{first: k, second: v} end)
+  end
+
+  # Set functions
+  @spec set_new() :: MapSet.t()
+  def set_new(), do: MapSet.new()
+
+  @spec set_add(MapSet.t(), term()) :: MapSet.t()
+  def set_add(data, item), do: MapSet.put(data, item)
+
+  @spec set_remove(MapSet.t(), term()) :: MapSet.t()
+  def set_remove(data, item), do: MapSet.delete(data, item)
+
+  @spec set_contains(MapSet.t(), term()) :: boolean()
+  def set_contains(data, item), do: MapSet.member?(data, item)
+
+  @spec set_size(MapSet.t()) :: non_neg_integer()
+  def set_size(data), do: MapSet.size(data)
+
+  @spec set_to_list(MapSet.t()) :: list()
+  def set_to_list(data), do: MapSet.to_list(data)
+
+  @spec set_union(MapSet.t(), MapSet.t()) :: MapSet.t()
+  def set_union(a, b), do: MapSet.union(a, b)
+
+  @spec set_intersection(MapSet.t(), MapSet.t()) :: MapSet.t()
+  def set_intersection(a, b), do: MapSet.intersection(a, b)
+
+  @spec set_difference(MapSet.t(), MapSet.t()) :: MapSet.t()
+  def set_difference(a, b), do: MapSet.difference(a, b)
 end
