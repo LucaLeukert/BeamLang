@@ -261,6 +261,57 @@ defmodule BeamLang.Runtime do
     :ok
   end
 
+  # File system operations
+  @spec file_read(term()) :: map()
+  def file_read(path) do
+    path_str = string_data(path) |> to_string()
+    case File.read(path_str) do
+      {:ok, content} ->
+        # Return Result.ok with String struct (tag=1 for ok)
+        string_struct = %{
+          data: String.to_charlist(content),
+          length: &string_length_data/1,
+          concat: &string_concat_data/2,
+          chars: &string_chars_data/1,
+          __beamlang_type__: ~c"String"
+        }
+        %{kind: 2, tag: 1, value: string_struct}
+      {:error, reason} ->
+        # Return Result.err (tag=0 for err, value contains error)
+        error_msg = %{
+          data: String.to_charlist(to_string(reason)),
+          length: &string_length_data/1,
+          concat: &string_concat_data/2,
+          chars: &string_chars_data/1,
+          __beamlang_type__: ~c"String"
+        }
+        %{kind: 2, tag: 0, value: error_msg}
+    end
+  end
+
+  @spec file_exists(term()) :: boolean()
+  def file_exists(path) do
+    path_str = string_data(path) |> to_string()
+    File.exists?(path_str)
+  end
+
+  @spec get_env(term()) :: map()
+  def get_env(name) do
+    name_str = string_data(name) |> to_string()
+    case System.get_env(name_str) do
+      nil -> %{tag: 0}
+      value ->
+        string_struct = %{
+          data: String.to_charlist(value),
+          length: &string_length_data/1,
+          concat: &string_concat_data/2,
+          chars: &string_chars_data/1,
+          __beamlang_type__: ~c"String"
+        }
+        %{tag: 1, value: string_struct}
+    end
+  end
+
   defp string_data(%{__beamlang_type__: "String", data: data}), do: data
   defp string_data(%{__beamlang_type__: ~c"String", data: data}), do: data
   defp string_data(value) when is_map(value) do

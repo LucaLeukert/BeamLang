@@ -1,0 +1,25 @@
+// System utilities for file and process operations
+
+@external(elixir, "BeamLang.Runtime", "file_read")
+fn file_read_data(path: String) -> any;
+
+@external(elixir, "BeamLang.Runtime", "file_exists")
+fn file_exists_data(path: String) -> bool;
+
+@external(elixir, "BeamLang.Runtime", "get_env")
+fn get_env_data(name: String) -> any;
+
+/** Read a file and return its contents as a Result **/
+fn read_file(path: String) -> Result<String, String> {
+    return file_read_data(path);
+}
+
+/** Check if a file exists **/
+fn file_exists(path: String) -> bool {
+    return file_exists_data(path);
+}
+
+/** Get an environment variable, returns None if not set **/
+fn get_env(name: String) -> String? {
+    return get_env_data(name);
+}

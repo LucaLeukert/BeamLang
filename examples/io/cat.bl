@@ -1,0 +1,30 @@
+// cat - read and print a file
+// Usage: beamlang cat.bl <file>
+
+fn cat_file(filename: String) -> number {
+    let result = read_file(filename);
+    match (result) {
+        case!ok content => {
+            print(content);
+            return 0;
+        },
+        case!err error => {
+            println("cat: ${filename}: ${error}");
+            return 1;
+        }
+    }
+}
+
+fn main(args: [String]) -> number {
+    let file_opt = args->first();
+    
+    let code = match (file_opt) {
+        case?some filename => cat_file(filename),
+        case?none => {
+            println("Usage: cat <file>");
+            1;
+        }
+    };
+    
+    return code;
+}
