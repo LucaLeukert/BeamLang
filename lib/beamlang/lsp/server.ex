@@ -225,7 +225,7 @@ defmodule BeamLang.LSP.Server do
 
       :no_string ->
         with %BeamLang.Token{type: :identifier, value: name} <- identifier_at(doc, offset),
-             {:ok, info} <- lookup_hover(doc, name, offset) do
+             {:ok, info} <- lookup_hover_with_field_access(doc, name, offset) do
           %{
             "contents" => %{
               "kind" => "markdown",
@@ -238,6 +238,76 @@ defmodule BeamLang.LSP.Server do
 
       :no_interpolation ->
         nil
+    end
+  end
+
+  # Try to get hover info, checking for field access pattern (target->field)
+  defp lookup_hover_with_field_access(doc, field_name, offset) do
+    # First check if this is a field access pattern: target->field
+    case detect_field_access(doc, offset) do
+      {:ok, target_name, _arrow_span, field_name_detected} when field_name_detected == field_name ->
+        # This is a field access, get the target's type and field info
+        case lookup_local(doc, target_name, offset) do
+          {:ok, %{type: target_type}} when not is_nil(target_type) ->
+            case lookup_field_type(doc, target_type, field_name) do
+              {:ok, type_name, field_type} ->
+                {:ok, "field #{field_name}: #{format_type(field_type)} (on #{type_name})"}
+
+              :error ->
+                # Field not found, fall back to regular lookup
+                lookup_hover(doc, field_name, offset)
+            end
+
+          _ ->
+            # Target type unknown, fall back to regular lookup
+            lookup_hover(doc, field_name, offset)
+        end
+
+      _ ->
+        # Not a field access, do regular lookup
+        lookup_hover(doc, field_name, offset)
+    end
+  end
+
+  # Detect if we're at a field access pattern: returns {:ok, target_name, arrow_span, field_name}
+  # or :error if not a field access
+  defp detect_field_access(doc, offset) do
+    # Find the identifier at the current position (the field name)
+    case identifier_at(doc, offset) do
+      %BeamLang.Token{type: :identifier, value: field_name, span: field_span} ->
+        # Look for arrow token before the field
+        arrow_token = find_token_before(doc.tokens, field_span.start, :arrow)
+
+        case arrow_token do
+          %BeamLang.Token{type: :arrow, span: arrow_span} ->
+            # Look for identifier before the arrow (the target)
+            target_token = find_token_before(doc.tokens, arrow_span.start, :identifier)
+
+            case target_token do
+              %BeamLang.Token{type: :identifier, value: target_name} ->
+                {:ok, target_name, arrow_span, field_name}
+
+              _ ->
+                :error
+            end
+
+          _ ->
+            :error
+        end
+
+      _ ->
+        :error
+    end
+  end
+
+  # Find a token of a specific type immediately before the given offset
+  defp find_token_before(tokens, offset, expected_type) do
+    tokens
+    |> Enum.filter(fn %BeamLang.Token{span: span} -> span.end <= offset end)
+    |> Enum.max_by(fn %BeamLang.Token{span: span} -> span.end end, fn -> nil end)
+    |> case do
+      %BeamLang.Token{type: ^expected_type} = token -> token
+      _ -> nil
     end
   end
 

@@ -2862,14 +2862,15 @@ defmodule BeamLang.Semantic do
 
   defp annotate_program(
          {:program,
-          %{module: module, imports: imports, types: types, functions: functions, span: span}},
+          %{module: module, imports: imports, types: types, functions: functions, span: span} = prog},
          func_table,
          type_table
        ) do
     functions = Enum.map(functions, &annotate_function(&1, func_table, type_table))
+    errors = Map.get(prog, :errors, [])
 
     {:program,
-     %{module: module, imports: imports, types: types, functions: functions, span: span}}
+     %{module: module, imports: imports, types: types, errors: errors, functions: functions, span: span}}
   end
 
   defp annotate_function({:function, %{body: nil}} = func, _func_table, _type_table), do: func
