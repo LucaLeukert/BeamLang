@@ -1,10 +1,15 @@
 // Demonstrate range iteration
 
 fn main(args: List<String>) -> number {
-    // Basic range
-    println("Range 0 to 5:");
-    let r = range(0, 5);
+    // Range literal syntax (0..5 creates a Range)
+    println("Range 0..5 using literal syntax:");
+    for (i in 0..5) {
+        println(to_string(i));
+    }
     
+    // Using range() function
+    println("Range using range() function:");
+    let r = range(0, 5);
     for (i in r->iter()) {
         println(to_string(i));
     }
@@ -12,7 +17,6 @@ fn main(args: List<String>) -> number {
     // Range with custom step
     println("Range 0 to 10 step 2:");
     let r2 = range_step(0, 10, 2);
-    
     for (i in r2->iter()) {
         println(to_string(i));
     }
@@ -27,6 +31,13 @@ fn main(args: List<String>) -> number {
     // Length
     println("length of range(0,5):");
     println(to_string(r->length()));
+    
+    // Range literal assigned to variable
+    println("Range 10..15:");
+    let r3 = 10..15;
+    for (i in r3->iter()) {
+        println(to_string(i));
+    }
     
     return 0;
 }

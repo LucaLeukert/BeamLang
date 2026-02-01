@@ -477,6 +477,13 @@ defmodule BeamLang.Codegen do
     {:call, line, {:atom, line, :result_err}, [value]}
   end
 
+  defp expr_form(line, {:range, %{start: start_expr, end: end_expr}}, env) do
+    # Compile 1..10 to range(1, 10)
+    start_form = expr_form(line, start_expr, env)
+    end_form = expr_form(line, end_expr, env)
+    {:call, line, {:atom, line, :range}, [start_form, end_form]}
+  end
+
   defp expr_form(line, {:list_literal, %{elements: elements}}, env) do
     elem_forms = Enum.map(elements, fn elem -> expr_form(line, elem, env) end)
     list_form = build_list_form(line, elem_forms)
@@ -625,9 +632,9 @@ defmodule BeamLang.Codegen do
           # List: access .data field
           expr_form(line, {:field, %{target: collection, name: "data"}}, env)
 
-        collection_type == :range ->
-          # Range: generate list with :lists.seq
-          range_to_list_form(line, collection, env)
+        range_type?(collection_type) ->
+          # Range type: call iter() then access .data field
+          range_iter_form(line, collection, env)
 
         true ->
           # Raw list or other iterable
@@ -638,10 +645,17 @@ defmodule BeamLang.Codegen do
     {{:block, line, [match_fun, call_fun]}, env, counter}
   end
 
-  defp range_to_list_form(line, {:range, %{start: start_expr, end: end_expr}}, env) do
-    start_form = expr_form(line, start_expr, env)
-    end_form = expr_form(line, end_expr, env)
-    {:call, line, {:remote, line, {:atom, line, :lists}, {:atom, line, :seq}}, [start_form, end_form]}
+  defp range_type?(type) do
+    case type do
+      {:named, "Range"} -> true
+      _ -> false
+    end
+  end
+
+  defp range_iter_form(line, collection, env) do
+    # Generate: collection->iter()->data which becomes range_iter(collection).data
+    iter_call = {:method_call, %{target: collection, name: "iter", args: [], span: BeamLang.Span.new("<gen>", 0, 0)}}
+    expr_form(line, {:field, %{target: iter_call, name: "data"}}, env)
   end
 
   @spec loop_fun_expr(

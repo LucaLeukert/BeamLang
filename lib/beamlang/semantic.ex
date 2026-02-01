@@ -768,7 +768,7 @@ defmodule BeamLang.Semantic do
     with {:ok, start_type} <- type_of_expr(start_expr, func_table, type_table, env, :number),
          {:ok, end_type} <- type_of_expr(end_expr, func_table, type_table, env, :number) do
       if start_type == :number and end_type == :number do
-        {:ok, :range}
+        {:ok, {:named, "Range"}}
       else
         {:error, BeamLang.Error.new(:type, "Range bounds must be numbers.", span)}
       end
@@ -2890,7 +2890,7 @@ defmodule BeamLang.Semantic do
     case normalize_type(type) do
       {:generic, {:named, "Iterator"}, [item_type]} -> {:ok, item_type}
       {:generic, {:named, "List"}, [item_type]} -> {:ok, item_type}
-      :range -> {:ok, :number}
+      {:named, "Range"} -> {:ok, :number}
       _ -> :error
     end
   end

@@ -641,6 +641,26 @@ fn vec2_lerp(a: Vec2, b: Vec2, t: number) -> Vec2
 
 ### Range (Iteration Support)
 
+The `..` operator creates a Range value. Ranges can be iterated directly in for loops or used with methods like `contains()` and `length()`.
+
+```beamlang
+// Range literal syntax
+for (i in 0..10) {
+    println(to_string(i));  // 0, 1, 2, ..., 9
+}
+
+// Assign to variable
+let r = 1..5;
+println(to_string(r->contains(3)));  // true
+println(to_string(r->length()));     // 4.0
+
+// Using range() function (equivalent to 0..5)
+let r2 = range(0, 5);
+
+// Range with custom step
+let r3 = range_step(0, 10, 2);  // 0, 2, 4, 6, 8
+```
+
 ```beamlang
 type Range {
     internal start: number,
