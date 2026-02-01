@@ -8,8 +8,8 @@ fn cat_file(filename: String) -> number {
             print(content);
             return 0;
         },
-        case!err error => {
-            println("cat: ${filename}: ${error}");
+        case!err err => {
+            println("cat: ${filename}: ${err->message}");
             return 1;
         }
     }
