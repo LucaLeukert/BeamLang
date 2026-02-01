@@ -2,6 +2,7 @@
 
 type Args {
     path: String
+    enabled: bool
 }
 
 fn main(args: [String]) -> number {
@@ -10,10 +11,11 @@ fn main(args: [String]) -> number {
     return match (parsed) {
         case!ok opts => {
             println("Path: ${opts->path}");
+            println("Enabled: ${opts->enabled}");
             0;
         },
         case!err err => {
-            println("Usage: parse_args <path>");
+            println("Usage: parse_args <path> <enabled>");
             println(err->message);
             println(err->usage);
             1;

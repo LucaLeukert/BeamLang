@@ -375,4 +375,122 @@ defmodule BeamLang.Runtime do
   defp string_map?(value) do
     is_map(value) and Map.has_key?(value, :data) and Map.has_key?(value, :length) and Map.has_key?(value, :chars)
   end
+
+  @doc """
+  Parses command line arguments into a struct.
+  
+  fields: list of field names (as strings)
+  field_types: list of field type atoms (:String, :number, :bool, :char)
+  type_label: the BeamLang type name for the result struct
+  args: the BeamLang List of string arguments
+  """
+  @spec parse_args(list(), list(), charlist(), map()) :: map()
+  def parse_args(fields, field_types, type_label, args) do
+    usage = "Usage: " <> Enum.join(fields, " ")
+    args_data = args.data
+
+    if length(args_data) != length(fields) do
+      error_struct = %{
+        message: string_new("Expected #{length(fields)} arguments."),
+        usage: string_new(usage),
+        __beamlang_type__: ~c"ArgsError"
+      }
+      %{tag: 0, value: error_struct}
+    else
+      parse_args_fields(fields, field_types, args_data, usage, type_label, %{})
+    end
+  end
+
+  defp parse_args_fields([], [], _args, _usage, type_label, acc) do
+    result = Map.put(acc, :__beamlang_type__, type_label)
+    %{tag: 1, value: result}
+  end
+
+  defp parse_args_fields([field | rest_fields], [type | rest_types], [arg | rest_args], usage, type_label, acc) do
+    # field comes as charlist from Erlang, convert to string then atom
+    field_str = to_string(field)
+    case parse_arg_value(arg, type, field_str, usage) do
+      {:ok, value} ->
+        acc = Map.put(acc, String.to_atom(field_str), value)
+        parse_args_fields(rest_fields, rest_types, rest_args, usage, type_label, acc)
+
+      {:error, error_struct} ->
+        %{tag: 0, value: error_struct}
+    end
+  end
+
+  defp parse_arg_value(arg, :String, _field, _usage) do
+    {:ok, to_string_struct(arg)}
+  end
+
+  defp parse_arg_value(arg, {:named, "String"}, field, usage) do
+    parse_arg_value(arg, :String, field, usage)
+  end
+
+  defp parse_arg_value(arg, :number, field, usage) do
+    case parse_number_data(arg) do
+      %{tag: 1, value: num} -> {:ok, num}
+      %{tag: 0} -> {:error, args_error_struct(field, usage, "number")}
+    end
+  end
+
+  defp parse_arg_value(arg, {:named, "number"}, field, usage) do
+    parse_arg_value(arg, :number, field, usage)
+  end
+
+  defp parse_arg_value(arg, :bool, field, usage) do
+    case parse_bool_data(arg) do
+      %{tag: 1, value: b} -> {:ok, b}
+      %{tag: 0} -> {:error, args_error_struct(field, usage, "bool")}
+    end
+  end
+
+  defp parse_arg_value(arg, {:named, "bool"}, field, usage) do
+    parse_arg_value(arg, :bool, field, usage)
+  end
+
+  defp parse_arg_value(arg, :char, field, usage) do
+    case parse_char_data(arg) do
+      %{tag: 1, value: ch} -> {:ok, ch}
+      %{tag: 0} -> {:error, args_error_struct(field, usage, "char")}
+    end
+  end
+
+  defp parse_arg_value(arg, {:named, "char"}, field, usage) do
+    parse_arg_value(arg, :char, field, usage)
+  end
+
+  defp parse_arg_value(_arg, _type, field, usage) do
+    {:error, args_error_struct(field, usage, "unknown")}
+  end
+
+  defp args_error_struct(field, usage, expected) do
+    %{
+      message: string_new("Invalid value for #{field} (expected #{expected})."),
+      usage: string_new(usage),
+      __beamlang_type__: ~c"ArgsError"
+    }
+  end
+
+  defp to_string_struct(value) when is_map(value) do
+    if string_map?(value), do: value, else: string_new(inspect(value))
+  end
+
+  defp to_string_struct(value) do
+    string_new(any_to_string_data(value))
+  end
+
+  defp string_new(data) when is_list(data) do
+    %{
+      data: data,
+      length: &string_length_data/1,
+      concat: &string_concat_data/2,
+      chars: &string_chars_data/1,
+      __beamlang_type__: ~c"String"
+    }
+  end
+
+  defp string_new(data) when is_binary(data) do
+    string_new(String.to_charlist(data))
+  end
 end

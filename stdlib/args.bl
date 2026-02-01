@@ -5,27 +5,8 @@ export error ArgsError {
     usage: String
 }
 
-@external(elixir, "BeamLang.Runtime", "parse_number_data")
-fn parse_number_data(value: any) -> number?;
-
-@external(elixir, "BeamLang.Runtime", "parse_bool_data")
-fn parse_bool_data(value: any) -> bool?;
-
-@external(elixir, "BeamLang.Runtime", "parse_char_data")
-fn parse_char_data(value: any) -> char?;
-
-internal fn args_require<T>(value: T?, field: String, usage: String, expected: String) -> T!ArgsError {
-    return match (value) {
-        case?some parsed => !ok parsed,
-        case?none => args_error(field, usage, expected)
-    };
-}
-
-internal fn args_error<T>(field: String, usage: String, expected: String) -> T!ArgsError {
-    let msg = "Invalid value for ${field} (expected ${expected}).";
-    let err: ArgsError = { message = msg, usage = usage };
-    return !err err;
-}
-
+// parse_args<T>(args) parses command line arguments into a struct T.
+// T must be a struct type with fields of type String, number, bool, or char.
+// Returns T!ArgsError - ok with the parsed struct or error with usage info.
 @external(elixir, "BeamLang.Runtime", "parse_args")
 fn parse_args<T>(args: [String]) -> T!ArgsError;

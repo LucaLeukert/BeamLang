@@ -1,6 +1,10 @@
 // cat - read and print a file
 // Usage: beamlang cat.bl <file>
 
+type Args {
+    file: String
+}
+
 fn cat_file(filename: String) -> number {
     if (file_exists(filename) == false) {
         println("cat: ${filename}: No such file or directory");
@@ -21,18 +25,15 @@ fn cat_file(filename: String) -> number {
 }
 
 fn main(args: [String]) -> number {
-    let code = match (args->first()) {
-        case?some filename => cat_file(filename),
-        case?none => {
+    let parsed = parse_args<Args>(args);
+
+    return match (parsed) {
+        case!ok opts => cat_file(opts->file),
+        case!err err => {
             println("Usage: cat <file>");
+            println(err->message);
+            println(err->usage);
             1;
         }
     };
-
-    match ("flush_stdout()") {
-        case "flush_stdout()" => {},
-        case _ => {}
-    }
-
-    return code;
 }

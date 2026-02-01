@@ -309,114 +309,6 @@ defmodule BeamLang.Codegen do
     {:atom, line, value}
   end
 
-  defp build_parse_args_match(span, args_expr, fields, field_types, type, usage, index, acc) do
-    case {fields, field_types} do
-      {[], []} ->
-        ok_fields =
-          acc
-          |> Enum.reverse()
-          |> Enum.map(fn {field, expr} -> %{name: field, expr: expr, span: span} end)
-
-        ok_struct = {:struct, %{fields: ok_fields, type: type, span: span}}
-        {:res_ok, %{expr: ok_struct, span: span, type: nil}}
-
-      {[field | rest], [field_type | rest_types]} ->
-        index_expr = {:integer, %{value: index, span: span}}
-        get_expr = {:method_call, %{target: args_expr, name: "get", args: [index_expr], span: span}}
-        value_expr = {:field, %{target: get_expr, name: "value", span: span}}
-
-        result_expr = parse_args_convert_expr(span, value_expr, field, field_type, usage)
-
-        ok_var = "value_#{index}"
-        ok_pat = {:res_ok_pat, %{name: ok_var, span: span}}
-        err_pat = {:res_err_pat, %{name: "err", span: span}}
-        ok_expr =
-          build_parse_args_match(
-            span,
-            args_expr,
-            rest,
-            rest_types,
-            type,
-            usage,
-            index + 1,
-            [{field, {:identifier, %{name: ok_var, span: span}}} | acc]
-          )
-
-        err_expr = {:res_err, %{expr: {:identifier, %{name: "err", span: span}}, span: span, type: nil}}
-
-        {:match,
-         %{
-           expr: result_expr,
-           cases: [
-             %{pattern: ok_pat, guard: nil, body: ok_expr, span: span},
-             %{pattern: err_pat, guard: nil, body: err_expr, span: span}
-           ],
-           span: span
-         }}
-    end
-  end
-
-  defp parse_args_convert_expr(span, value_expr, field, field_type, usage) do
-    field_expr = {:string, %{value: field, span: span}}
-    usage_expr = {:string, %{value: usage, span: span}}
-
-    case field_type do
-      :String ->
-        {:res_ok, %{expr: {:call, %{name: "to_string", args: [value_expr], span: span}}, span: span, type: nil}}
-
-      {:named, "String"} ->
-        {:res_ok, %{expr: {:call, %{name: "to_string", args: [value_expr], span: span}}, span: span, type: nil}}
-
-      :number ->
-        args_require_expr(span, value_expr, field_expr, usage_expr, "number")
-
-      {:named, "number"} ->
-        args_require_expr(span, value_expr, field_expr, usage_expr, "number")
-
-      :bool ->
-        args_require_expr(span, value_expr, field_expr, usage_expr, "bool")
-
-      {:named, "bool"} ->
-        args_require_expr(span, value_expr, field_expr, usage_expr, "bool")
-
-      :char ->
-        args_require_expr(span, value_expr, field_expr, usage_expr, "char")
-
-      {:named, "char"} ->
-        args_require_expr(span, value_expr, field_expr, usage_expr, "char")
-
-      _ ->
-        {:res_err,
-         %{
-           expr:
-             {:struct,
-              %{
-                fields: [
-                  %{name: "message", expr: {:string, %{value: "Unsupported field type.", span: span}}, span: span},
-                  %{name: "usage", expr: usage_expr, span: span}
-                ],
-                type: {:named, "ArgsError"},
-                span: span
-              }},
-           span: span,
-           type: nil
-         }}
-    end
-  end
-
-  defp args_require_expr(span, value_expr, field_expr, usage_expr, expected) do
-    parse_call =
-      case expected do
-        "number" -> "parse_number_data"
-        "bool" -> "parse_bool_data"
-        "char" -> "parse_char_data"
-      end
-
-    optional_expr = {:call, %{name: parse_call, args: [value_expr], span: span}}
-    expected_expr = {:string, %{value: expected, span: span}}
-    {:call, %{name: "args_require", args: [optional_expr, field_expr, usage_expr, expected_expr], span: span}}
-  end
-
   @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
   defp expr_form(
          line,
@@ -428,47 +320,19 @@ defmodule BeamLang.Codegen do
           }},
          env
        ) do
-    span = BeamLang.Span.new("<generated>", 0, 0)
+    # Build the fields list as Erlang list of binaries
+    fields_list = build_list_form(line, Enum.map(fields, fn f -> {:string, line, String.to_charlist(f)} end))
 
-    usage = "Usage: " <> Enum.join(fields, " ")
+    # Build the field_types list as Erlang atoms/tuples
+    types_list = build_list_form(line, Enum.map(field_types, fn t -> type_to_erlang_term(line, t) end))
 
-    length_expr =
-      {:method_call, %{target: args_expr, name: "length", args: [], span: span}}
+    # Get the type label
+    type_label = {:string, line, String.to_charlist(type_label(type))}
 
-    ok_expr =
-      build_parse_args_match(span, args_expr, fields, field_types, type, usage, 0, [])
-
-    err_expr =
-      {:res_err,
-       %{
-         expr:
-           {:struct,
-            %{
-              fields: [
-                %{
-                  name: "message",
-                  expr: {:string, %{value: "Expected #{length(fields)} arguments.", span: span}},
-                  span: span
-                },
-                %{name: "usage", expr: {:string, %{value: usage, span: span}}, span: span}
-              ],
-              type: {:named, "ArgsError"},
-              span: span
-            }},
-         span: span,
-         type: nil
-       }}
-
-    ok_case = %{
-      pattern: {:integer, %{value: length(fields), span: span}},
-      guard: nil,
-      body: ok_expr,
-      span: span
-    }
-    err_case = %{pattern: {:wildcard, %{span: span}}, guard: nil, body: err_expr, span: span}
-    match_expr = {:match, %{expr: length_expr, cases: [ok_case, err_case], span: span}}
-
-    expr_form(line, match_expr, env)
+    # Call BeamLang.Runtime.parse_args(fields, field_types, type_label, args)
+    {:call, line,
+     {:remote, line, {:atom, line, :"Elixir.BeamLang.Runtime"}, {:atom, line, :parse_args}},
+     [fields_list, types_list, type_label, expr_form(line, args_expr, env)]}
   end
 
   @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
@@ -591,6 +455,16 @@ defmodule BeamLang.Codegen do
   defp build_list_form(line, [head | tail]) do
     {:cons, line, head, build_list_form(line, tail)}
   end
+
+  # Convert BeamLang type to Erlang term for runtime
+  defp type_to_erlang_term(line, :String), do: {:atom, line, :String}
+  defp type_to_erlang_term(line, :number), do: {:atom, line, :number}
+  defp type_to_erlang_term(line, :bool), do: {:atom, line, :bool}
+  defp type_to_erlang_term(line, :char), do: {:atom, line, :char}
+  defp type_to_erlang_term(line, {:named, name}) do
+    {:tuple, line, [{:atom, line, :named}, {:string, line, String.to_charlist(name)}]}
+  end
+  defp type_to_erlang_term(line, _), do: {:atom, line, :unknown}
 
   @spec assignment_form(
           non_neg_integer(),
