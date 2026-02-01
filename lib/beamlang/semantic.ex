@@ -1017,17 +1017,17 @@ defmodule BeamLang.Semantic do
                     substitute_type(type, param_map)
                   end)
 
-                if Enum.all?(field_types, &string_type?/1) do
-                  {:ok, %{type: type_arg, fields: field_order}}
+                if Enum.all?(field_types, &parse_args_field_type?/1) do
+                  {:ok, %{type: type_arg, fields: field_order, field_types: field_types}}
                 else
                   {:error,
                    [
                      BeamLang.Error.new(
-                       :type,
-                       "parse_args only supports String fields.",
-                       span
-                     )
-                   ]}
+                        :type,
+                        "parse_args only supports String, number, bool, and char fields.",
+                        span
+                      )
+                    ]}
                 end
             end
 
@@ -1076,9 +1076,15 @@ defmodule BeamLang.Semantic do
      ]}
   end
 
-  defp string_type?(:String), do: true
-  defp string_type?({:named, "String"}), do: true
-  defp string_type?(_), do: false
+  defp parse_args_field_type?(:String), do: true
+  defp parse_args_field_type?({:named, "String"}), do: true
+  defp parse_args_field_type?(:number), do: true
+  defp parse_args_field_type?({:named, "number"}), do: true
+  defp parse_args_field_type?(:bool), do: true
+  defp parse_args_field_type?({:named, "bool"}), do: true
+  defp parse_args_field_type?(:char), do: true
+  defp parse_args_field_type?({:named, "char"}), do: true
+  defp parse_args_field_type?(_), do: false
 
   defp method_call_type(target_type, name, args, func_table, type_table, env) do
     error_span =

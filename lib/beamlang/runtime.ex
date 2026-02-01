@@ -118,6 +118,43 @@ defmodule BeamLang.Runtime do
     Enum.map(value, fn ch -> {:char, ch} end)
   end
 
+  @spec parse_number_data(term()) :: map()
+  def parse_number_data(value) do
+    str = any_to_string_data(value) |> to_string()
+
+    case Integer.parse(str) do
+      {int, ""} ->
+        %{tag: 1, value: int}
+
+      _ ->
+        case Float.parse(str) do
+          {float, ""} -> %{tag: 1, value: float}
+          _ -> %{tag: 0}
+        end
+    end
+  end
+
+  @spec parse_bool_data(term()) :: map()
+  def parse_bool_data(value) do
+    str = any_to_string_data(value) |> to_string() |> String.downcase()
+
+    case str do
+      "true" -> %{tag: 1, value: true}
+      "false" -> %{tag: 1, value: false}
+      _ -> %{tag: 0}
+    end
+  end
+
+  @spec parse_char_data(term()) :: map()
+  def parse_char_data(value) do
+    chars = any_to_string_data(value)
+
+    case chars do
+      [ch] -> %{tag: 1, value: {:char, ch}}
+      _ -> %{tag: 0}
+    end
+  end
+
   @spec string_add_or_numeric(term(), term()) :: term()
   def string_add_or_numeric(left, right) do
     cond do

@@ -393,8 +393,8 @@ type List<T> {
 
 ### Args
 
-`parse_args<T>(args: [String]) -> T!String` parses command-line arguments into a struct literal of `T`.
-For now, `T` must be a struct type with `String` fields, and the argument count must match exactly.
+`parse_args<T>(args: [String]) -> T!ArgsError` parses command-line arguments into a struct literal of `T`.
+For now, `T` must be a struct type with `String`, `number`, `bool`, or `char` fields, and the argument count must match exactly.
 
 Type alias: `[T]` is equivalent to `List<T>`.
 

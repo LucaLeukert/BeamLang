@@ -12,9 +12,10 @@ fn main(args: [String]) -> number {
             println("Path: ${opts->path}");
             0;
         },
-        case!err msg => {
+        case!err err => {
             println("Usage: parse_args <path>");
-            println(msg);
+            println(err->message);
+            println(err->usage);
             1;
         }
     };
