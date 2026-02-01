@@ -930,6 +930,14 @@ defmodule BeamLang.LSP.Server do
               expr_str == "" ->
                 :no_interpolation
 
+              interpolation_field_access(expr_str) ->
+                {target, field} = interpolation_field_parts(expr_str)
+
+                case interpolation_field_info(doc, target, field, offset) do
+                  nil -> {:ok, expr_str}
+                  info -> {:ok, info}
+                end
+
               identifier = interpolation_identifier(expr_str) ->
                 case lookup_hover(doc, identifier, offset) do
                   {:ok, info} -> {:ok, info}
@@ -946,11 +954,78 @@ defmodule BeamLang.LSP.Server do
     end
   end
 
+  defp interpolation_field_access(expr_str) do
+    Regex.match?(~r/^[A-Za-z_][A-Za-z0-9_]*->[A-Za-z_][A-Za-z0-9_]*$/, expr_str)
+  end
+
+  defp interpolation_field_parts(expr_str) do
+    case Regex.run(~r/^([A-Za-z_][A-Za-z0-9_]*)->([A-Za-z_][A-Za-z0-9_]*)$/, expr_str) do
+      [_, target, field] -> {target, field}
+      _ -> {nil, nil}
+    end
+  end
+
+  defp interpolation_field_info(doc, target, field, offset) when is_binary(target) and is_binary(field) do
+    target_type =
+      case lookup_local(doc, target, offset) do
+        {:ok, info} -> info.type
+        :error -> nil
+      end
+
+    case lookup_field_type(doc, target_type, field) do
+      {:ok, type_name, field_type} ->
+        "field #{field}: #{format_type(field_type)} (on #{type_name})"
+
+      :error ->
+        nil
+    end
+  end
+
+  defp interpolation_field_info(_doc, _target, _field, _offset), do: nil
+
   defp interpolation_identifier(expr_str) do
     if Regex.match?(~r/^[A-Za-z_][A-Za-z0-9_]*$/, expr_str) do
       expr_str
     else
       nil
+    end
+  end
+
+  defp lookup_field_type(_doc, nil, _field), do: :error
+
+  defp lookup_field_type(doc, {:named, type_name}, field) do
+    lookup_named_field(doc, type_name, field)
+  end
+
+  defp lookup_field_type(doc, type_name, field) when is_binary(type_name) do
+    lookup_named_field(doc, type_name, field)
+  end
+
+  defp lookup_field_type(_doc, _type, _field), do: :error
+
+  defp lookup_named_field(doc, type_name, field) do
+    case Map.get(doc.index[:types] || %{}, type_name) do
+      %{fields: fields} ->
+        case Enum.find(fields, fn %{name: name} -> name == field end) do
+          nil -> lookup_error_field(doc, type_name, field)
+          %{type: type} -> {:ok, type_name, type}
+        end
+
+      _ ->
+        lookup_error_field(doc, type_name, field)
+    end
+  end
+
+  defp lookup_error_field(doc, type_name, field) do
+    case Map.get(doc.index[:errors] || %{}, type_name) do
+      %{fields: fields} ->
+        case Enum.find(fields, fn %{name: name} -> name == field end) do
+          nil -> :error
+          %{type: type} -> {:ok, type_name, type}
+        end
+
+      _ ->
+        :error
     end
   end
 
