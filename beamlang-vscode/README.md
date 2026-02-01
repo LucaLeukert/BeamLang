@@ -30,6 +30,7 @@ A Visual Studio Code extension that provides syntax highlighting and LSP-powered
   - Document symbols
   - Workspace symbols
   - Signature help
+  - Local/parameter hover and definition support
 
 ## Installation
 

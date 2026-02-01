@@ -2,6 +2,16 @@
 
 All notable changes to the "beamlang" extension will be documented in this file.
 
+## [1.1.2] - 2026-02-01
+
+### Added
+- Language server client integration for BeamLang
+- Diagnostics, hover, go-to definition, and completion
+- Configurable LSP server path and arguments
+- Document symbols, workspace symbols, and signature help
+- Debug setting for LSP logging
+- Hover and definition support for locals and struct methods
+
 ## [1.1.1] - 2026-02-01
 
 ### Added
