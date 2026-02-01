@@ -15,9 +15,17 @@ fn file_exists_data(path: String) -> bool;
 @external(elixir, "BeamLang.Runtime", "get_env")
 fn get_env_data(name: String) -> any;
 
+@external(elixir, "BeamLang.Runtime", "clock_now_data")
+fn clock_now_data() -> number;
+
 internal fn make_io_error(msg: String) -> String!IoError {
     let err: IoError = { kind = "read", message = msg };
     return !err err;
+}
+
+/** Get current monotonic time in milliseconds **/
+fn clock_now() -> number {
+    return clock_now_data();
 }
 
 /** Read a file and return its contents as a Result **/

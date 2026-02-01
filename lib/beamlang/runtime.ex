@@ -18,8 +18,8 @@ defmodule BeamLang.Runtime do
   def load_and_run(module, binary, args \\ []) do
     case :code.load_binary(module, ~c"beamlang_program.beam", binary) do
       {:module, ^module} ->
-        # Convert raw Erlang list to BeamLang List struct
-        beamlang_list = wrap_as_beamlang_list(args)
+        # Convert raw Erlang list to BeamLang List struct using the loaded module
+        beamlang_list = wrap_as_beamlang_list(args, module)
         {:ok, apply(module, :main, [beamlang_list])}
       {:error, reason} -> {:error, %{message: "Failed to load compiled module: #{inspect(reason)}"}}
     end
@@ -29,9 +29,9 @@ defmodule BeamLang.Runtime do
   Wraps a raw Erlang list into a BeamLang List struct.
   Delegates to the compiled stdlib's list_from_data function.
   """
-  @spec wrap_as_beamlang_list(list()) :: map()
-  def wrap_as_beamlang_list(data) when is_list(data) do
-    apply(:beamlang_program, :list_from_data, [data])
+  @spec wrap_as_beamlang_list(list(), atom()) :: map()
+  def wrap_as_beamlang_list(data, module \\ :beamlang_program) when is_list(data) do
+    apply(module, :list_from_data, [data])
   end
 
   @spec load_modules([{atom(), binary()}]) :: :ok | {:error, map()}
@@ -321,6 +321,11 @@ defmodule BeamLang.Runtime do
     end
   end
 
+  @spec clock_now_data() :: number()
+  def clock_now_data() do
+    :erlang.monotonic_time(:millisecond)
+  end
+
   defp string_data(%{__beamlang_type__: "String", data: data}), do: data
   defp string_data(%{__beamlang_type__: ~c"String", data: data}), do: data
   defp string_data(value) when is_map(value) do
@@ -328,6 +333,7 @@ defmodule BeamLang.Runtime do
   end
   defp string_data(value) when is_list(value), do: value
   defp string_data(value) when is_binary(value), do: value
+  defp string_data({:char, code}) when is_integer(code), do: [code]
   defp string_data(value), do: inspect(value)
 
   defp ensure_charlist(value) when is_binary(value), do: String.to_charlist(value)
@@ -340,14 +346,6 @@ defmodule BeamLang.Runtime do
     is_map(value) and Map.has_key?(value, :data) and Map.has_key?(value, :length) and Map.has_key?(value, :chars)
   end
 
-  @doc """
-  Parses command line arguments into a struct.
-
-  fields: list of field names (as strings)
-  field_types: list of field type atoms (:String, :number, :bool, :char)
-  type_label: the BeamLang type name for the result struct
-  args: the BeamLang List of string arguments
-  """
   @spec parse_args(list(), list(), charlist(), map()) :: map()
   def parse_args(fields, field_types, type_label, args) do
     args_data = args.data

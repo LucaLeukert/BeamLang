@@ -12,7 +12,8 @@ type List<T> {
     fold: fn(List<T>, any, fn(any, T) -> any) -> any,
     for_each: fn(List<T>, fn(T) -> void) -> void,
     reverse: fn(List<T>) -> List<T>,
-    concat: fn(List<T>, List<T>) -> List<T>
+    concat: fn(List<T>, List<T>) -> List<T>,
+    join: fn(List<T>, String) -> String
 }
 
 @external(elixir, "BeamLang.Runtime", "list_length")
@@ -45,6 +46,9 @@ fn list_empty_data() -> any;
 @external(elixir, "BeamLang.Runtime", "list_for_each")
 fn list_for_each_data(data: any, callback: fn(any) -> void) -> void;
 
+@external(elixir, "BeamLang.Runtime", "list_join")
+fn list_join_data(data: any, separator: String) -> String;
+
 fn list_new<T>() -> List<T> {
     return list_from_data(list_empty_data());
 }
@@ -68,7 +72,8 @@ internal fn list_from_data<T>(data: any) -> List<T> {
         fold = list_fold_method,
         for_each = list_for_each_method,
         reverse = list_reverse_method,
-        concat = list_concat_method
+        concat = list_concat_method,
+        join = list_join_method
     };
 }
 
@@ -129,4 +134,9 @@ internal fn list_reverse_method<T>(self: List<T>) -> List<T> {
 internal fn list_concat_method<T>(self: List<T>, other: List<T>) -> List<T> {
     let concatenated = list_concat_data(self->data, other->data);
     return list_from_data(concatenated);
+}
+
+internal fn list_join_method<T>(self: List<T>, separator: String) -> String {
+    let result = list_join_data(self->data, separator);
+    return result;
 }

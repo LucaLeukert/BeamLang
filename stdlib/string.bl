@@ -23,6 +23,9 @@ fn println<T>(value: T) -> void;
 @external(elixir, "BeamLang.Runtime", "print")
 fn print<T>(value: T) -> void;
 
+@external(elixir, "BeamLang.Runtime", "println_raw")
+fn println_raw<T>(value: T) -> void;
+
 @external(elixir, "BeamLang.Runtime", "any_to_string_data")
 fn any_to_string_data(value: any) -> any;
 
