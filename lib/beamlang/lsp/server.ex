@@ -235,7 +235,7 @@ defmodule BeamLang.LSP.Server do
       [
         %{
           "uri" => path_to_uri(path),
-          "range" => range_for_span(doc.text, span)
+          "range" => range_for_span_in_doc(doc, span)
         }
       ]
     else
@@ -251,6 +251,7 @@ defmodule BeamLang.LSP.Server do
     functions =
       doc.index
       |> Map.get(:functions, %{})
+      |> Enum.filter(fn {_name, info} -> span_in_doc?(doc, info.span) end)
       |> Enum.map(fn {name, info} ->
         document_symbol(name, 12, doc.text, info.span)
       end)
@@ -258,6 +259,7 @@ defmodule BeamLang.LSP.Server do
     types =
       doc.index
       |> Map.get(:types, %{})
+      |> Enum.filter(fn {_name, info} -> span_in_doc?(doc, info.span) end)
       |> Enum.map(fn {name, info} ->
         document_symbol(name, 23, doc.text, info.span)
       end)
@@ -265,6 +267,7 @@ defmodule BeamLang.LSP.Server do
     errors =
       doc.index
       |> Map.get(:errors, %{})
+      |> Enum.filter(fn {_name, info} -> span_in_doc?(doc, info.span) end)
       |> Enum.map(fn {name, info} ->
         document_symbol(name, 23, doc.text, info.span)
       end)
@@ -273,7 +276,9 @@ defmodule BeamLang.LSP.Server do
       doc.index
       |> Map.get(:methods, %{})
       |> Enum.flat_map(fn {name, infos} ->
-        Enum.map(infos, fn info ->
+        infos
+        |> Enum.filter(fn info -> span_in_doc?(doc, info.span) end)
+        |> Enum.map(fn info ->
           document_symbol("#{info.type_name}::#{name}", 6, doc.text, info.span)
         end)
       end)
@@ -287,15 +292,20 @@ defmodule BeamLang.LSP.Server do
       doc.index
       |> symbol_matches(query)
       |> Enum.map(fn {name, kind, span} ->
+        if span_in_doc?(doc, span) do
         %{
           "name" => name,
           "kind" => kind,
           "location" => %{
             "uri" => doc.uri,
-            "range" => range_for_span(doc.text, span)
+            "range" => range_for_span_in_doc(doc, span)
           }
         }
+        else
+          nil
+        end
       end)
+      |> Enum.reject(&is_nil/1)
     end)
   end
 
@@ -402,7 +412,7 @@ defmodule BeamLang.LSP.Server do
   end
 
   defp lookup_hover(doc, name, offset) do
-    case lookup_local(doc.index, name, offset) do
+    case lookup_local(doc, name, offset) do
       {:ok, info} ->
         {:ok, format_local_info(info)}
 
@@ -432,7 +442,7 @@ defmodule BeamLang.LSP.Server do
   end
 
   defp lookup_definition(doc, name, offset) do
-    case lookup_local(doc.index, name, offset) do
+    case lookup_local(doc, name, offset) do
       {:ok, info} ->
         {:ok, %{span: info.span, path: doc.path}}
 
@@ -660,12 +670,13 @@ defmodule BeamLang.LSP.Server do
 
   defp find_call_name([_ | rest]), do: find_call_name(rest)
 
-  defp lookup_local(index, name, offset) do
-    locals = Map.get(index, :locals, [])
+  defp lookup_local(doc, name, offset) do
+    locals = Map.get(doc.index, :locals, [])
 
     locals
     |> Enum.filter(fn local ->
       local.name == name and
+        local.func_span.file_id == doc.path and
         offset >= local.func_span.start and offset <= local.func_span.end and
         local.span.start <= offset
     end)
@@ -749,6 +760,25 @@ defmodule BeamLang.LSP.Server do
       "start" => offset_to_position(source, start_offset),
       "end" => offset_to_position(source, end_offset)
     }
+  end
+
+  defp range_for_span_in_doc(doc, %BeamLang.Span{file_id: file_id} = span) do
+    source =
+      cond do
+        file_id == doc.path -> doc.text
+        file_id == "<source>" -> doc.text
+        true ->
+          case File.read(file_id) do
+            {:ok, contents} -> contents
+            _ -> doc.text
+          end
+      end
+
+    range_for_span(source, span)
+  end
+
+  defp span_in_doc?(doc, %BeamLang.Span{file_id: file_id}) do
+    file_id == doc.path or file_id == "<source>"
   end
 
   defp offset_to_position(source, offset) do

@@ -74,8 +74,8 @@ defmodule BeamLang do
          {:ok, stdlib_ast} <- load_stdlib_ast(),
          {:ok, merged} <- merge_programs(stdlib_ast, ast) do
       case Semantic.validate(merged, require_main: false) do
-        {:ok, _checked} -> {:ok, %{tokens: tokens, ast: ast, errors: []}}
-        {:error, errors} when is_list(errors) -> {:ok, %{tokens: tokens, ast: ast, errors: errors}}
+        {:ok, checked} -> {:ok, %{tokens: tokens, ast: checked, errors: []}}
+        {:error, errors} when is_list(errors) -> {:ok, %{tokens: tokens, ast: merged, errors: errors}}
       end
     else
       {:error, %BeamLang.Error{} = error} ->
