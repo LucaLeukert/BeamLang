@@ -296,23 +296,27 @@ type List<T> {
 }
 ```
 
-Constructor:
+Type alias: `[T]` is equivalent to `List<T>`.
+
+List literal syntax:
 
 ```beamlang
-let nums = list_new();  // Creates an empty List<any>
-let nums2 = nums->push(1);
+let nums: [number] = [1, 2, 3, 4, 5];
+let empty: [String] = [];
+let nested: [[number]] = [[1, 2], [3, 4]];
 ```
 
 Example:
 
 ```beamlang
-let nums = make_nums();
+let nums: [number] = [1, 2, 3, 4, 5];
 let sum = nums->fold(0, add_nums);
 println("Sum: ${sum}");
 
-for (item in nums->iter()) {
-    print("${item} ");
-}
+match (nums->first()) {
+    case ?some val => println("First: ${val}"),
+    case ?none => println("Empty")
+};
 ```
 
 ### Result

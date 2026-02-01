@@ -413,6 +413,20 @@ defmodule BeamLang.Codegen do
     {:call, line, {:atom, line, :result_err}, [value]}
   end
 
+  @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
+  defp expr_form(line, {:list_literal, %{elements: elements}}, env) do
+    elem_forms = Enum.map(elements, fn elem -> expr_form(line, elem, env) end)
+    list_form = build_list_form(line, elem_forms)
+
+    {:call, line, {:atom, line, :list_of}, [list_form]}
+  end
+
+  defp build_list_form(line, []), do: {:nil, line}
+
+  defp build_list_form(line, [head | tail]) do
+    {:cons, line, head, build_list_form(line, tail)}
+  end
+
   @spec assignment_form(
           non_neg_integer(),
           BeamLang.AST.expr(),

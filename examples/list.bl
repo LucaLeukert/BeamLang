@@ -1,5 +1,5 @@
 fn main() -> number {
-    let nums = make_nums();
+    let nums: [number] = [1, 2, 3, 4, 5];
     
     println("List length: ${nums->length()}");
     
@@ -28,28 +28,14 @@ fn main() -> number {
         case ?none => println("Empty reversed")
     };
     
-    let more = make_more();
+    let more: [number] = [6, 7];
     let combined = nums->concat(more);
     println("Combined length: ${combined->length()}");
     
+    let empty: [number] = [];
+    println("Empty length: ${empty->length()}");
+    
     return 0;
-}
-
-fn make_nums() -> List<number> {
-    let l0 = list_new();
-    let l1 = l0->push(1);
-    let l2 = l1->push(2);
-    let l3 = l2->push(3);
-    let l4 = l3->push(4);
-    let l5 = l4->push(5);
-    return l5;
-}
-
-fn make_more() -> List<number> {
-    let m0 = list_new();
-    let m1 = m0->push(6);
-    let m2 = m1->push(7);
-    return m2;
 }
 
 fn add_nums(acc: number, x: number) -> number {

@@ -558,6 +558,60 @@ defmodule BeamLang.Semantic do
     end
   end
 
+  defp type_of_expr({:list_literal, %{elements: elements, span: _span}}, func_table, type_table, env, expected) do
+    elem_type =
+      case expected do
+        {:generic, {:named, "List"}, [t]} -> t
+        _ -> :any
+      end
+
+    errors =
+      Enum.flat_map(elements, fn elem ->
+        case type_of_expr(elem, func_table, type_table, env, elem_type) do
+          {:ok, inferred} ->
+            if elem_type == :any or type_compatible?(elem_type, inferred) do
+              []
+            else
+              [
+                BeamLang.Error.new(
+                  :type,
+                  "List element type mismatch. Expected #{type_label(elem_type)}, got #{type_label(inferred)}.",
+                  expr_span(elem)
+                )
+              ]
+            end
+
+          {:error, reason} when is_binary(reason) ->
+            [BeamLang.Error.new(:type, reason, expr_span(elem))]
+
+          {:error, %BeamLang.Error{} = err} ->
+            [err]
+
+          {:error, {:match, errs}} ->
+            errs
+
+          {:error, _reason} ->
+            [BeamLang.Error.new(:type, "Invalid list element.", expr_span(elem))]
+        end
+      end)
+
+    if errors == [] do
+      inferred_elem_type =
+        case elements do
+          [] -> elem_type
+          [first | _] ->
+            case type_of_expr(first, func_table, type_table, env, nil) do
+              {:ok, t} -> t
+              _ -> :any
+            end
+        end
+
+      {:ok, {:generic, {:named, "List"}, [inferred_elem_type]}}
+    else
+      {:error, {:match, errors}}
+    end
+  end
+
   defp type_of_expr(
          {:field, %{target: target, name: name}},
          func_table,
@@ -2390,6 +2444,7 @@ defmodule BeamLang.Semantic do
   defp expr_span({:res_err, %{span: span}}), do: span
   defp expr_span({:lambda, %{span: span}}), do: span
   defp expr_span({:method_call, %{span: span}}), do: span
+  defp expr_span({:list_literal, %{span: span}}), do: span
 
   @spec type_compatible?(BeamLang.AST.type_name(), BeamLang.AST.type_name()) :: boolean()
   defp type_compatible?(expected, inferred) do
@@ -3086,6 +3141,34 @@ defmodule BeamLang.Semantic do
       end
 
     {{:res_err, %{expr: expr, span: span, type: inferred}}, inferred}
+  end
+
+  defp annotate_expr({:list_literal, %{elements: elements, span: span}}, expected, env, func_table, type_table) do
+    elem_type =
+      case normalize_type(expected) do
+        {:generic, {:named, "List"}, [t]} -> t
+        _ -> nil
+      end
+
+    annotated_elements =
+      Enum.map(elements, fn elem ->
+        {annotated, _} = annotate_expr(elem, elem_type, env, func_table, type_table)
+        annotated
+      end)
+
+    inferred =
+      case type_of_expr(
+             {:list_literal, %{elements: elements, span: span}},
+             func_table,
+             type_table,
+             env,
+             expected
+           ) do
+        {:ok, type} -> type
+        _ -> {:generic, {:named, "List"}, [:any]}
+      end
+
+    {{:list_literal, %{elements: annotated_elements, span: span, type: inferred}}, inferred}
   end
 
   defp annotate_expr(

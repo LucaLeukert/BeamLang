@@ -445,4 +445,42 @@ defmodule BeamLang.ParserTest do
     # return len;
     assert {:return, %{expr: {:identifier, %{name: "len"}}}} = Enum.at(stmts, 3)
   end
+
+  test "parses list literal syntax" do
+    source = """
+    fn main() -> number {
+        let nums: [number] = [1, 2, 3];
+        let empty: [number] = [];
+        return 0;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{functions: [func]}} = ast
+    assert {:function, %{name: "main", body: {:block, %{stmts: stmts}}}} = func
+    assert length(stmts) == 3
+
+    # let nums: [number] = [1, 2, 3];
+    assert {:let, %{name: "nums", type: {:generic, {:named, "List"}, [:number]}, expr: {:list_literal, %{elements: elems}}}} = Enum.at(stmts, 0)
+    assert length(elems) == 3
+
+    # let empty: [number] = [];
+    assert {:let, %{name: "empty", type: {:generic, {:named, "List"}, [:number]}, expr: {:list_literal, %{elements: []}}}} = Enum.at(stmts, 1)
+  end
+
+  test "parses nested list type" do
+    source = """
+    fn main() -> [[number]] {
+        return [];
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{functions: [func]}} = ast
+    assert {:function, %{name: "main", return_type: {:generic, {:named, "List"}, [{:generic, {:named, "List"}, [:number]}]}}} = func
+  end
 end

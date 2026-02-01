@@ -815,6 +815,10 @@ defmodule BeamLang.Parser do
     end
   end
 
+  defp parse_primary([%Token{type: :lbracket} = lbracket_tok | rest]) do
+    parse_list_literal(lbracket_tok, rest)
+  end
+
   defp parse_primary(tokens) do
     case parse_call(tokens) do
       {:ok, _expr, _rest} = ok -> ok
@@ -827,6 +831,35 @@ defmodule BeamLang.Parser do
               {:error, _} -> parse_identifier(tokens)
             end
         end
+    end
+  end
+
+  @spec parse_list_literal(Token.t(), [Token.t()]) ::
+          {:ok, BeamLang.AST.expr(), [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_list_literal(lbracket_tok, [%Token{type: :rbracket} = rbracket_tok | rest]) do
+    span = BeamLang.Span.merge(lbracket_tok.span, rbracket_tok.span)
+    {:ok, {:list_literal, %{elements: [], span: span}}, rest}
+  end
+
+  defp parse_list_literal(lbracket_tok, tokens) do
+    with {:ok, elements, rest1} <- parse_list_elements(tokens, []),
+         {:ok, rbracket_tok, rest2} <- expect(rest1, :rbracket) do
+      span = BeamLang.Span.merge(lbracket_tok.span, rbracket_tok.span)
+      {:ok, {:list_literal, %{elements: elements, span: span}}, rest2}
+    end
+  end
+
+  @spec parse_list_elements([Token.t()], [BeamLang.AST.expr()]) ::
+          {:ok, [BeamLang.AST.expr()], [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_list_elements(tokens, acc) do
+    with {:ok, expr, rest} <- parse_expression(tokens) do
+      case rest do
+        [%Token{type: :comma} | rest1] ->
+          parse_list_elements(rest1, acc ++ [expr])
+
+        _ ->
+          {:ok, acc ++ [expr], rest}
+      end
     end
   end
 
@@ -1378,6 +1411,7 @@ defmodule BeamLang.Parser do
   defp expr_span({:res_err, %{span: span}}), do: span
   defp expr_span({:lambda, %{span: span}}), do: span
   defp expr_span({:method_call, %{span: span}}), do: span
+  defp expr_span({:list_literal, %{span: span}}), do: span
 
   @spec pattern_span(BeamLang.AST.pattern()) :: BeamLang.Span.t()
   defp pattern_span({:integer, %{span: span}}), do: span
@@ -1546,6 +1580,14 @@ defmodule BeamLang.Parser do
           {:ok, {BeamLang.AST.type_name(), BeamLang.Span.t()}, [Token.t()]} | {:error, BeamLang.Error.t()}
   defp parse_base_type([%Token{type: :type} = tok | rest]) do
     {:ok, {String.to_atom(tok.value), tok.span}, rest}
+  end
+
+  defp parse_base_type([%Token{type: :lbracket} = lbracket_tok | rest]) do
+    with {:ok, {elem_type, _elem_span}, rest1} <- parse_type_name(rest),
+         {:ok, rbracket_tok, rest2} <- expect(rest1, :rbracket) do
+      span = BeamLang.Span.merge(lbracket_tok.span, rbracket_tok.span)
+      {:ok, {{:generic, {:named, "List"}, [elem_type]}, span}, rest2}
+    end
   end
 
   defp parse_base_type([%Token{type: :fn} = fn_tok | rest]) do

@@ -40,6 +40,8 @@ defmodule BeamLang.Lexer do
     ?) => :rparen,
     ?{ => :lbrace,
     ?} => :rbrace,
+    ?[ => :lbracket,
+    ?] => :rbracket,
     ?; => :semicolon,
     ?. => :dot,
     ?= => :equals,
