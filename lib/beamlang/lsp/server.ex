@@ -524,24 +524,27 @@ defmodule BeamLang.LSP.Server do
   defp build_index(nil), do: %{}
 
   defp build_index({:program, %{functions: functions, types: types, errors: errors}}) do
+    func_index = index_functions(functions)
+
     %{
-      functions: index_functions(functions),
+      functions: func_index,
       types: index_types(types),
       errors: index_errors(errors),
       methods: index_methods(types),
-      locals: index_locals(functions, index_functions(functions))
+      locals: index_locals(functions, func_index)
     }
   end
 
   defp build_index({:program, %{functions: functions, types: types} = program}) do
     errors = Map.get(program, :errors, [])
+    func_index = index_functions(functions)
 
     %{
-      functions: index_functions(functions),
+      functions: func_index,
       types: index_types(types),
       errors: index_errors(errors),
       methods: index_methods(types),
-      locals: index_locals(functions, index_functions(functions))
+      locals: index_locals(functions, func_index)
     }
   end
 
@@ -596,12 +599,14 @@ defmodule BeamLang.LSP.Server do
           _ -> func_span
         end
 
-      param_entries =
-        Enum.map(params, fn %{name: name, type: type, span: span} ->
-          %{name: name, type: type, span: span, func_span: func_span, scope_span: scope_span, kind: :param}
+      {env, param_entries} =
+        Enum.reduce(params, {%{}, []}, fn %{name: name, type: type, span: span}, {env, acc} ->
+          entry = %{name: name, type: type, span: span, func_span: func_span, scope_span: scope_span, kind: :param}
+          {Map.put(env, name, type), [entry | acc]}
         end)
 
-      param_entries ++ collect_lets(body, func_span, func_table)
+      {locals, _env} = collect_block_locals(body, func_span, func_table, env)
+      Enum.reverse(param_entries) ++ locals
     end)
   end
 
@@ -1120,61 +1125,82 @@ defmodule BeamLang.LSP.Server do
     end
   end
 
-  defp collect_lets(nil, _func_span, _func_table), do: []
+  defp collect_block_locals(nil, _func_span, _func_table, env), do: {[], env}
 
-  defp collect_lets({:block, %{stmts: stmts, span: block_span}}, func_span, func_table) do
-    Enum.flat_map(stmts, &collect_from_stmt(&1, func_span, block_span, func_table))
+  defp collect_block_locals({:block, %{stmts: stmts, span: block_span}}, func_span, func_table, env) do
+    Enum.reduce(stmts, {[], env}, fn stmt, {locals, acc_env} ->
+      {new_locals, next_env} = collect_stmt_locals(stmt, func_span, block_span, func_table, acc_env)
+      {locals ++ new_locals, next_env}
+    end)
   end
 
-  defp collect_from_stmt({:let, %{name: name, type: type, expr: expr, span: span} = info}, func_span, scope_span, func_table) do
-    inferred = Map.get(info, :inferred_type) || type || infer_expr_type(expr)
-    [%{name: name, type: inferred, span: span, func_span: func_span, scope_span: scope_span, kind: :let}] ++
-      collect_from_expr(expr, func_span, scope_span, func_table)
+  defp collect_stmt_locals({:let, %{name: name, type: type, expr: expr, span: span} = info}, func_span, scope_span, func_table, env) do
+    inferred = Map.get(info, :inferred_type) || type || infer_expr_type_with_env(expr, func_table, env)
+    entry = %{name: name, type: inferred, span: span, func_span: func_span, scope_span: scope_span, kind: :let}
+    expr_locals = collect_expr_locals(expr, func_span, scope_span, func_table, env)
+    {expr_locals ++ [entry], Map.put(env, name, inferred)}
   end
 
-  defp collect_from_stmt({:for, %{name: name, body: body, span: span}}, func_span, scope_span, func_table) do
-    [%{name: name, type: nil, span: span, func_span: func_span, scope_span: scope_span, kind: :for}] ++
-      collect_lets(body, func_span, func_table)
+  defp collect_stmt_locals({:for, %{name: name, body: body, span: span}}, func_span, _scope_span, func_table, env) do
+    entry = %{name: name, type: nil, span: span, func_span: func_span, scope_span: span, kind: :for}
+    {body_locals, _} = collect_block_locals(body, func_span, func_table, Map.put(env, name, nil))
+    {[entry | body_locals], env}
   end
 
-  defp collect_from_stmt({:if_stmt, %{then_block: then_block, else_branch: else_branch}}, func_span, _scope_span, func_table) do
-    collect_lets(then_block, func_span, func_table) ++ collect_from_else(else_branch, func_span, func_table)
+  defp collect_stmt_locals({:if_stmt, %{then_block: then_block, else_branch: else_branch}}, func_span, _scope_span, func_table, env) do
+    {then_locals, _} = collect_block_locals(then_block, func_span, func_table, env)
+    else_locals = collect_else_locals(else_branch, func_span, func_table, env)
+    {then_locals ++ else_locals, env}
   end
 
-  defp collect_from_stmt({:while, %{body: body}}, func_span, _scope_span, func_table),
-    do: collect_lets(body, func_span, func_table)
-
-  defp collect_from_stmt({:loop, %{body: body}}, func_span, _scope_span, func_table),
-    do: collect_lets(body, func_span, func_table)
-
-  defp collect_from_stmt({:guard, %{else_block: block}}, func_span, _scope_span, func_table),
-    do: collect_lets(block, func_span, func_table)
-
-  defp collect_from_stmt({:expr, %{expr: expr}}, func_span, scope_span, func_table),
-    do: collect_from_expr(expr, func_span, scope_span, func_table)
-
-  defp collect_from_stmt(_stmt, _func_span, _scope_span, _func_table), do: []
-
-  defp collect_from_else(nil, _func_span, _func_table), do: []
-
-  defp collect_from_else({:else_block, %{block: block}}, func_span, func_table) do
-    collect_lets(block, func_span, func_table)
+  defp collect_stmt_locals({:while, %{body: body}}, func_span, _scope_span, func_table, env) do
+    {body_locals, _} = collect_block_locals(body, func_span, func_table, env)
+    {body_locals, env}
   end
 
-  defp collect_from_else({:else_if, %{if: if_stmt}}, func_span, func_table) do
-    collect_from_stmt(if_stmt, func_span, nil, func_table)
+  defp collect_stmt_locals({:loop, %{body: body}}, func_span, _scope_span, func_table, env) do
+    {body_locals, _} = collect_block_locals(body, func_span, func_table, env)
+    {body_locals, env}
   end
 
-  defp collect_from_expr(nil, _func_span, _scope_span, _func_table), do: []
-  defp collect_from_expr({:block_expr, %{block: block}}, func_span, _scope_span, func_table),
-    do: collect_lets(block, func_span, func_table)
-
-  defp collect_from_expr({:if_expr, %{then_block: then_block, else_branch: else_branch}}, func_span, _scope_span, func_table) do
-    collect_lets(then_block, func_span, func_table) ++ collect_from_else(else_branch, func_span, func_table)
+  defp collect_stmt_locals({:guard, %{else_block: block}}, func_span, _scope_span, func_table, env) do
+    {body_locals, _} = collect_block_locals(block, func_span, func_table, env)
+    {body_locals, env}
   end
 
-  defp collect_from_expr({:match, %{expr: match_expr, cases: cases}}, func_span, _scope_span, func_table) do
-    match_type = infer_expr_type_with_functions(match_expr, func_table)
+  defp collect_stmt_locals({:expr, %{expr: expr}}, func_span, scope_span, func_table, env) do
+    {collect_expr_locals(expr, func_span, scope_span, func_table, env), env}
+  end
+
+  defp collect_stmt_locals(_stmt, _func_span, _scope_span, _func_table, env), do: {[], env}
+
+  defp collect_else_locals(nil, _func_span, _func_table, _env), do: []
+
+  defp collect_else_locals({:else_block, %{block: block}}, func_span, func_table, env) do
+    {locals, _} = collect_block_locals(block, func_span, func_table, env)
+    locals
+  end
+
+  defp collect_else_locals({:else_if, %{if: if_stmt}}, func_span, func_table, env) do
+    {locals, _} = collect_stmt_locals(if_stmt, func_span, nil, func_table, env)
+    locals
+  end
+
+  defp collect_expr_locals(nil, _func_span, _scope_span, _func_table, _env), do: []
+
+  defp collect_expr_locals({:block_expr, %{block: block}}, func_span, _scope_span, func_table, env) do
+    {locals, _} = collect_block_locals(block, func_span, func_table, env)
+    locals
+  end
+
+  defp collect_expr_locals({:if_expr, %{then_block: then_block, else_branch: else_branch}}, func_span, _scope_span, func_table, env) do
+    {then_locals, _} = collect_block_locals(then_block, func_span, func_table, env)
+    else_locals = collect_else_locals(else_branch, func_span, func_table, env)
+    then_locals ++ else_locals
+  end
+
+  defp collect_expr_locals({:match, %{expr: match_expr, cases: cases}}, func_span, _scope_span, func_table, env) do
+    match_type = infer_expr_type_with_env(match_expr, func_table, env)
 
     Enum.flat_map(cases, fn %{pattern: pattern, body: body, span: case_span} ->
       pattern_locals =
@@ -1184,29 +1210,29 @@ defmodule BeamLang.LSP.Server do
           %{name: name, type: type, span: span, func_span: func_span, scope_span: case_span, kind: :let}
         end)
 
-      pattern_locals ++ collect_from_expr(body, func_span, case_span, func_table)
+      pattern_locals ++ collect_expr_locals(body, func_span, case_span, func_table, env)
     end)
   end
 
-  defp collect_from_expr({:call, %{args: args}}, func_span, scope_span, func_table) do
-    Enum.flat_map(args, &collect_from_expr(&1, func_span, scope_span, func_table))
+  defp collect_expr_locals({:call, %{args: args}}, func_span, scope_span, func_table, env) do
+    Enum.flat_map(args, &collect_expr_locals(&1, func_span, scope_span, func_table, env))
   end
 
-  defp collect_from_expr({:method_call, %{target: target, args: args}}, func_span, scope_span, func_table) do
-    collect_from_expr(target, func_span, scope_span, func_table) ++
-      Enum.flat_map(args, &collect_from_expr(&1, func_span, scope_span, func_table))
+  defp collect_expr_locals({:method_call, %{target: target, args: args}}, func_span, scope_span, func_table, env) do
+    collect_expr_locals(target, func_span, scope_span, func_table, env) ++
+      Enum.flat_map(args, &collect_expr_locals(&1, func_span, scope_span, func_table, env))
   end
 
-  defp collect_from_expr({:binary, %{left: left, right: right}}, func_span, scope_span, func_table) do
-    collect_from_expr(left, func_span, scope_span, func_table) ++
-      collect_from_expr(right, func_span, scope_span, func_table)
+  defp collect_expr_locals({:binary, %{left: left, right: right}}, func_span, scope_span, func_table, env) do
+    collect_expr_locals(left, func_span, scope_span, func_table, env) ++
+      collect_expr_locals(right, func_span, scope_span, func_table, env)
   end
 
-  defp collect_from_expr({:struct, %{fields: fields}}, func_span, scope_span, func_table) do
-    Enum.flat_map(fields, fn %{expr: expr} -> collect_from_expr(expr, func_span, scope_span, func_table) end)
+  defp collect_expr_locals({:struct, %{fields: fields}}, func_span, scope_span, func_table, env) do
+    Enum.flat_map(fields, fn %{expr: expr} -> collect_expr_locals(expr, func_span, scope_span, func_table, env) end)
   end
 
-  defp collect_from_expr(_expr, _func_span, _scope_span, _func_table), do: []
+  defp collect_expr_locals(_expr, _func_span, _scope_span, _func_table, _env), do: []
 
   defp pattern_bindings_with_type({:pat_identifier, %{name: name, span: span}}, type),
     do: [{name, span, type}]
@@ -1265,14 +1291,18 @@ defmodule BeamLang.LSP.Server do
 
   defp infer_expr_type(_expr), do: nil
 
-  defp infer_expr_type_with_functions({:call, %{name: name}}, func_table) do
+  defp infer_expr_type_with_env({:identifier, %{name: name}}, _func_table, env) do
+    Map.get(env, name)
+  end
+
+  defp infer_expr_type_with_env({:call, %{name: name}}, func_table, _env) do
     case Map.get(func_table, name) do
       nil -> nil
       info -> info.return_type
     end
   end
 
-  defp infer_expr_type_with_functions(expr, _func_table), do: infer_expr_type(expr)
+  defp infer_expr_type_with_env(expr, _func_table, _env), do: infer_expr_type(expr)
 
   defp span_contains?(nil, _offset), do: false
   defp span_contains?(%BeamLang.Span{start: start_pos, end: end_pos}, offset) do
