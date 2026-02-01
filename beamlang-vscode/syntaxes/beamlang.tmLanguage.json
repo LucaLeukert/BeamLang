@@ -5,11 +5,11 @@
   "patterns": [
     { "include": "#comments" },
     { "include": "#keywords" },
+    { "include": "#operators" },
     { "include": "#types" },
     { "include": "#functions" },
     { "include": "#attributes" },
     { "include": "#literals" },
-    { "include": "#operators" },
     { "include": "#punctuation" }
   ],
   "repository": {
@@ -34,7 +34,7 @@
         },
         {
           "name": "keyword.other.beamlang",
-          "match": "\\b(fn|type|let|import|export|internal|as)\\b"
+          "match": "\\b(fn|type|let|mut|import|export|internal|as)\\b"
         },
         {
           "name": "keyword.operator.beamlang",
@@ -62,7 +62,7 @@
         },
         {
           "name": "support.type.generic.beamlang",
-          "begin": "<",
+          "begin": "<(?![=0-9])",
           "end": ">",
           "patterns": [
             { "include": "#types" },

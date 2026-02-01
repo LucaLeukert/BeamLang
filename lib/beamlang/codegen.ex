@@ -598,7 +598,7 @@ defmodule BeamLang.Codegen do
       end)
 
     continue_call = {:call, line, {:var, line, fun_name}, continue_args}
-    
+
     # Combine body forms with continue call, handling return/break
     body_with_continue = build_loop_body_with_continue(body_forms, continue_call, env_after_body, param_vars, counter)
 
@@ -688,23 +688,23 @@ defmodule BeamLang.Codegen do
 
   defp loop_stmt_form({:if_stmt, %{cond: cond, then_block: then_block, else_branch: else_branch}}, env, counter) do
     # For if in loop body, we need to handle it specially
-    {then_forms, _then_env, counter} = 
+    {then_forms, _then_env, counter} =
       case then_block do
         {:block, %{stmts: stmts}} -> loop_body_forms(stmts, env, counter)
         _ -> {[], env, counter}
       end
-    
+
     {else_forms, _else_env, counter} =
       case else_branch do
         {:else_block, %{block: {:block, %{stmts: stmts}}}} -> loop_body_forms(stmts, env, counter)
         nil -> {[{:atom, 1, :ok}], env, counter}
         _ -> {[{:atom, 1, :ok}], env, counter}
       end
-    
+
     cond_form = expr_form(1, cond, env)
     then_expr = if length(then_forms) == 1, do: hd(then_forms), else: {:block, 1, then_forms}
     else_expr = if length(else_forms) == 1, do: hd(else_forms), else: {:block, 1, else_forms}
-    
+
     clause_true = {:clause, 1, [{:atom, 1, true}], [], [then_expr]}
     clause_false = {:clause, 1, [{:atom, 1, false}], [], [else_expr]}
     {{:case, 1, cond_form, [clause_true, clause_false]}, env, counter}
@@ -718,21 +718,21 @@ defmodule BeamLang.Codegen do
   # Build the loop body with continue call at the end
   defp build_loop_body_with_continue(body_forms, continue_call, env_after_body, param_vars, _counter) do
     line = 1
-    
+
     if Enum.empty?(body_forms) do
       continue_call
     else
       # Check if any form might be a return or break
       # If so, we need to wrap in case to catch it
       has_control_flow = Enum.any?(body_forms, &has_return_or_break?/1)
-      
+
       if has_control_flow do
         # Wrap in case to handle return/break
         body_expr = if length(body_forms) == 1, do: hd(body_forms), else: {:block, line, body_forms}
         ret_var = internal_var("return_value")
         return_tuple = {:tuple, line, [{:atom, line, :__return__}, {:var, line, ret_var}]}
         clause_return = {:clause, line, [return_tuple], [], [return_tuple]}
-        
+
         break_values = build_vars_tuple(line, param_vars, env_after_body)
         clause_break = {:clause, line, [{:atom, line, :__break__}], [], [break_values]}
         clause_continue = {:clause, line, [{:var, line, :_}], [], [continue_call]}
