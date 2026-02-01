@@ -321,8 +321,8 @@ defmodule BeamLang.Runtime do
     end
   end
 
-  @spec clock_now_data() :: number()
-  def clock_now_data() do
+  @spec clock_now() :: number()
+  def clock_now() do
     :erlang.monotonic_time(:millisecond)
   end
 

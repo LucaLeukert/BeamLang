@@ -180,6 +180,26 @@ export fn add(a: number, b: number) -> number { return a + b; }
 internal fn helper() -> void { return; }
 ```
 
+### Mutable Parameters
+
+By default, function parameters are immutable. Use the `mut` keyword to allow reassignment:
+
+```beamlang
+fn increment(mut value: number) -> number {
+    value = value + 1;
+    return value;
+}
+
+fn process(x: number, mut y: number) -> number {
+    // x cannot be reassigned
+    // y can be reassigned
+    y = y + x;
+    return y;
+}
+```
+
+Note: Erlang/BEAM is immutable by design. Mutable parameters are implemented via variable shadowing - each reassignment creates a new binding that shadows the previous one. The original value passed by the caller is never modified.
+
 ### Generics in Functions
 
 Generic parameters are declared after the function name:

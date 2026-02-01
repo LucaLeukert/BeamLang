@@ -6,6 +6,15 @@ export error IoError {
     message: String
 }
 
+export type Clock {
+    internal start_time: number,
+    internal stop_time: number,
+    start: fn(Clock) -> Clock,
+    stop: fn(Clock) -> Clock,
+    elapsed: fn(Clock) -> number,
+    now: fn(Clock) -> number
+}
+
 @external(elixir, "BeamLang.Runtime", "file_read")
 fn file_read_data(path: String) -> String!String;
 
@@ -15,12 +24,54 @@ fn file_exists_data(path: String) -> bool;
 @external(elixir, "BeamLang.Runtime", "get_env")
 fn get_env_data(name: String) -> any;
 
-@external(elixir, "BeamLang.Runtime", "clock_now_data")
+@external(elixir, "BeamLang.Runtime", "clock_now")
 fn clock_now_data() -> number;
 
 internal fn make_io_error(msg: String) -> String!IoError {
     let err: IoError = { kind = "read", message = msg };
     return !err err;
+}
+
+internal fn clock_now_method(self: Clock) -> number {
+    return clock_now_data();
+}
+
+internal fn clock_start_method(self: Clock) -> Clock {
+    return {
+        start_time = clock_now_data(),
+        stop_time = self->stop_time,
+        start = clock_start_method,
+        stop = clock_stop_method,
+        elapsed = clock_elapsed_method,
+        now = clock_now_method
+    };
+}
+
+internal fn clock_stop_method(self: Clock) -> Clock {
+    return {
+        start_time = self->start_time,
+        stop_time = clock_now_data(),
+        start = clock_start_method,
+        stop = clock_stop_method,
+        elapsed = clock_elapsed_method,
+        now = clock_now_method
+    };
+}
+
+internal fn clock_elapsed_method(self: Clock) -> number {
+    return self->stop_time - self->start_time;
+}
+
+/** Create a new Clock instance **/
+fn clock_new() -> Clock {
+    return {
+        start_time = 0,
+        stop_time = 0,
+        start = clock_start_method,
+        stop = clock_stop_method,
+        elapsed = clock_elapsed_method,
+        now = clock_now_method
+    };
 }
 
 /** Get current monotonic time in milliseconds **/

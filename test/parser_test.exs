@@ -627,4 +627,38 @@ defmodule BeamLang.ParserTest do
     assert {:for, %{name: "x", collection: {:list_literal, %{elements: elements}}}} = for_stmt
     assert length(elements) == 3
   end
+
+  test "parses mutable parameter" do
+    source = """
+    fn update(mut value: number) -> number {
+        value = value + 1;
+        return value;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{functions: [func]}} = ast
+    assert {:function, %{name: "update", params: [param]}} = func
+    assert %{name: "value", type: :number, mutable: true} = param
+  end
+
+  test "parses mixed mutable and immutable parameters" do
+    source = """
+    fn process(x: number, mut y: number, z: String) -> number {
+        y = y + x;
+        return y;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{functions: [func]}} = ast
+    assert {:function, %{params: [p1, p2, p3]}} = func
+    assert %{name: "x", mutable: false} = p1
+    assert %{name: "y", mutable: true} = p2
+    assert %{name: "z", mutable: false} = p3
+  end
 end

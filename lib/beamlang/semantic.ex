@@ -318,8 +318,9 @@ defmodule BeamLang.Semantic do
     lambda_errors = validate_param_names(params)
 
     param_env =
-      Enum.reduce(params, %{}, fn %{name: param_name, type: param_type}, acc ->
-        Map.put(acc, param_name, %{type: normalize_type(param_type), mutable: false})
+      Enum.reduce(params, %{}, fn param, acc ->
+        param_mutable = Map.get(param, :mutable, false)
+        Map.put(acc, param.name, %{type: normalize_type(param.type), mutable: param_mutable})
       end)
 
     return_type = normalize_type(return_type)
@@ -1225,9 +1226,9 @@ defmodule BeamLang.Semantic do
     errors = validate_param_names(params)
 
     param_env =
-      Enum.reduce(params, %{}, fn %{name: param_name, type: param_type}, acc ->
+      Enum.reduce(params, %{}, fn %{name: param_name, type: param_type, mutable: mutable}, acc ->
         param_type = param_type |> normalize_type() |> replace_type_params(type_params)
-        Map.put(acc, param_name, %{type: param_type, mutable: false})
+        Map.put(acc, param_name, %{type: param_type, mutable: mutable})
       end)
 
     # If first param is 'self', track the method type context for internal field access

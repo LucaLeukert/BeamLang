@@ -1048,11 +1048,18 @@ defmodule BeamLang.Parser do
   end
 
   defp parse_params(tokens, acc) do
-    with {:ok, name_tok, rest1} <- expect(tokens, :identifier),
+    # Check for optional 'mut' keyword
+    {mutable, tokens_after_mut} =
+      case tokens do
+        [%Token{type: :mut} | rest] -> {true, rest}
+        _ -> {false, tokens}
+      end
+
+    with {:ok, name_tok, rest1} <- expect(tokens_after_mut, :identifier),
          {:ok, _colon, rest2} <- expect(rest1, :colon),
          {:ok, {type_name, type_span}, rest3} <- parse_type_name(rest2) do
       span = BeamLang.Span.merge(name_tok.span, type_span)
-      param = %{name: name_tok.value, type: type_name, span: span}
+      param = %{name: name_tok.value, type: type_name, mutable: mutable, span: span}
 
       case rest3 do
         [%Token{type: :comma} | rest4] -> parse_params(rest4, [param | acc])

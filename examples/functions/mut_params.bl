@@ -1,0 +1,39 @@
+// Demonstrates mutable parameters feature
+// The 'mut' keyword allows reassignment of parameters within a function
+// Note: Erlang/BEAM is immutable - this works via variable shadowing internally
+
+fn increment(mut value: number) -> number {
+    value = value + 1;
+    return value;
+}
+
+fn accumulate(mut sum: number, items: number) -> number {
+    // Reassign the mutable parameter multiple times
+    sum = sum + items;
+    sum = sum * 2;
+    return sum;
+}
+
+fn process_with_immutable(x: number, mut y: number) -> number {
+    // x cannot be reassigned (immutable by default)
+    // y can be reassigned
+    y = y + x;
+    y = y * x;
+    return y;
+}
+
+fn main(args: [String]) -> number {
+    let result1 = increment(5);
+    println("increment(5) = ");
+    println(result1);
+    
+    let result2 = accumulate(10, 3);
+    println("accumulate(10, 3) = ");
+    println(result2);
+    
+    let result3 = process_with_immutable(2, 5);
+    println("process_with_immutable(2, 5) = ");
+    println(result3);
+    
+    return 0;
+}

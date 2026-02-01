@@ -93,7 +93,7 @@ defmodule BeamLang.AST do
           {:block, %{stmts: [stmt()], span: BeamLang.Span.t()}}
 
   @type func_param ::
-          %{name: binary(), type: type_name(), span: BeamLang.Span.t()}
+          %{name: binary(), type: type_name(), mutable: boolean(), span: BeamLang.Span.t()}
 
   @type func ::
           {:function,

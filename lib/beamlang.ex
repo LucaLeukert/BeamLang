@@ -967,7 +967,7 @@ defmodule BeamLang do
 
     Enum.with_index(param_types)
     |> Enum.map(fn {type, idx} ->
-      %{name: "arg#{idx + 1}", type: type, span: BeamLang.Span.new("<import>", 0, 0)}
+      %{name: "arg#{idx + 1}", type: type, mutable: false, span: BeamLang.Span.new("<import>", 0, 0)}
     end)
   end
 
@@ -1008,8 +1008,8 @@ defmodule BeamLang do
          alias_map
        ) do
     params =
-      Enum.map(params, fn %{name: name, type: type, span: span} ->
-        %{name: name, type: qualify_type(type, type_map, local_types, alias_map), span: span}
+      Enum.map(params, fn param ->
+        %{name: param.name, type: qualify_type(param.type, type_map, local_types, alias_map), mutable: Map.get(param, :mutable, false), span: param.span}
       end)
 
     return_type = qualify_type(return_type, type_map, local_types, alias_map)
@@ -1410,8 +1410,8 @@ defmodule BeamLang do
          alias_map
        ) do
     params =
-      Enum.map(params, fn %{name: name, type: type, span: pspan} ->
-        %{name: name, type: qualify_type(type, type_map, local_types, alias_map), span: pspan}
+      Enum.map(params, fn param ->
+        %{name: param.name, type: qualify_type(param.type, type_map, local_types, alias_map), mutable: Map.get(param, :mutable, false), span: param.span}
       end)
 
     return_type = qualify_type(return_type, type_map, local_types, alias_map)

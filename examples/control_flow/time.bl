@@ -1,14 +1,38 @@
 fn main(args: [String]) -> number {
-    // Iterate over a list literal
-    for (i in [1, 2, 3, 4, 5]) {
-        println(i);
+    // Time a large loop using Clock
+    
+    // Start timing - chain the calls
+    let clock1 = clock_new()->start();
+    
+    // Large loop - 1 million iterations
+    let mut sum = 0;
+    let mut i = 1;
+    while (i <= 1000000) {
+        sum = sum + i;
+        i = i + 1;
     }
     
-    println("---");
+    // Stop timing
+    let clock1_stopped = clock1->stop();
     
-    // Iterate over a range
-    for (i in 1..5) {
-        println(i);
+    println("Sum of 1..1000000: ");
+    println(sum);
+    println("Elapsed time (ms): ");
+    println(clock1_stopped->elapsed());
+    
+    // Time another loop - 10 million iterations
+    let clock2 = clock_new()->start();
+    
+    let mut j = 0;
+    while (j < 1000000000) {
+        sum = sum + 1;
+        j = j + 1;
     }
+    
+    let clock2_stopped = clock2->stop();
+    
+    println("Time for 1B iterations (ms): ");
+    println(clock2_stopped->elapsed());
+    
     return 0;
 }
