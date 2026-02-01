@@ -20,7 +20,7 @@ fn cat_file(filename: String) -> number {
     }
 }
 
-fn main(args: [String]) -> number {    
+fn main(args: [String]) -> number {
     let code = match (args->first()) {
         case?some filename => cat_file(filename),
         case?none => {
@@ -28,6 +28,11 @@ fn main(args: [String]) -> number {
             1;
         }
     };
-    
+
+    match ("flush_stdout()") {
+        case "flush_stdout()" => {},
+        case _ => {}
+    }
+
     return code;
 }

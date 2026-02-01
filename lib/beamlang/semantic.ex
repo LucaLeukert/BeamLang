@@ -780,7 +780,13 @@ defmodule BeamLang.Semantic do
     end
   end
 
-  defp type_of_expr({:match, %{expr: expr, cases: cases}}, func_table, type_table, env, _expected) do
+  defp type_of_expr(
+         {:match, %{expr: expr, cases: cases, span: span}},
+         func_table,
+         type_table,
+         env,
+         _expected
+       ) do
     case type_of_expr(expr, func_table, type_table, env, nil) do
       {:ok, match_type} ->
         {case_types, errors} =
@@ -796,6 +802,8 @@ defmodule BeamLang.Semantic do
           end)
 
         case_types = Enum.reverse(case_types)
+
+        errors = errors ++ non_exhaustive_match_errors(match_type, cases, span)
 
         if errors != [] do
           {:error, {:match, errors}}
@@ -855,6 +863,57 @@ defmodule BeamLang.Semantic do
       end
     end
   end
+
+  defp non_exhaustive_match_errors(match_type, cases, span) do
+    if match_exhaustive?(match_type, cases) do
+      []
+    else
+      [
+        BeamLang.Error.new(
+          :type,
+          "Non-exhaustive match. Add a 'case _' or cover all variants.",
+          span
+        )
+      ]
+    end
+  end
+
+  defp match_exhaustive?(match_type, cases) do
+    patterns = Enum.map(cases, & &1.pattern)
+
+    if Enum.any?(patterns, &wildcard_pattern?/1) do
+      true
+    else
+      match_exhaustive_for_type?(normalize_type(match_type), patterns)
+    end
+  end
+
+  defp wildcard_pattern?({:wildcard, _}), do: true
+  defp wildcard_pattern?(_), do: false
+
+  defp match_exhaustive_for_type?({:optional, _inner}, patterns) do
+    has_some = Enum.any?(patterns, &match?({:opt_some_pat, _}, &1))
+    has_none = Enum.any?(patterns, &match?({:opt_none_pat, _}, &1))
+    has_some and has_none
+  end
+
+  defp match_exhaustive_for_type?({:result, _ok_type, _err_type}, patterns) do
+    has_ok = Enum.any?(patterns, &match?({:res_ok_pat, _}, &1))
+    has_err = Enum.any?(patterns, &match?({:res_err_pat, _}, &1))
+    has_ok and has_err
+  end
+
+  defp match_exhaustive_for_type?(:bool, patterns) do
+    has_true = Enum.any?(patterns, &match?({:bool, %{value: true}}, &1))
+    has_false = Enum.any?(patterns, &match?({:bool, %{value: false}}, &1))
+    has_true and has_false
+  end
+
+  defp match_exhaustive_for_type?({:named, "bool"}, patterns) do
+    match_exhaustive_for_type?(:bool, patterns)
+  end
+
+  defp match_exhaustive_for_type?(_type, _patterns), do: false
 
   defp method_call_type(target_type, name, args, func_table, type_table, env) do
     error_span =
@@ -1025,7 +1084,13 @@ defmodule BeamLang.Semantic do
         {:error, errs} -> errors ++ errs
       end
 
-    errors
+    dedupe_errors(errors)
+  end
+
+  defp dedupe_errors(errors) do
+    Enum.uniq_by(errors, fn %BeamLang.Error{kind: kind, message: message, span: span} ->
+      {kind, message, span.file_id, span.start, span.end}
+    end)
   end
 
   @spec validate_statements(BeamLang.AST.block(), map(), map(), map()) ::

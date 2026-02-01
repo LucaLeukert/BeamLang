@@ -159,6 +159,19 @@ defmodule BeamLang.IntegrationTest do
     assert {:ok, 4} == BeamLang.run_source(source)
   end
 
+  test "rejects non-exhaustive match expression" do
+    source = """
+    fn main(args: [String]) -> number {
+        return match (true) {
+            case true => 1
+        };
+    }
+    """
+
+    assert {:error, [error]} = BeamLang.run_source(source)
+    assert error.message == "Non-exhaustive match. Add a 'case _' or cover all variants."
+  end
+
   test "runs if expression" do
     source = """
     fn main(args: [String]) -> number {

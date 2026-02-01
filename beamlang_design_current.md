@@ -318,6 +318,8 @@ match (user) {
 }
 ```
 
+Match expressions must be exhaustive. Use `case _` or cover all variants (e.g. `case?some` + `case?none`, `case!ok` + `case!err`, `case true` + `case false`).
+
 ## Expressions
 
 - Binary operators: `+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `>`, `<=`, `>=`

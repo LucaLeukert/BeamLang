@@ -21,4 +21,22 @@ defmodule BeamLang.ParserMatchTest do
     assert {:function, %{body: {:block, %{stmts: [stmt, _]}}}} = func
     assert {:let, %{expr: {:match, _}}} = stmt
   end
+
+  test "parses match expression with boolean cases" do
+    source = """
+    fn main(args: [String]) -> number {
+        return match (true) {
+            case true => 1,
+            case false => 0
+        };
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{functions: [func]}} = ast
+    assert {:function, %{body: {:block, %{stmts: [stmt]}}}} = func
+    assert {:return, %{expr: {:match, _}}} = stmt
+  end
 end

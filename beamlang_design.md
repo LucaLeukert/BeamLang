@@ -165,6 +165,8 @@ match (user) {
 
 Guards support comparison operators: `==`, `!=`, `<`, `>`, `<=`, `>=`.
 
+Match expressions must be exhaustive. Use `case _` or cover all variants (e.g. `case?some` + `case?none`, `case!ok` + `case!err`, `case true` + `case false`).
+
 ### Control Flow
 
 ```beamlang
