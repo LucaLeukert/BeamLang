@@ -1206,7 +1206,7 @@ defmodule BeamLang do
   end
 
   defp qualify_expr(
-         {:call, %{name: name, args: args, span: span}},
+         {:call, %{name: name, args: args, span: span} = info},
          func_map,
          type_map,
          local_types,
@@ -1215,6 +1215,11 @@ defmodule BeamLang do
        ) do
     args =
       Enum.map(args, &qualify_expr(&1, func_map, type_map, local_types, local_funcs, alias_map))
+
+    type_args =
+      info
+      |> Map.get(:type_args, [])
+      |> Enum.map(&qualify_type(&1, type_map, local_types, alias_map))
 
     name =
       if String.contains?(name, "::") do
@@ -1232,7 +1237,7 @@ defmodule BeamLang do
         end
       end
 
-    {:call, %{name: name, args: args, span: span}}
+    {:call, %{name: name, args: args, span: span, type_args: type_args, type_info: nil}}
   end
 
   defp qualify_expr(
