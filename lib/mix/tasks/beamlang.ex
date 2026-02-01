@@ -11,6 +11,11 @@ defmodule Mix.Tasks.Beamlang do
 
   @spec run([binary()]) :: :ok
   def run(args) do
+    if Enum.member?(args, "--lsp") do
+      Mix.shell(Mix.Shell.Quiet)
+      Logger.configure(level: :error)
+    end
+
     BeamLang.CLI.main(args)
   end
 end

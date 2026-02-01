@@ -4,7 +4,24 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 project_root="$(cd "${script_dir}/.." && pwd)"
 
+if ! command -v mix >/dev/null 2>&1; then
+  echo "Error: mix is not available in PATH." >&2
+  exit 127
+fi
+
+quiet=""
+for arg in "$@"; do
+  if [ "${arg}" = "--lsp" ]; then
+    quiet="1"
+    break
+  fi
+done
+
 (
   cd "${project_root}"
-  mix beamlang -- "$@"
+  if [ -n "${quiet}" ]; then
+    MIX_QUIET=1 mix beamlang -- "$@"
+  else
+    mix beamlang -- "$@"
+  fi
 )

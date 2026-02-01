@@ -48,6 +48,11 @@
             "--lsp"
           ],
           "description": "Arguments to start the BeamLang LSP server."
+        },
+        "beamlang.lsp.serverCwd": {
+          "type": "string",
+          "default": "",
+          "description": "Working directory for launching the BeamLang LSP server (optional)."
         }
       }
     }

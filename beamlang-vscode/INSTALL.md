@@ -71,6 +71,7 @@ If you want to create a proper VSIX package:
 - Ensure the `beamlang` CLI is on your PATH
 - Or set `beamlang.lsp.serverPath` in VS Code settings to the full path of the CLI
 - If you need custom args, update `beamlang.lsp.serverArgs`
+- If you use the repo script, set `beamlang.lsp.serverCwd` to the repo root
 
 **Syntax highlighting looks wrong?**
 - Some themes may display colors differently
