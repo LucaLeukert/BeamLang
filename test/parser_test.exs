@@ -167,6 +167,19 @@ defmodule BeamLang.ParserTest do
     assert %{name: "fold", type: {:fn, [_, _, {:fn, [_, _], _}], _}} = Enum.at(fields, 1)
   end
 
+  test "rejects empty interpolation" do
+    source = """
+    fn main() -> number {
+        println("${}");
+        return 0;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    assert {:error, error} = Parser.parse(tokens)
+    assert error.kind == :parser
+  end
+
   test "parses generic function definition" do
     source = """
     fn test<T>(opt: Optional<T>) -> T {

@@ -832,6 +832,10 @@ defmodule BeamLang.Parser do
     parse_list_literal(lbracket_tok, rest)
   end
 
+  defp parse_primary([%Token{type: :string} | _] = tokens) do
+    parse_literal(tokens)
+  end
+
   defp parse_primary(tokens) do
     case parse_call(tokens) do
       {:ok, _expr, _rest} = ok -> ok
@@ -1272,18 +1276,25 @@ defmodule BeamLang.Parser do
 
   @spec parse_interpolation_expressions([binary()], BeamLang.Span.t()) ::
           {:ok, [BeamLang.AST.expr()]} | {:error, BeamLang.Error.t()}
-  defp parse_interpolation_expressions(exprs, _span) do
+  defp parse_interpolation_expressions(exprs, span) do
     results =
       Enum.map(exprs, fn expr_str ->
-        case BeamLang.Lexer.tokenize(expr_str) do
-          {:ok, tokens} ->
-            case parse_expression(tokens) do
-              {:ok, expr, _rest} -> {:ok, expr}
-              {:error, _} = err -> err
-            end
+        if String.trim(expr_str) == "" do
+          {:error, BeamLang.Error.new(:parser, "Empty interpolation expression.", span)}
+        else
+          case BeamLang.Lexer.tokenize(expr_str) do
+            {:ok, []} ->
+              {:error, BeamLang.Error.new(:parser, "Empty interpolation expression.", span)}
 
-          {:error, _} = err ->
-            err
+            {:ok, tokens} ->
+              case parse_expression(tokens) do
+                {:ok, expr, _rest} -> {:ok, expr}
+                {:error, _} = err -> err
+              end
+
+            {:error, _} = err ->
+              err
+          end
         end
       end)
 
