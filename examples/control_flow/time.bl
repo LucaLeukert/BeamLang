@@ -3,6 +3,8 @@ fn main(args: [String]) -> number {
     
     // Start timing - chain the calls
     let clock1 = clock_new()->start();
+
+    println_raw(clock_new());
     
     // Large loop - 1 million iterations
     let mut sum = 0;
