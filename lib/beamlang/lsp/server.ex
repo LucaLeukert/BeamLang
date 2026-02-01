@@ -392,10 +392,17 @@ defmodule BeamLang.LSP.Server do
 
     base =
       case context do
-        :methods -> methods
-        :statement -> functions ++ locals ++ statement_keywords()
-        :expression -> functions ++ locals ++ types ++ errors
-        _ -> functions ++ locals ++ types ++ errors
+        :methods ->
+          locals ++ methods
+
+        :statement ->
+          locals ++ functions ++ statement_keywords()
+
+        :expression ->
+          locals ++ functions ++ methods ++ types ++ errors ++ statement_keywords()
+
+        _ ->
+          locals ++ functions ++ methods ++ types ++ errors ++ statement_keywords()
       end
 
     base
