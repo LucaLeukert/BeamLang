@@ -2929,7 +2929,9 @@ defmodule BeamLang.Semantic do
       end
 
     env = Map.put(env, name, %{type: inferred, mutable: mutable})
-    {{:let, %{info | expr: expr}}, env}
+    info = Map.put(info, :expr, expr)
+    info = Map.put(info, :inferred_type, inferred)
+    {{:let, info}, env}
   end
 
   defp annotate_stmt(

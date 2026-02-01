@@ -65,6 +65,7 @@ See `examples/` for runnable programs, including:
 - `examples/result.bl`
 - `examples/iterator_methods.bl`
 - `examples/lsp/lsp_features.bl`
+- `examples/lsp/hover_types.bl`
 
 ## Design Docs
 

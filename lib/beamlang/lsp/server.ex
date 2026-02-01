@@ -770,8 +770,8 @@ defmodule BeamLang.LSP.Server do
     Enum.flat_map(stmts, &collect_from_stmt(&1, func_span, block_span))
   end
 
-  defp collect_from_stmt({:let, %{name: name, type: type, expr: expr, span: span}}, func_span, scope_span) do
-    inferred = type || infer_expr_type(expr)
+  defp collect_from_stmt({:let, %{name: name, type: type, expr: expr, span: span} = info}, func_span, scope_span) do
+    inferred = Map.get(info, :inferred_type) || type || infer_expr_type(expr)
     [%{name: name, type: inferred, span: span, func_span: func_span, scope_span: scope_span, kind: :let}] ++
       collect_from_expr(expr, func_span, scope_span)
   end
