@@ -662,11 +662,11 @@ defmodule BeamLang.ParserTest do
     assert %{name: "z", mutable: false} = p3
   end
 
-  test "parses type with operator overloading" do
+  test "parses type with operator declaration" do
     source = """
     type Path {
         path: String,
-        __op_div: fn(Path, String) -> Path
+        operator /: fn(Path, String) -> Path
     }
 
     fn path_join(self: Path, segment: String) -> Path {
@@ -682,8 +682,12 @@ defmodule BeamLang.ParserTest do
     {:ok, ast} = Parser.parse(tokens)
 
     assert {:program, %{types: [type_def], functions: _}} = ast
-    assert {:type_def, %{name: "Path", fields: fields}} = type_def
-    assert length(fields) == 2  # path and __op_div
+    assert {:type_def, %{name: "Path", fields: fields, operators: operators}} = type_def
+    assert length(fields) == 1  # just path field
+    assert length(operators) == 1
+    [op_decl] = operators
+    assert op_decl.op == :div
+    assert op_decl.type == {:fn, [{:named, "Path"}, :String], {:named, "Path"}}
   end
 
   test "parses struct literal with operator binding" do
@@ -691,7 +695,7 @@ defmodule BeamLang.ParserTest do
     type Vec2 {
         x: number,
         y: number,
-        __op_add: fn(Vec2, Vec2) -> Vec2
+        operator +: fn(Vec2, Vec2) -> Vec2
     }
 
     fn vec2_add(a: Vec2, b: Vec2) -> Vec2 { return { x = 0, y = 0, operator + = vec2_add }; }
@@ -705,9 +709,12 @@ defmodule BeamLang.ParserTest do
     {:ok, ast} = Parser.parse(tokens)
 
     assert {:program, %{types: [type_def], functions: functions}} = ast
-    assert {:type_def, %{name: "Vec2", fields: fields}} = type_def
-    assert length(fields) == 3  # x, y, __op_add
-    
+    assert {:type_def, %{name: "Vec2", fields: fields, operators: operators}} = type_def
+    assert length(fields) == 2  # x, y
+    assert length(operators) == 1
+    [op_decl] = operators
+    assert op_decl.op == :add
+
     # Check that the struct literal has the operator binding
     [{:function, %{body: {:block, %{stmts: [{:return, %{expr: {:struct, struct_info}}}]}}}}, _] = functions
     assert length(struct_info.operators) == 1

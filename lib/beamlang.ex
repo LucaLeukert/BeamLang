@@ -1250,7 +1250,7 @@ defmodule BeamLang do
        ), do: expr
 
   defp qualify_expr(
-         {:struct, %{fields: fields, type: type, span: span}},
+         {:struct, %{fields: fields, type: type, span: span} = info},
          func_map,
          type_map,
          local_types,
@@ -1267,7 +1267,9 @@ defmodule BeamLang do
       end)
 
     type = if type == nil, do: nil, else: qualify_type(type, type_map, local_types, alias_map)
-    {:struct, %{fields: fields, type: type, span: span}}
+    # Preserve operators from original info
+    operators = Map.get(info, :operators, [])
+    {:struct, %{fields: fields, type: type, span: span, operators: operators}}
   end
 
   defp qualify_expr(

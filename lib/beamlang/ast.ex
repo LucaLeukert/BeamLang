@@ -36,7 +36,7 @@ defmodule BeamLang.AST do
           | {:identifier, %{name: binary(), span: BeamLang.Span.t()}}
           | {:lambda, %{params: [func_param()], return_type: type_name(), body: block(), span: BeamLang.Span.t()}}
           | {:method_call, %{target: expr(), name: binary(), args: [expr()], span: BeamLang.Span.t(), target_type: type_name() | nil}}
-          | {:struct, %{fields: [field_assign()], operators: [operator_def()], type: type_name() | nil, span: BeamLang.Span.t()}}
+          | {:struct, %{fields: [field_assign()], operators: [operator_binding()], type: type_name() | nil, span: BeamLang.Span.t()}}
           | {:field, %{target: expr(), name: binary(), span: BeamLang.Span.t()}}
           | {:block_expr, %{block: block(), span: BeamLang.Span.t()}}
           | {:match, %{expr: expr(), cases: [match_case()], span: BeamLang.Span.t()}}
@@ -49,7 +49,10 @@ defmodule BeamLang.AST do
 
   @type binary_op :: :eq | :neq | :lt | :gt | :lte | :gte | :add | :sub | :mul | :div | :mod
 
-  @type operator_def ::
+  @type operator_decl ::
+          %{op: binary_op(), type: type_name(), span: BeamLang.Span.t()}
+
+  @type operator_binding ::
           %{op: binary_op(), func: binary(), span: BeamLang.Span.t()}
 
   @type pattern ::
@@ -118,6 +121,7 @@ defmodule BeamLang.AST do
              name: binary(),
              params: [binary()],
              fields: [field_def()],
+             operators: [operator_decl()],
              exported: boolean(),
              span: BeamLang.Span.t()
            }}

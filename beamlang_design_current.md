@@ -104,12 +104,14 @@ let user: User = { name = "Ada", age = 30 };
 
 ### Operator Overloading
 
-Types can define custom behavior for operators. The operator implementation is bound during struct construction using the `operator` keyword. The type definition declares the operator field type, and the struct literal binds the implementation function.
+Types can define custom behavior for operators using a two-part system:
+1. **Type Definition** declares the operator signature with `operator OP: fn(...)` syntax
+2. **Struct Literal** binds the implementation function with `operator OP = func_name` syntax
 
 ```beamlang
 type Path {
     path: String,
-    __op_div: fn(Path, String) -> Path  // Operator field declaration
+    operator /: fn(Path, String) -> Path  // Operator signature declaration
 }
 
 fn path_join(self: Path, segment: String) -> Path {
@@ -121,21 +123,21 @@ fn path_new(p: String) -> Path {
 }
 ```
 
-The `operator / = func_name` syntax in the struct literal binds the operator to an implementation function. Supported operators:
+The type definition declares the operator's type signature, while the struct literal binds it to an implementation. Supported operators:
 
-| Operator | Field Name  | Description        |
-|----------|-------------|--------------------|
-| `+`      | `__op_add`  | Addition           |
-| `-`      | `__op_sub`  | Subtraction        |
-| `*`      | `__op_mul`  | Multiplication     |
-| `/`      | `__op_div`  | Division           |
-| `%`      | `__op_mod`  | Modulo             |
-| `==`     | `__op_eq`   | Equality           |
-| `!=`     | `__op_neq`  | Inequality         |
-| `<`      | `__op_lt`   | Less than          |
-| `>`      | `__op_gt`   | Greater than       |
-| `<=`     | `__op_lte`  | Less or equal      |
-| `>=`     | `__op_gte`  | Greater or equal   |
+| Operator | Internal Name | Description        |
+|----------|---------------|--------------------|
+| `+`      | `__op_add`    | Addition           |
+| `-`      | `__op_sub`    | Subtraction        |
+| `*`      | `__op_mul`    | Multiplication     |
+| `/`      | `__op_div`    | Division           |
+| `%`      | `__op_mod`    | Modulo             |
+| `==`     | `__op_eq`     | Equality           |
+| `!=`     | `__op_neq`    | Inequality         |
+| `<`      | `__op_lt`     | Less than          |
+| `>`      | `__op_gt`     | Greater than       |
+| `<=`     | `__op_lte`    | Less or equal      |
+| `>=`     | `__op_gte`    | Greater or equal   |
 
 **Alternative: Naming Convention**
 
@@ -156,7 +158,7 @@ Example usage:
 ```beamlang
 type Path {
     path: String,
-    __op_div: fn(Path, String) -> Path
+    operator /: fn(Path, String) -> Path
 }
 
 fn path_join(self: Path, segment: String) -> Path {

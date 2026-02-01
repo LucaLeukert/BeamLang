@@ -1262,15 +1262,13 @@ defmodule BeamLang.Parser do
     with {:ok, op_symbol, rest1} <- parse_operator_symbol(rest),
          {:ok, _eq, rest2} <- expect(rest1, :equals),
          {:ok, func_tok, rest3} <- expect(rest2, :identifier) do
-      # Convert operator binding to a special field: __op_<opname> = func
-      field_name = "__op_#{op_symbol}"
+      # Store operator binding (not as a field - will be converted to __op_* in codegen)
       span = BeamLang.Span.merge(op_tok.span, func_tok.span)
-      field = %{name: field_name, expr: {:identifier, %{name: func_tok.value, span: func_tok.span}}, span: span}
       op_def = %{op: op_symbol, func: func_tok.value, span: span}
 
       case rest3 do
-        [%Token{type: :comma} | rest4] -> parse_struct_fields_and_operators(rest4, [field | fields_acc], [op_def | ops_acc])
-        _ -> parse_struct_fields_and_operators(rest3, [field | fields_acc], [op_def | ops_acc])
+        [%Token{type: :comma} | rest4] -> parse_struct_fields_and_operators(rest4, fields_acc, [op_def | ops_acc])
+        _ -> parse_struct_fields_and_operators(rest3, fields_acc, [op_def | ops_acc])
       end
     end
   end
@@ -1649,7 +1647,7 @@ defmodule BeamLang.Parser do
          {:ok, name_tok, rest2} <- parse_type_def_name(rest1),
          {:ok, {params, params_span}, rest3} <- parse_type_params(rest2),
          {:ok, _lbrace, rest4} <- expect(rest3, :lbrace),
-         {:ok, fields, rest5} <- parse_type_fields(rest4, []),
+         {:ok, {fields, operators}, rest5} <- parse_type_fields_and_operators(rest4, [], []),
          {:ok, _rbrace, rest6} <- expect(rest5, :rbrace) do
       span = BeamLang.Span.merge(type_tok.span, name_tok.span)
       span =
@@ -1658,7 +1656,7 @@ defmodule BeamLang.Parser do
           _ -> BeamLang.Span.merge(span, params_span)
         end
       span = BeamLang.Span.merge(span, rbrace_span(rest5, rest6))
-      {:ok, {:type_def, %{name: name_tok.value, params: params, fields: fields, exported: exported, span: span}}, rest6}
+      {:ok, {:type_def, %{name: name_tok.value, params: params, fields: fields, operators: operators, exported: exported, span: span}}, rest6}
     end
   end
 
@@ -1727,13 +1725,27 @@ defmodule BeamLang.Parser do
     {:error, error("Expected type parameter.", tok)}
   end
 
-  @spec parse_type_fields([Token.t()], [map()]) ::
-          {:ok, [map()], [Token.t()]} | {:error, BeamLang.Error.t()}
-  defp parse_type_fields([%Token{type: :rbrace} | _] = rest, fields_acc) do
-    {:ok, Enum.reverse(fields_acc), rest}
+  @spec parse_type_fields_and_operators([Token.t()], [map()], [map()]) ::
+          {:ok, {[map()], [map()]}, [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_type_fields_and_operators([%Token{type: :rbrace} | _] = rest, fields_acc, ops_acc) do
+    {:ok, {Enum.reverse(fields_acc), Enum.reverse(ops_acc)}, rest}
   end
 
-  defp parse_type_fields([%Token{type: :internal_kw} | rest], fields_acc) do
+  defp parse_type_fields_and_operators([%Token{type: :operator_kw} = op_tok | rest], fields_acc, ops_acc) do
+    with {:ok, op_symbol, rest1} <- parse_operator_symbol(rest),
+         {:ok, _colon, rest2} <- expect(rest1, :colon),
+         {:ok, {type_name, type_span}, rest3} <- parse_type_name(rest2) do
+      span = BeamLang.Span.merge(op_tok.span, type_span)
+      op_decl = %{op: op_symbol, type: type_name, span: span}
+
+      case rest3 do
+        [%Token{type: :comma} | rest4] -> parse_type_fields_and_operators(rest4, fields_acc, [op_decl | ops_acc])
+        _ -> parse_type_fields_and_operators(rest3, fields_acc, [op_decl | ops_acc])
+      end
+    end
+  end
+
+  defp parse_type_fields_and_operators([%Token{type: :internal_kw} | rest], fields_acc, ops_acc) do
     with {:ok, name_tok, rest1} <- expect(rest, :identifier),
          {:ok, _colon, rest2} <- expect(rest1, :colon),
          {:ok, {type_name, type_span}, rest3} <- parse_type_name(rest2) do
@@ -1741,13 +1753,13 @@ defmodule BeamLang.Parser do
       field = %{name: name_tok.value, type: type_name, internal: true, span: span}
 
       case rest3 do
-        [%Token{type: :comma} | rest4] -> parse_type_fields(rest4, [field | fields_acc])
-        _ -> parse_type_fields(rest3, [field | fields_acc])
+        [%Token{type: :comma} | rest4] -> parse_type_fields_and_operators(rest4, [field | fields_acc], ops_acc)
+        _ -> parse_type_fields_and_operators(rest3, [field | fields_acc], ops_acc)
       end
     end
   end
 
-  defp parse_type_fields(tokens, fields_acc) do
+  defp parse_type_fields_and_operators(tokens, fields_acc, ops_acc) do
     with {:ok, name_tok, rest1} <- expect(tokens, :identifier),
          {:ok, _colon, rest2} <- expect(rest1, :colon),
          {:ok, {type_name, type_span}, rest3} <- parse_type_name(rest2) do
@@ -1755,8 +1767,8 @@ defmodule BeamLang.Parser do
       field = %{name: name_tok.value, type: type_name, internal: false, span: span}
 
       case rest3 do
-        [%Token{type: :comma} | rest4] -> parse_type_fields(rest4, [field | fields_acc])
-        _ -> parse_type_fields(rest3, [field | fields_acc])
+        [%Token{type: :comma} | rest4] -> parse_type_fields_and_operators(rest4, [field | fields_acc], ops_acc)
+        _ -> parse_type_fields_and_operators(rest3, [field | fields_acc], ops_acc)
       end
     end
   end

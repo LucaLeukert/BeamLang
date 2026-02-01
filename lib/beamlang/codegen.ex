@@ -254,12 +254,28 @@ defmodule BeamLang.Codegen do
   end
 
   @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
-  defp expr_form(line, {:struct, %{fields: fields, type: type}}, env) do
+  defp expr_form(line, {:struct, %{fields: fields} = struct_data}, env) do
     entries =
       Enum.map(fields, fn %{name: name, expr: expr} ->
         {:map_field_assoc, line, {:atom, line, String.to_atom(name)}, expr_form(line, expr, env)}
       end)
 
+    # Add operator bindings as __op_* fields with function references
+    operators = Map.get(struct_data, :operators, [])
+    operator_entries =
+      Enum.map(operators, fn %{op: op, func: func_name} ->
+        field_name = String.to_atom("__op_#{op}")
+        # Get the function arity from the environment
+        arity = Map.get(env[:__functions__], func_name, 2)
+        func_atom = String.to_atom(func_name)
+        # Create a fun reference: fun func_name/arity
+        func_ref = {:fun, line, {:function, func_atom, arity}}
+        {:map_field_assoc, line, {:atom, line, field_name}, func_ref}
+      end)
+
+    entries = entries ++ operator_entries
+
+    type = Map.get(struct_data, :type)
     entries =
       case type do
         nil ->

@@ -959,26 +959,27 @@ defmodule BeamLang.Semantic do
   @spec check_operator_overload(atom(), BeamLang.AST.type_name(), BeamLang.AST.type_name(), map(), map()) ::
           {:ok, BeamLang.AST.type_name(), binary()} | :no_overload
   defp check_operator_overload(op, left_type, right_type, type_table, func_table) do
-    # Check if the type has an __op_<opname> field (operator binding from struct literal)
+    # Check if the type has an operator declaration in the type definition
     case get_type_name(left_type) do
       {:ok, type_name} ->
-        op_field_name = "__op_#{op}"
         case Map.fetch(type_table, type_name) do
-          {:ok, %{fields: fields}} ->
-            case Map.fetch(fields, op_field_name) do
+          {:ok, %{operators: operators}} when map_size(operators) > 0 ->
+            case Map.fetch(operators, op) do
               {:ok, %{type: {:fn, [param1, param2], return_type}}} ->
                 if types_match?(param1, normalize_type(left_type)) and
                      types_match?(param2, normalize_type(right_type)) do
-                  {:ok, return_type, op_field_name}
+                  # The actual function is bound in the struct at runtime as __op_<opname>
+                  {:ok, return_type, "__op_#{op}"}
                 else
                   :no_overload
                 end
               _ ->
-                # No operator field, try naming convention
+                # No operator for this op, try naming convention
                 check_operator_by_convention(op, left_type, right_type, type_name, func_table)
             end
           _ ->
-            :no_overload
+            # No operators map or empty, try naming convention
+            check_operator_by_convention(op, left_type, right_type, type_name, func_table)
         end
       :error ->
         :no_overload
@@ -2124,7 +2125,7 @@ defmodule BeamLang.Semantic do
   defp build_type_table(types) do
     table =
       types
-      |> Enum.reduce(%{}, fn {:type_def, %{name: name, params: params, fields: fields}}, acc ->
+      |> Enum.reduce(%{}, fn {:type_def, %{name: name, params: params, fields: fields} = td}, acc ->
         field_order = Enum.map(fields, & &1.name)
 
         field_map =
@@ -2133,7 +2134,14 @@ defmodule BeamLang.Semantic do
             Map.put(f_acc, fname, %{type: normalize_type(ftype), internal: internal})
           end)
 
-        Map.put(acc, name, %{params: params, fields: field_map, field_order: field_order, operators: %{}})
+        # Extract operator declarations from type definition
+        operators = Map.get(td, :operators, [])
+        operator_map =
+          Enum.reduce(operators, %{}, fn %{op: op, type: op_type}, op_acc ->
+            Map.put(op_acc, op, %{type: normalize_type(op_type)})
+          end)
+
+        Map.put(acc, name, %{params: params, fields: field_map, field_order: field_order, operators: operator_map})
       end)
 
     {:ok, table}
@@ -3437,7 +3445,14 @@ defmodule BeamLang.Semantic do
         %{field | expr: expr}
       end)
 
-    expr = {:struct, %{info | fields: fields, type: struct_type, span: span}}
+    # Preserve operators from original info (may not exist)
+    operators = Map.get(info, :operators, [])
+    updated_info = info
+      |> Map.put(:fields, fields)
+      |> Map.put(:type, struct_type)
+      |> Map.put(:span, span)
+      |> Map.put(:operators, operators)
+    expr = {:struct, updated_info}
     {expr, struct_type || expected}
   end
 
