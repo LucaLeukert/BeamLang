@@ -104,9 +104,9 @@ defmodule BeamLang.LSP.Server do
 
   defp handle_message(state, %{"method" => "textDocument/completion", "id" => id, "params" => params}) do
     completion =
-      with %{"textDocument" => %{"uri" => uri}} <- params,
+      with %{"textDocument" => %{"uri" => uri}, "position" => position} <- params,
            doc when not is_nil(doc) <- Map.get(state.documents, uri) do
-        completion_for(doc)
+        completion_for(doc, position)
       else
         _ -> %{"isIncomplete" => false, "items" => []}
       end
@@ -243,8 +243,10 @@ defmodule BeamLang.LSP.Server do
     end
   end
 
-  defp completion_for(doc) do
-    %{"isIncomplete" => false, "items" => completion_items(doc)}
+  defp completion_for(doc, %{"line" => line, "character" => character}) do
+    offset = position_to_offset(doc.text, line, character)
+    context = completion_context(doc, offset)
+    %{"isIncomplete" => false, "items" => completion_items(doc, context)}
   end
 
   defp document_symbols_for(doc) do
@@ -358,7 +360,7 @@ defmodule BeamLang.LSP.Server do
     end
   end
 
-  defp completion_items(doc) do
+  defp completion_items(doc, context) do
     functions =
       doc.index
       |> Map.get(:functions, %{})
@@ -386,30 +388,15 @@ defmodule BeamLang.LSP.Server do
       |> Enum.filter(fn local -> local.func_span.file_id == doc.path end)
       |> Enum.map(fn local -> %{"label" => local.name, "kind" => 6} end)
 
-    keywords = [
-      "fn",
-      "type",
-      "error",
-      "let",
-      "mut",
-      "import",
-      "export",
-      "internal",
-      "if",
-      "else",
-      "match",
-      "case",
-      "while",
-      "loop",
-      "for",
-      "return",
-      "guard"
-    ]
+    base =
+      case context do
+        :methods -> methods
+        :statement -> functions ++ locals ++ statement_keywords()
+        :expression -> functions ++ locals ++ types ++ errors
+        _ -> functions ++ locals ++ types ++ errors
+      end
 
-    keyword_items =
-      Enum.map(keywords, fn keyword -> %{"label" => keyword, "kind" => 14} end)
-
-    (functions ++ types ++ errors ++ methods ++ locals ++ keyword_items)
+    base
     |> Enum.uniq_by(& &1["label"])
   end
 
@@ -662,6 +649,19 @@ defmodule BeamLang.LSP.Server do
     end
   end
 
+  defp statement_keywords do
+    [
+      %{"label" => "let", "kind" => 14},
+      %{"label" => "return", "kind" => 14},
+      %{"label" => "if", "kind" => 14},
+      %{"label" => "match", "kind" => 14},
+      %{"label" => "while", "kind" => 14},
+      %{"label" => "loop", "kind" => 14},
+      %{"label" => "for", "kind" => 14},
+      %{"label" => "guard", "kind" => 14}
+    ]
+  end
+
   defp document_symbol(name, kind, source, span) do
     %{
       "name" => name,
@@ -713,6 +713,22 @@ defmodule BeamLang.LSP.Server do
   end
 
   defp find_call_name([_ | rest]), do: find_call_name(rest)
+
+  defp completion_context(doc, offset) do
+    case previous_token(doc.tokens, offset) do
+      nil -> :statement
+      %BeamLang.Token{type: :arrow} -> :methods
+      %BeamLang.Token{type: :lbrace} -> :statement
+      %BeamLang.Token{type: :semicolon} -> :statement
+      _ -> :expression
+    end
+  end
+
+  defp previous_token(tokens, offset) do
+    tokens
+    |> Enum.filter(fn %BeamLang.Token{span: span} -> span.start < offset end)
+    |> Enum.max_by(fn %BeamLang.Token{span: span} -> span.start end, fn -> nil end)
+  end
 
   defp lookup_local(doc, name, offset) do
     locals = Map.get(doc.index, :locals, [])
