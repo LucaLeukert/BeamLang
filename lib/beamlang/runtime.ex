@@ -17,10 +17,50 @@ defmodule BeamLang.Runtime do
   @spec load_and_run(atom(), binary(), list()) :: {:ok, term()} | {:error, map()}
   def load_and_run(module, binary, args \\ []) do
     case :code.load_binary(module, ~c"beamlang_program.beam", binary) do
-      {:module, ^module} -> {:ok, apply(module, :main, [args])}
+      {:module, ^module} ->
+        # Convert raw Erlang list to BeamLang List struct
+        beamlang_list = wrap_as_beamlang_list(args)
+        {:ok, apply(module, :main, [beamlang_list])}
       {:error, reason} -> {:error, %{message: "Failed to load compiled module: #{inspect(reason)}"}}
     end
   end
+
+  @doc """
+  Wraps a raw Erlang list into a BeamLang List struct.
+  This mirrors the structure created by stdlib/list.bl's list_from_data.
+  """
+  @spec wrap_as_beamlang_list(list()) :: map()
+  def wrap_as_beamlang_list(data) when is_list(data) do
+    %{
+      data: data,
+      length: &list_length_method/1,
+      get: &list_get_method/2,
+      push: &list_push_method/2,
+      pop: &list_pop_method/1,
+      first: &list_first_method/1,
+      last: &list_last_method/1,
+      iter: &list_iter_method/1,
+      map: &list_map_method/2,
+      filter: &list_filter_method/2,
+      fold: &list_fold_method/3,
+      reverse: &list_reverse_method/1,
+      concat: &list_concat_method/2,
+      __beamlang_type__: ~c"List"
+    }
+  end
+
+  defp list_length_method(self), do: list_length(self.data)
+  defp list_get_method(self, index), do: list_get(self.data, index)
+  defp list_push_method(self, item), do: wrap_as_beamlang_list(list_push(self.data, item))
+  defp list_pop_method(self), do: wrap_as_beamlang_list(list_pop(self.data))
+  defp list_first_method(self), do: list_first(self.data)
+  defp list_last_method(self), do: list_last(self.data)
+  defp list_iter_method(self), do: list_iter(self.data)
+  defp list_map_method(self, mapper), do: wrap_as_beamlang_list(list_map(self.data, mapper))
+  defp list_filter_method(self, pred), do: wrap_as_beamlang_list(list_filter(self.data, pred))
+  defp list_fold_method(self, init, folder), do: list_fold(self.data, init, folder)
+  defp list_reverse_method(self), do: wrap_as_beamlang_list(list_reverse(self.data))
+  defp list_concat_method(self, other), do: wrap_as_beamlang_list(list_concat(self.data, other.data))
 
   @spec load_modules([{atom(), binary()}]) :: :ok | {:error, map()}
   def load_modules(modules) when is_list(modules) do

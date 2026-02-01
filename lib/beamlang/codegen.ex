@@ -360,49 +360,10 @@ defmodule BeamLang.Codegen do
     {:fun, line, {:clauses, [clause]}}
   end
 
-  defp expr_form(line, {:method_call, %{target: target, name: name, args: args, target_type: target_type}}, env) do
-    # Check if target is a List type - if so, dispatch to Runtime functions
-    case target_type do
-      {:generic, {:named, "List"}, _} ->
-        list_method_form(line, target, name, args, env)
-
-      _ ->
-        fun_expr = expr_form(line, {:field, %{target: target, name: name}}, env)
-        all_args = [expr_form(line, target, env) | Enum.map(args, &expr_form(line, &1, env))]
-        {:call, line, fun_expr, all_args}
-    end
-  end
-
-  # Fallback for method_call without target_type (shouldn't happen after semantic analysis)
   defp expr_form(line, {:method_call, %{target: target, name: name, args: args}}, env) do
     fun_expr = expr_form(line, {:field, %{target: target, name: name}}, env)
     all_args = [expr_form(line, target, env) | Enum.map(args, &expr_form(line, &1, env))]
     {:call, line, fun_expr, all_args}
-  end
-
-  defp list_method_form(line, target, name, args, env) do
-    target_form = expr_form(line, target, env)
-    arg_forms = Enum.map(args, &expr_form(line, &1, env))
-
-    runtime_fn =
-      case name do
-        "length" -> :list_length
-        "get" -> :list_get
-        "push" -> :list_push
-        "pop" -> :list_pop
-        "first" -> :list_first
-        "last" -> :list_last
-        "iter" -> :list_iter
-        "map" -> :list_map
-        "filter" -> :list_filter
-        "fold" -> :list_fold
-        "reverse" -> :list_reverse
-        "concat" -> :list_concat
-        _ -> raise "Unknown List method: #{name}"
-      end
-
-    {:call, line, {:remote, line, {:atom, line, BeamLang.Runtime}, {:atom, line, runtime_fn}},
-     [target_form | arg_forms]}
   end
 
   @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
@@ -429,23 +390,6 @@ defmodule BeamLang.Codegen do
 
       _ ->
         {:op, line, op_atom(op), expr_form(line, left, env), expr_form(line, right, env)}
-    end
-  end
-
-  defp get_expr_type({_tag, %{type: type}}), do: type
-  defp get_expr_type({:string, _}), do: :String
-  defp get_expr_type(_), do: nil
-
-  defp is_string_type?(:String), do: true
-  defp is_string_type?({:named, "String"}), do: true
-  defp is_string_type?(_), do: false
-
-  defp ensure_string_form(line, expr, type, env) do
-    if is_string_type?(type) do
-      expr_form(line, expr, env)
-    else
-      # Convert to string using to_string
-      {:call, line, {:atom, line, :to_string}, [expr_form(line, expr, env)]}
     end
   end
 
@@ -1021,5 +965,23 @@ defmodule BeamLang.Codegen do
         [part_string]
       end
     end)
+  end
+
+  # Helper functions for string type checking (moved here to keep expr_form clauses grouped)
+  defp get_expr_type({_tag, %{type: type}}), do: type
+  defp get_expr_type({:string, _}), do: :String
+  defp get_expr_type(_), do: nil
+
+  defp is_string_type?(:String), do: true
+  defp is_string_type?({:named, "String"}), do: true
+  defp is_string_type?(_), do: false
+
+  defp ensure_string_form(line, expr, type, env) do
+    if is_string_type?(type) do
+      expr_form(line, expr, env)
+    else
+      # Convert to string using to_string
+      {:call, line, {:atom, line, :to_string}, [expr_form(line, expr, env)]}
+    end
   end
 end
