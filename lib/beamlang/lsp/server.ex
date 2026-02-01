@@ -214,16 +214,30 @@ defmodule BeamLang.LSP.Server do
   defp hover_for(doc, %{"line" => line, "character" => character}) do
     offset = position_to_offset(doc.text, line, character)
 
-    with %BeamLang.Token{type: :identifier, value: name} <- identifier_at(doc, offset),
-         {:ok, info} <- lookup_hover(doc, name, offset) do
-      %{
-        "contents" => %{
-          "kind" => "markdown",
-          "value" => "```beamlang\n" <> info <> "\n```"
+    case hover_in_interpolated_string(doc, offset) do
+      {:ok, info} ->
+        %{
+          "contents" => %{
+            "kind" => "markdown",
+            "value" => "```beamlang\n" <> info <> "\n```"
+          }
         }
-      }
-    else
-      _ -> nil
+
+      :no_string ->
+        with %BeamLang.Token{type: :identifier, value: name} <- identifier_at(doc, offset),
+             {:ok, info} <- lookup_hover(doc, name, offset) do
+          %{
+            "contents" => %{
+              "kind" => "markdown",
+              "value" => "```beamlang\n" <> info <> "\n```"
+            }
+          }
+        else
+          _ -> nil
+        end
+
+      :no_interpolation ->
+        nil
     end
   end
 
@@ -899,6 +913,87 @@ defmodule BeamLang.LSP.Server do
         end
     end
   end
+
+  defp hover_in_interpolated_string(doc, offset) do
+    case token_at(doc.tokens, offset) do
+      %BeamLang.Token{type: :string, value: value, span: span} ->
+        rel_offset = offset - span.start - 1
+
+        case interpolation_expr_at(value, rel_offset) do
+          nil ->
+            :no_interpolation
+
+          expr_str ->
+            expr_str = String.trim(expr_str)
+
+            cond do
+              expr_str == "" ->
+                :no_interpolation
+
+              identifier = interpolation_identifier(expr_str) ->
+                case lookup_hover(doc, identifier, offset) do
+                  {:ok, info} -> {:ok, info}
+                  _ -> {:ok, expr_str}
+                end
+
+              true ->
+                {:ok, expr_str}
+            end
+        end
+
+      _ ->
+        :no_string
+    end
+  end
+
+  defp interpolation_identifier(expr_str) do
+    if Regex.match?(~r/^[A-Za-z_][A-Za-z0-9_]*$/, expr_str) do
+      expr_str
+    else
+      nil
+    end
+  end
+
+  defp interpolation_expr_at(value, rel_offset) when is_integer(rel_offset) do
+    if rel_offset < 0 or rel_offset >= byte_size(value) do
+      nil
+    else
+      find_interpolation_at(value, rel_offset, 0)
+    end
+  end
+
+  defp find_interpolation_at(<<"${", rest::binary>>, rel_offset, idx) do
+    case find_closing_brace(rest, 0, "") do
+      {:ok, expr, remaining} ->
+        expr_start = idx + 2
+        expr_end = expr_start + byte_size(expr)
+
+        cond do
+          rel_offset >= expr_start and rel_offset <= expr_end ->
+            expr
+
+          true ->
+            consumed = byte_size(rest) - byte_size(remaining)
+            next_idx = idx + 2 + consumed
+            find_interpolation_at(remaining, rel_offset, next_idx)
+        end
+
+      {:error, _} ->
+        nil
+    end
+  end
+
+  defp find_interpolation_at(<<_char::utf8, rest::binary>>, rel_offset, idx) do
+    find_interpolation_at(rest, rel_offset, idx + 1)
+  end
+
+  defp find_interpolation_at(<<>>, _rel_offset, _idx), do: nil
+
+  defp find_closing_brace(<<"}", rest::binary>>, 0, acc), do: {:ok, acc, rest}
+  defp find_closing_brace(<<"}", rest::binary>>, depth, acc), do: find_closing_brace(rest, depth - 1, acc <> "}")
+  defp find_closing_brace(<<"{", rest::binary>>, depth, acc), do: find_closing_brace(rest, depth + 1, acc <> "{")
+  defp find_closing_brace(<<char::utf8, rest::binary>>, depth, acc), do: find_closing_brace(rest, depth, acc <> <<char::utf8>>)
+  defp find_closing_brace(<<>>, _depth, _acc), do: {:error, :unclosed}
 
   defp infer_call_name(tokens, offset) do
     tokens
