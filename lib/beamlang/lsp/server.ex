@@ -434,7 +434,10 @@ defmodule BeamLang.LSP.Server do
             end
 
           info ->
-            {:ok, format_function_info(name, info.params, info.return_type)}
+            case instantiated_function_info(doc, name, offset, info) do
+              nil -> {:ok, format_function_info(name, info.params, info.return_type)}
+              signature -> {:ok, signature}
+            end
         end
     end
   end
@@ -529,11 +532,12 @@ defmodule BeamLang.LSP.Server do
   end
 
   defp index_functions(functions) do
-    Enum.reduce(functions, %{}, fn {:function, %{name: name, params: params, return_type: return_type, span: span} = func}, acc ->
+    Enum.reduce(functions, %{}, fn {:function, %{name: name, params: params, return_type: return_type, span: span, type_params: type_params} = func}, acc ->
       info = %{
         params: params,
         return_type: return_type,
         span: span,
+        type_params: type_params,
         exported: Map.get(func, :exported, false),
         internal: Map.get(func, :internal, false),
         external: Map.get(func, :external)
@@ -633,6 +637,188 @@ defmodule BeamLang.LSP.Server do
   end
 
   defp format_type(type) when is_atom(type), do: Atom.to_string(type)
+
+  defp instantiated_function_info(doc, name, offset, info) do
+    case Map.get(info, :type_params, []) do
+      [] -> nil
+      _ ->
+        case find_call_at_offset(doc.ast, name, offset) do
+          nil -> nil
+          {:call, args} ->
+            subst = build_type_subst(doc, args, info.params, offset)
+            if map_size(subst) == 0 do
+              nil
+            else
+              param_list =
+                info.params
+                |> Enum.map(fn %{name: param_name, type: type} ->
+                  "#{param_name}: #{format_type(substitute_type(type, subst))}"
+                end)
+                |> Enum.join(", ")
+
+              return_type = substitute_type(info.return_type, subst)
+              "fn #{name}(#{param_list}) -> #{format_type(return_type)}"
+            end
+        end
+    end
+  end
+
+  defp build_type_subst(doc, args, params, offset) do
+    Enum.zip(args, params)
+    |> Enum.reduce(%{}, fn {arg, param}, acc ->
+      case infer_expr_type_for_call(arg, doc, offset) do
+        nil -> acc
+        arg_type -> unify_types(param.type, arg_type, acc)
+      end
+    end)
+  end
+
+  defp unify_types({:type_var, name}, arg_type, subst) when is_binary(name) do
+    Map.put_new(subst, name, arg_type)
+  end
+
+  defp unify_types({:generic, base_a, args_a}, {:generic, base_b, args_b}, subst) do
+    subst =
+      case {base_a, base_b} do
+        {^base_a, ^base_b} -> subst
+        _ -> subst
+      end
+
+    Enum.zip(args_a, args_b)
+    |> Enum.reduce(subst, fn {a, b}, acc -> unify_types(a, b, acc) end)
+  end
+
+  defp unify_types({:optional, inner_a}, {:optional, inner_b}, subst), do: unify_types(inner_a, inner_b, subst)
+
+  defp unify_types({:result, ok_a, err_a}, {:result, ok_b, err_b}, subst) do
+    subst
+    |> unify_types(ok_a, ok_b)
+    |> unify_types(err_a, err_b)
+  end
+
+  defp unify_types({:fn, params_a, ret_a}, {:fn, params_b, ret_b}, subst) do
+    subst =
+      Enum.zip(params_a, params_b)
+      |> Enum.reduce(subst, fn {a, b}, acc -> unify_types(a, b, acc) end)
+
+    unify_types(ret_a, ret_b, subst)
+  end
+
+  defp unify_types(_param_type, _arg_type, subst), do: subst
+
+  defp substitute_type({:type_var, name}, subst) when is_binary(name) do
+    Map.get(subst, name, {:type_var, name})
+  end
+
+  defp substitute_type({:generic, base, args}, subst) do
+    {:generic, substitute_type(base, subst), Enum.map(args, &substitute_type(&1, subst))}
+  end
+
+  defp substitute_type({:optional, inner}, subst), do: {:optional, substitute_type(inner, subst)}
+  defp substitute_type({:result, ok_type, err_type}, subst),
+    do: {:result, substitute_type(ok_type, subst), substitute_type(err_type, subst)}
+
+  defp substitute_type({:fn, params, return_type}, subst) do
+    {:fn, Enum.map(params, &substitute_type(&1, subst)), substitute_type(return_type, subst)}
+  end
+
+  defp substitute_type(type, _subst), do: type
+
+  defp infer_expr_type_for_call({:identifier, %{name: name}}, doc, offset) do
+    case lookup_local(doc, name, offset) do
+      {:ok, info} -> info.type
+      :error ->
+        case Map.get(doc.index[:functions] || %{}, name) do
+          nil -> nil
+          info -> info.return_type
+        end
+    end
+  end
+
+  defp infer_expr_type_for_call({:call, %{name: name}}, doc, _offset) do
+    case Map.get(doc.index[:functions] || %{}, name) do
+      nil -> nil
+      info -> info.return_type
+    end
+  end
+
+  defp infer_expr_type_for_call(expr, _doc, _offset), do: infer_expr_type(expr)
+
+  defp find_call_at_offset(nil, _name, _offset), do: nil
+
+  defp find_call_at_offset({:program, %{functions: functions}}, name, offset) do
+    Enum.reduce_while(functions, nil, fn {:function, %{body: body}}, _acc ->
+      case find_call_in_block(body, name, offset) do
+        nil -> {:cont, nil}
+        call -> {:halt, call}
+      end
+    end)
+  end
+
+  defp find_call_in_block(nil, _name, _offset), do: nil
+
+  defp find_call_in_block({:block, %{stmts: stmts}}, name, offset) do
+    Enum.reduce_while(stmts, nil, fn stmt, _acc ->
+      case find_call_in_stmt(stmt, name, offset) do
+        nil -> {:cont, nil}
+        call -> {:halt, call}
+      end
+    end)
+  end
+
+  defp find_call_in_stmt({:let, %{expr: expr}}, name, offset), do: find_call_in_expr(expr, name, offset)
+  defp find_call_in_stmt({:assign, %{expr: expr}}, name, offset), do: find_call_in_expr(expr, name, offset)
+  defp find_call_in_stmt({:return, %{expr: expr}}, name, offset), do: find_call_in_expr(expr, name, offset)
+  defp find_call_in_stmt({:expr, %{expr: expr}}, name, offset), do: find_call_in_expr(expr, name, offset)
+  defp find_call_in_stmt({:if_stmt, %{then_block: then_block, else_branch: else_branch}}, name, offset) do
+    find_call_in_block(then_block, name, offset) || find_call_in_else(else_branch, name, offset)
+  end
+
+  defp find_call_in_stmt({:while, %{body: body}}, name, offset), do: find_call_in_block(body, name, offset)
+  defp find_call_in_stmt({:loop, %{body: body}}, name, offset), do: find_call_in_block(body, name, offset)
+  defp find_call_in_stmt({:for, %{body: body}}, name, offset), do: find_call_in_block(body, name, offset)
+  defp find_call_in_stmt({:guard, %{else_block: block}}, name, offset), do: find_call_in_block(block, name, offset)
+  defp find_call_in_stmt(_stmt, _name, _offset), do: nil
+
+  defp find_call_in_else(nil, _name, _offset), do: nil
+  defp find_call_in_else({:else_block, %{block: block}}, name, offset), do: find_call_in_block(block, name, offset)
+  defp find_call_in_else({:else_if, %{if: if_stmt}}, name, offset), do: find_call_in_stmt(if_stmt, name, offset)
+
+  defp find_call_in_expr(nil, _name, _offset), do: nil
+
+  defp find_call_in_expr({:call, %{name: name, args: args, span: span}}, name, offset) do
+    if span_contains?(span, offset), do: {:call, args}, else: nil
+  end
+
+  defp find_call_in_expr({:call, %{args: args}}, name, offset) do
+    Enum.find_value(args, &find_call_in_expr(&1, name, offset))
+  end
+
+  defp find_call_in_expr({:method_call, %{target: target, args: args}}, name, offset) do
+    find_call_in_expr(target, name, offset) || Enum.find_value(args, &find_call_in_expr(&1, name, offset))
+  end
+
+  defp find_call_in_expr({:binary, %{left: left, right: right}}, name, offset) do
+    find_call_in_expr(left, name, offset) || find_call_in_expr(right, name, offset)
+  end
+
+  defp find_call_in_expr({:block_expr, %{block: block}}, name, offset), do: find_call_in_block(block, name, offset)
+  defp find_call_in_expr({:match, %{cases: cases}}, name, offset) do
+    Enum.find_value(cases, fn %{body: body} -> find_call_in_expr(body, name, offset) end)
+  end
+
+  defp find_call_in_expr({:if_expr, %{then_block: then_block, else_branch: else_branch}}, name, offset) do
+    find_call_in_block(then_block, name, offset) || find_call_in_else(else_branch, name, offset)
+  end
+
+  defp find_call_in_expr({:struct, %{fields: fields}}, name, offset) do
+    Enum.find_value(fields, fn %{expr: expr} -> find_call_in_expr(expr, name, offset) end)
+  end
+
+  defp find_call_in_expr({:res_ok, %{expr: expr}}, name, offset), do: find_call_in_expr(expr, name, offset)
+  defp find_call_in_expr({:res_err, %{expr: expr}}, name, offset), do: find_call_in_expr(expr, name, offset)
+  defp find_call_in_expr({:opt_some, %{expr: expr}}, name, offset), do: find_call_in_expr(expr, name, offset)
+  defp find_call_in_expr(_expr, _name, _offset), do: nil
 
   defp format_local_info(%{name: name, type: nil, kind: kind}) do
     "#{kind_label(kind)} #{name}"
