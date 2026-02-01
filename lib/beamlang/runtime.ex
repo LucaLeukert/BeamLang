@@ -43,6 +43,7 @@ defmodule BeamLang.Runtime do
       map: &list_map_method/2,
       filter: &list_filter_method/2,
       fold: &list_fold_method/3,
+      for_each: &list_for_each_method/2,
       reverse: &list_reverse_method/1,
       concat: &list_concat_method/2,
       __beamlang_type__: ~c"List"
@@ -59,6 +60,7 @@ defmodule BeamLang.Runtime do
   defp list_map_method(self, mapper), do: wrap_as_beamlang_list(list_map(self.data, mapper))
   defp list_filter_method(self, pred), do: wrap_as_beamlang_list(list_filter(self.data, pred))
   defp list_fold_method(self, init, folder), do: list_fold(self.data, init, folder)
+  defp list_for_each_method(self, callback), do: list_for_each(self.data, callback)
   defp list_reverse_method(self), do: wrap_as_beamlang_list(list_reverse(self.data))
   defp list_concat_method(self, other), do: wrap_as_beamlang_list(list_concat(self.data, other.data))
 
@@ -245,6 +247,12 @@ defmodule BeamLang.Runtime do
   @spec list_fold(list(), term(), function()) :: term()
   def list_fold(list, initial, folder) do
     Enum.reduce(list, initial, folder)
+  end
+
+  @spec list_for_each(list(), function()) :: :ok
+  def list_for_each(list, callback) do
+    Enum.each(list, callback)
+    :ok
   end
 
   @spec println(term()) :: :ok

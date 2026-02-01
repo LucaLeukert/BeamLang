@@ -10,6 +10,7 @@ type List<T> {
     map: fn(List<T>, fn(T) -> any) -> List<any>,
     filter: fn(List<T>, fn(T) -> bool) -> List<T>,
     fold: fn(List<T>, any, fn(any, T) -> any) -> any,
+    for_each: fn(List<T>, fn(T) -> void) -> void,
     reverse: fn(List<T>) -> List<T>,
     concat: fn(List<T>, List<T>) -> List<T>
 }
@@ -41,6 +42,9 @@ fn list_concat_data(left: any, right: any) -> any;
 @external(elixir, "BeamLang.Runtime", "list_empty")
 fn list_empty_data() -> any;
 
+@external(elixir, "BeamLang.Runtime", "list_for_each")
+fn list_for_each_data(data: any, callback: fn(any) -> void) -> void;
+
 fn list_new<T>() -> List<T> {
     return list_from_data(list_empty_data());
 }
@@ -62,6 +66,7 @@ internal fn list_from_data<T>(data: any) -> List<T> {
         map = list_map_method,
         filter = list_filter_method,
         fold = list_fold_method,
+        for_each = list_for_each_method,
         reverse = list_reverse_method,
         concat = list_concat_method
     };
@@ -109,6 +114,11 @@ internal fn list_filter_method<T>(self: List<T>, predicate: fn(T) -> bool) -> Li
 
 internal fn list_fold_method<T, U>(self: List<T>, initial: U, folder: fn(U, T) -> U) -> U {
     return iterator_fold_data(self->data, initial, folder);
+}
+
+internal fn list_for_each_method<T>(self: List<T>, callback: fn(T) -> void) -> void {
+    list_for_each_data(self->data, callback);
+    return;
 }
 
 internal fn list_reverse_method<T>(self: List<T>) -> List<T> {
