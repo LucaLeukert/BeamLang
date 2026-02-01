@@ -107,7 +107,10 @@ defmodule BeamLang.CLI do
           case BeamLang.Runtime.load_modules(modules) do
             :ok ->
               case BeamLang.Runtime.load_and_run(entry_module, elem(List.keyfind(modules, entry_module, 0), 1), beamlang_args) do
-                {:ok, value} -> IO.puts(value)
+                {:ok, exit_code} when is_integer(exit_code) -> 
+                  System.halt(exit_code)
+                {:ok, _value} -> 
+                  System.halt(0)
                 {:error, %{message: message}} ->
                   IO.puts(:stderr, "Error: #{message}")
                   System.halt(1)
