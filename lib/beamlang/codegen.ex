@@ -568,24 +568,231 @@ defmodule BeamLang.Codegen do
     line = 1
     {fun_var, counter} = fresh_var("loop", counter)
     fun_name = fun_var
-    {body_expr, _env_body, counter} = stmt_expr_tree(body_stmts, env, counter)
-    continue_call = {:call, line, {:var, line, fun_name}, []}
-    {body_case, counter} = break_case(body_expr, continue_call, counter)
 
+    # Find all mutable variables that are assigned in the loop body
+    assigned_vars = find_assigned_vars(body_stmts)
+    # Get the current env mappings for these vars (their current Erlang variable names)
+    loop_vars = for var_name <- assigned_vars, Map.has_key?(env, var_name), do: var_name
+
+    # Create fresh parameter names for loop function
+    {param_vars, counter} =
+      Enum.reduce(loop_vars, {[], counter}, fn name, {acc, cnt} ->
+        {pvar, cnt} = fresh_var("#{name}_loop", cnt)
+        {acc ++ [{name, pvar}], cnt}
+      end)
+
+    # Build env for loop body: map each name to its parameter variable
+    body_env =
+      Enum.reduce(param_vars, env, fn {name, pvar}, acc ->
+        Map.put(acc, name, pvar)
+      end)
+
+    # Generate body statements as a list of forms (no return-case wrapping)
+    {body_forms, env_after_body, counter} = loop_body_forms(body_stmts, body_env, counter)
+
+    # Build the recursive call with updated variables
+    continue_args =
+      Enum.map(param_vars, fn {name, _pvar} ->
+        updated_var = Map.get(env_after_body, name)
+        {:var, line, updated_var}
+      end)
+
+    continue_call = {:call, line, {:var, line, fun_name}, continue_args}
+    
+    # Combine body forms with continue call, handling return/break
+    body_with_continue = build_loop_body_with_continue(body_forms, continue_call, env_after_body, param_vars, counter)
+
+    # Build condition - must use parameter variables
     cond_form =
       case cond do
         :always_true -> {:atom, line, true}
-        _ -> expr_form(line, cond, env)
+        _ -> expr_form(line, cond, body_env)
       end
 
-    clause_true = {:clause, line, [{:atom, line, true}], [], [body_case]}
-    clause_false = {:clause, line, [{:atom, line, false}], [], [{:atom, line, :ok}]}
+    # When condition is false, return tuple of final variable values
+    final_values_tuple = build_vars_tuple(line, param_vars, body_env)
+
+    clause_true = {:clause, line, [{:atom, line, true}], [], [body_with_continue]}
+    clause_false = {:clause, line, [{:atom, line, false}], [], [final_values_tuple]}
     cond_case = {:case, line, cond_form, [clause_true, clause_false]}
-    fun_expr = {:named_fun, line, fun_name, [{:clause, line, [], [], [cond_case]}]}
+
+    # Function parameters
+    fun_params = Enum.map(param_vars, fn {_name, pvar} -> {:var, line, pvar} end)
+    fun_expr = {:named_fun, line, fun_name, [{:clause, line, fun_params, [], [cond_case]}]}
     match_fun = {:match, line, {:var, line, fun_var}, fun_expr}
-    call_fun = {:call, line, {:var, line, fun_var}, []}
-    {{:block, line, [match_fun, call_fun]}, env, counter}
+
+    # Initial call with current variable values
+    initial_args =
+      Enum.map(loop_vars, fn name ->
+        current_var = Map.get(env, name)
+        {:var, line, current_var}
+      end)
+
+    call_fun = {:call, line, {:var, line, fun_var}, initial_args}
+
+    # Create fresh variables for the results and update env
+    {result_vars, new_env, counter} =
+      Enum.reduce(loop_vars, {[], env, counter}, fn name, {acc_vars, acc_env, cnt} ->
+        {rvar, cnt} = fresh_var("#{name}_result", cnt)
+        {acc_vars ++ [{name, rvar}], Map.put(acc_env, name, rvar), cnt}
+      end)
+
+    if length(result_vars) == 0 do
+      # No mutable vars - simple call
+      {{:block, line, [match_fun, call_fun]}, env, counter}
+    else
+      # Match the returned tuple to get final values
+      result_pattern = build_vars_tuple(line, result_vars, %{})
+      match_result = {:match, line, result_pattern, call_fun}
+      {{:block, line, [match_fun, match_result]}, new_env, counter}
+    end
   end
+
+  # Generate loop body forms as a list without return-case wrapping
+  defp loop_body_forms([], env, counter), do: {[], env, counter}
+  defp loop_body_forms([stmt | rest], env, counter) do
+    {form, env, counter} = loop_stmt_form(stmt, env, counter)
+    {rest_forms, env, counter} = loop_body_forms(rest, env, counter)
+    {[form | rest_forms], env, counter}
+  end
+
+  # Convert statement to form for loop body (simpler than stmt_form, no return wrapping)
+  defp loop_stmt_form({:let, %{name: name, expr: expr}}, env, counter) do
+    {var, counter} = fresh_var(name, counter)
+    form = match_form(1, var, expr, env)
+    {form, Map.put(env, name, var), counter}
+  end
+
+  defp loop_stmt_form({:assign, %{target: target, expr: expr}}, env, counter) do
+    case assignment_form(1, target, expr, env, counter) do
+      {:ok, form, new_env, new_counter} -> {form, new_env, new_counter}
+      {:error, _} -> {{:atom, 1, :ok}, env, counter}
+    end
+  end
+
+  defp loop_stmt_form({:expr, %{expr: expr}}, env, counter) do
+    {expr_form(1, expr, env), env, counter}
+  end
+
+  defp loop_stmt_form({:return, %{expr: nil}}, env, counter) do
+    {return_marker({:atom, 1, :ok}), env, counter}
+  end
+
+  defp loop_stmt_form({:return, %{expr: expr}}, env, counter) do
+    {return_marker(expr_form(1, expr, env)), env, counter}
+  end
+
+  defp loop_stmt_form({:break, %{}}, env, counter) do
+    {{:atom, 1, :__break__}, env, counter}
+  end
+
+  defp loop_stmt_form({:if_stmt, %{cond: cond, then_block: then_block, else_branch: else_branch}}, env, counter) do
+    # For if in loop body, we need to handle it specially
+    {then_forms, _then_env, counter} = 
+      case then_block do
+        {:block, %{stmts: stmts}} -> loop_body_forms(stmts, env, counter)
+        _ -> {[], env, counter}
+      end
+    
+    {else_forms, _else_env, counter} =
+      case else_branch do
+        {:else_block, %{block: {:block, %{stmts: stmts}}}} -> loop_body_forms(stmts, env, counter)
+        nil -> {[{:atom, 1, :ok}], env, counter}
+        _ -> {[{:atom, 1, :ok}], env, counter}
+      end
+    
+    cond_form = expr_form(1, cond, env)
+    then_expr = if length(then_forms) == 1, do: hd(then_forms), else: {:block, 1, then_forms}
+    else_expr = if length(else_forms) == 1, do: hd(else_forms), else: {:block, 1, else_forms}
+    
+    clause_true = {:clause, 1, [{:atom, 1, true}], [], [then_expr]}
+    clause_false = {:clause, 1, [{:atom, 1, false}], [], [else_expr]}
+    {{:case, 1, cond_form, [clause_true, clause_false]}, env, counter}
+  end
+
+  defp loop_stmt_form(stmt, env, counter) do
+    # Fallback to regular stmt_form
+    stmt_form(stmt, env, counter)
+  end
+
+  # Build the loop body with continue call at the end
+  defp build_loop_body_with_continue(body_forms, continue_call, env_after_body, param_vars, _counter) do
+    line = 1
+    
+    if Enum.empty?(body_forms) do
+      continue_call
+    else
+      # Check if any form might be a return or break
+      # If so, we need to wrap in case to catch it
+      has_control_flow = Enum.any?(body_forms, &has_return_or_break?/1)
+      
+      if has_control_flow do
+        # Wrap in case to handle return/break
+        body_expr = if length(body_forms) == 1, do: hd(body_forms), else: {:block, line, body_forms}
+        ret_var = internal_var("return_value")
+        return_tuple = {:tuple, line, [{:atom, line, :__return__}, {:var, line, ret_var}]}
+        clause_return = {:clause, line, [return_tuple], [], [return_tuple]}
+        
+        break_values = build_vars_tuple(line, param_vars, env_after_body)
+        clause_break = {:clause, line, [{:atom, line, :__break__}], [], [break_values]}
+        clause_continue = {:clause, line, [{:var, line, :_}], [], [continue_call]}
+        {:case, line, body_expr, [clause_return, clause_break, clause_continue]}
+      else
+        # Simple case: just sequence forms and add continue call
+        {:block, line, body_forms ++ [continue_call]}
+      end
+    end
+  end
+
+  defp has_return_or_break?({:tuple, _, [{:atom, _, :__return__}, _]}), do: true
+  defp has_return_or_break?({:atom, _, :__break__}), do: true
+  defp has_return_or_break?({:case, _, _, clauses}) do
+    Enum.any?(clauses, fn {:clause, _, _, _, body} ->
+      Enum.any?(body, &has_return_or_break?/1)
+    end)
+  end
+  defp has_return_or_break?({:block, _, exprs}), do: Enum.any?(exprs, &has_return_or_break?/1)
+  defp has_return_or_break?(_), do: false
+
+  # Build a tuple of variables
+  defp build_vars_tuple(line, vars, _env) when length(vars) == 0 do
+    {:atom, line, :ok}
+  end
+  defp build_vars_tuple(line, vars, env) when length(vars) == 1 do
+    [{name, var}] = vars
+    actual_var = Map.get(env, name, var)
+    {:var, line, actual_var}
+  end
+  defp build_vars_tuple(line, vars, env) do
+    elements = Enum.map(vars, fn {name, var} ->
+      actual_var = Map.get(env, name, var)
+      {:var, line, actual_var}
+    end)
+    {:tuple, line, elements}
+  end
+
+  # Find variable names that are assigned in statements
+  defp find_assigned_vars(stmts) do
+    stmts
+    |> Enum.flat_map(&find_assigned_in_stmt/1)
+    |> Enum.uniq()
+  end
+
+  defp find_assigned_in_stmt({:assign, %{target: {:identifier, %{name: name}}}}), do: [name]
+  defp find_assigned_in_stmt({:assign, %{target: {:field, %{target: {:identifier, %{name: name}}}}}}), do: [name]
+  defp find_assigned_in_stmt({:if_stmt, %{then_block: {:block, %{stmts: then_stmts}}, else_branch: else_branch}}) do
+    then_vars = find_assigned_vars(then_stmts)
+    else_vars = case else_branch do
+      {:else_block, %{block: {:block, %{stmts: else_stmts}}}} -> find_assigned_vars(else_stmts)
+      {:else_if, %{if: if_stmt}} -> find_assigned_in_stmt(if_stmt)
+      nil -> []
+    end
+    then_vars ++ else_vars
+  end
+  defp find_assigned_in_stmt({:while, %{body: {:block, %{stmts: body_stmts}}}}), do: find_assigned_vars(body_stmts)
+  defp find_assigned_in_stmt({:loop, %{body: {:block, %{stmts: body_stmts}}}}), do: find_assigned_vars(body_stmts)
+  defp find_assigned_in_stmt({:for, %{body: {:block, %{stmts: body_stmts}}}}), do: find_assigned_vars(body_stmts)
+  defp find_assigned_in_stmt(_), do: []
 
   @spec break_case(tuple(), tuple(), non_neg_integer()) :: {tuple(), non_neg_integer()}
   defp break_case(body_expr, continue_expr, counter) do

@@ -10,7 +10,7 @@ fn file_exists_data(path: String) -> bool;
 fn get_env_data(name: String) -> any;
 
 /** Read a file and return its contents as a Result **/
-fn read_file(path: String) -> Result<String, String> {
+fn read_file(path: String) -> String!String {
     return file_read_data(path);
 }
 

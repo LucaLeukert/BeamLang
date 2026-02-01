@@ -213,4 +213,50 @@ defmodule BeamLang.IntegrationTest do
 
     assert {:ok, 6} == BeamLang.run_source(source)
   end
+
+  test "runs while loop with mutable variable increment" do
+    source = """
+    fn main(args: [String]) -> number {
+        let mut i = 0;
+        while (i < 3) {
+            i = i + 1;
+        }
+        return i;
+    }
+    """
+
+    assert {:ok, 3} == BeamLang.run_source(source)
+  end
+
+  test "runs while loop with multiple statements" do
+    source = """
+    fn main(args: [String]) -> number {
+        let mut i = 0;
+        let mut sum = 0;
+        while (i < 5) {
+            sum = sum + i;
+            i = i + 1;
+        }
+        return sum;
+    }
+    """
+
+    # sum = 0 + 1 + 2 + 3 + 4 = 10
+    assert {:ok, 10} == BeamLang.run_source(source)
+  end
+
+  test "runs while loop with println" do
+    source = """
+    fn main(args: [String]) -> number {
+        let mut i = 0;
+        while (i < 3) {
+            println(i);
+            i = i + 1;
+        }
+        return i;
+    }
+    """
+
+    assert {:ok, 3} == BeamLang.run_source(source)
+  end
 end

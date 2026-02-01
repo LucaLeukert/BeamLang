@@ -1,11 +1,30 @@
 fn main(args: [String]) -> number {
     let mut count = 0;
 
+    // While loop with mutable variable increment
+    let mut i = 0;
+    while (i < 5) {
+        println(i);
+        i = i + 1;
+    }
+
+    // Sum calculation with while loop
+    let mut sum = 0;
+    let mut j = 1;
+    while (j <= 10) {
+        sum = sum + j;
+        j = j + 1;
+    }
+    println("Sum of 1 to 10:");
+    println(sum);
+
+    // While with early break
     while (true) {
         count = 1;
         break;
     }
 
+    // Loop with break
     loop {
         break;
     }
@@ -13,6 +32,7 @@ fn main(args: [String]) -> number {
     let none = ?none;
     println(none->is_present());
 
+    // For loop over string characters
     for (ch in "hi"->chars()) {
         println(ch);
     }

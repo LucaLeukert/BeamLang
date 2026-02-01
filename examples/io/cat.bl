@@ -15,10 +15,8 @@ fn cat_file(filename: String) -> number {
     }
 }
 
-fn main(args: [String]) -> number {
-    let file_opt = args->first();
-    
-    let code = match (file_opt) {
+fn main(args: [String]) -> number {    
+    let code = match (args->first()) {
         case?some filename => cat_file(filename),
         case?none => {
             println("Usage: cat <file>");
