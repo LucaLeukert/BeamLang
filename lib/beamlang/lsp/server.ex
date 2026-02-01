@@ -1401,6 +1401,19 @@ defmodule BeamLang.LSP.Server do
     end
   end
 
+  defp infer_expr_type_with_env({:method_call, %{target: target, name: name}}, func_table, env) do
+    case infer_expr_type_with_env(target, func_table, env) do
+      {:generic, {:named, "List"}, [elem_type]} when name == "first" ->
+        {:optional, elem_type}
+
+      {:generic, {:named, "Iterator"}, [elem_type]} when name == "next" ->
+        {:optional, elem_type}
+
+      other ->
+        other
+    end
+  end
+
   defp infer_expr_type_with_env(expr, _func_table, _env), do: infer_expr_type(expr)
 
   defp span_contains?(nil, _offset), do: false
