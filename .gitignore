@@ -3,3 +3,4 @@
 erl_crash.dump
 .elixir_ls/
 *.beam
+node_modules/

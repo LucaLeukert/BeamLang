@@ -1,6 +1,0 @@
-{
-    "beamlang.lsp.serverPath": "/Users/lucaleukert/src/BeamLang/beamlang",
-    "beamlang.lsp.serverArgs": ["--lsp"],
-    "beamlang.lsp.serverCwd": "/Users/lucaleukert/src/BeamLang",
-    "beamlang.lsp.debug": true
-}
