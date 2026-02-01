@@ -214,7 +214,7 @@ defmodule BeamLang.LSP.Server do
   defp hover_for(doc, %{"line" => line, "character" => character}) do
     offset = position_to_offset(doc.text, line, character)
 
-    with %BeamLang.Token{type: :identifier, value: name} <- token_at(doc.tokens, offset),
+    with %BeamLang.Token{type: :identifier, value: name} <- identifier_at(doc, offset),
          {:ok, info} <- lookup_hover(doc, name, offset) do
       %{
         "contents" => %{
@@ -230,7 +230,7 @@ defmodule BeamLang.LSP.Server do
   defp definition_for(doc, %{"line" => line, "character" => character}) do
     offset = position_to_offset(doc.text, line, character)
 
-    with %BeamLang.Token{type: :identifier, value: name} <- token_at(doc.tokens, offset),
+    with %BeamLang.Token{type: :identifier, value: name} <- identifier_at(doc, offset),
          {:ok, %{span: span, path: path}} <- lookup_definition(doc, name, offset) do
       [
         %{
@@ -655,6 +655,28 @@ defmodule BeamLang.LSP.Server do
     end)
   end
 
+  defp identifier_at(doc, offset) do
+    case token_at(doc.tokens, offset) do
+      %BeamLang.Token{type: :identifier} = token ->
+        token
+
+      _ ->
+        case token_at(doc.tokens, max(offset - 1, 0)) do
+          %BeamLang.Token{type: :identifier} = token ->
+            token
+
+          _ ->
+            {line_start, line_end} = line_bounds(doc.text, offset)
+
+            doc.tokens
+            |> Enum.filter(fn %BeamLang.Token{type: type, span: span} ->
+              type == :identifier and span.start >= line_start and span.start <= line_end
+            end)
+            |> Enum.min_by(fn %BeamLang.Token{span: span} -> abs(span.start - offset) end, fn -> nil end)
+        end
+    end
+  end
+
   defp infer_call_name(tokens, offset) do
     tokens
     |> Enum.filter(fn %BeamLang.Token{span: span} -> span.start <= offset end)
@@ -800,6 +822,25 @@ defmodule BeamLang.LSP.Server do
     char_col = String.length(binary_slice(line_text, 0, min(byte_col, byte_size(line_text))))
 
     %{"line" => line_idx, "character" => char_col}
+  end
+
+  defp line_bounds(source, offset) do
+    lines = String.split(source, "\n", trim: false)
+
+    {line_idx, line_start} =
+      Enum.reduce_while(lines, {0, 0}, fn line, {idx, start_offset} ->
+        line_len = byte_size(String.trim_trailing(line, "\r"))
+
+        if offset <= start_offset + line_len do
+          {:halt, {idx, start_offset}}
+        else
+          {:cont, {idx + 1, start_offset + line_len + 1}}
+        end
+      end)
+
+    line_text = Enum.at(lines, line_idx, "") |> String.trim_trailing("\r")
+    line_end = line_start + byte_size(line_text)
+    {line_start, line_end}
   end
 
   defp position_to_offset(source, line, character) do
