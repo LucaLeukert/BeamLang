@@ -3,8 +3,7 @@
 
 type Path {
     path: String,
-    operator /: fn(Path, String) -> Path,
-    op_div: fn(Path, String) -> Path
+    operator / = path_join
 }
 
 fn path_join(self: Path, segment: String) -> Path {
@@ -15,7 +14,7 @@ fn path_join(self: Path, segment: String) -> Path {
 }
 
 fn path_new(p: String) -> Path {
-    return { path = p, op_div = path_join };
+    return { path = p };
 }
 
 fn main(args: [String]) -> number {

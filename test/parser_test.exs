@@ -666,8 +666,11 @@ defmodule BeamLang.ParserTest do
     source = """
     type Path {
         path: String,
-        operator /: fn(Path, String) -> Path,
-        op_div: fn(Path, String) -> Path
+        operator / = path_join
+    }
+
+    fn path_join(self: Path, segment: String) -> Path {
+        return { path = "test" };
     }
 
     fn main(args: [String]) -> number {
@@ -680,11 +683,11 @@ defmodule BeamLang.ParserTest do
 
     assert {:program, %{types: [type_def], functions: _}} = ast
     assert {:type_def, %{name: "Path", fields: fields, operators: operators}} = type_def
-    assert length(fields) == 2
+    assert length(fields) == 1
     assert length(operators) == 1
     [op] = operators
     assert op.op == :div
-    assert {:fn, [{:named, "Path"}, :String], {:named, "Path"}} = op.type
+    assert op.func == "path_join"
   end
 
   test "parses type with multiple operator overloads" do
@@ -692,13 +695,14 @@ defmodule BeamLang.ParserTest do
     type Vec2 {
         x: number,
         y: number,
-        operator +: fn(Vec2, Vec2) -> Vec2,
-        operator -: fn(Vec2, Vec2) -> Vec2,
-        operator *: fn(Vec2, number) -> Vec2,
-        op_add: fn(Vec2, Vec2) -> Vec2,
-        op_sub: fn(Vec2, Vec2) -> Vec2,
-        op_mul: fn(Vec2, number) -> Vec2
+        operator + = vec2_add,
+        operator - = vec2_sub,
+        operator * = vec2_mul
     }
+
+    fn vec2_add(a: Vec2, b: Vec2) -> Vec2 { return { x = 0, y = 0 }; }
+    fn vec2_sub(a: Vec2, b: Vec2) -> Vec2 { return { x = 0, y = 0 }; }
+    fn vec2_mul(a: Vec2, b: number) -> Vec2 { return { x = 0, y = 0 }; }
 
     fn main(args: [String]) -> number {
         return 0;
@@ -710,7 +714,7 @@ defmodule BeamLang.ParserTest do
 
     assert {:program, %{types: [type_def], functions: _}} = ast
     assert {:type_def, %{name: "Vec2", fields: fields, operators: operators}} = type_def
-    assert length(fields) == 5  # x, y, op_add, op_sub, op_mul
+    assert length(fields) == 2  # x, y
     assert length(operators) == 3
     ops_by_name = Enum.map(operators, & &1.op)
     assert :add in ops_by_name

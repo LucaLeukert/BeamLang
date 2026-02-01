@@ -1718,10 +1718,10 @@ defmodule BeamLang.Parser do
 
   defp parse_type_fields_and_operators([%Token{type: :operator_kw} = op_tok | rest], fields_acc, ops_acc) do
     with {:ok, op_symbol, rest1} <- parse_operator_symbol(rest),
-         {:ok, _colon, rest2} <- expect(rest1, :colon),
-         {:ok, {type_name, type_span}, rest3} <- parse_type_name(rest2) do
-      span = BeamLang.Span.merge(op_tok.span, type_span)
-      op_def = %{op: op_symbol, type: type_name, span: span}
+         {:ok, _eq, rest2} <- expect(rest1, :equals),
+         {:ok, func_tok, rest3} <- expect(rest2, :identifier) do
+      span = BeamLang.Span.merge(op_tok.span, func_tok.span)
+      op_def = %{op: op_symbol, func: func_tok.value, span: span}
 
       case rest3 do
         [%Token{type: :comma} | rest4] -> parse_type_fields_and_operators(rest4, fields_acc, [op_def | ops_acc])

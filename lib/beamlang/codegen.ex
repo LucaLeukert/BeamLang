@@ -401,12 +401,10 @@ defmodule BeamLang.Codegen do
   defp expr_form(line, {:binary, %{op: op, left: left, right: right} = info}, env) do
     # Check if this is an overloaded operator
     case Map.get(info, :operator_info) do
-      %{overloaded: true, left_type: _left_type} ->
-        # Call the operator function: get the operator field from left operand and call it
-        op_name = operator_field_name(op)
-        fun_expr = expr_form(line, {:field, %{target: left, name: op_name}}, env)
+      %{overloaded: true, func_name: func_name} ->
+        # Call the operator function directly
         all_args = [expr_form(line, left, env), expr_form(line, right, env)]
-        {:call, line, fun_expr, all_args}
+        {:call, line, {:atom, line, String.to_atom(func_name)}, all_args}
 
       _ ->
         # Standard operator handling
@@ -461,19 +459,6 @@ defmodule BeamLang.Codegen do
 
     {:call, line, {:atom, line, :list_of}, [list_form]}
   end
-
-  @spec operator_field_name(atom()) :: binary()
-  defp operator_field_name(:add), do: "op_add"
-  defp operator_field_name(:sub), do: "op_sub"
-  defp operator_field_name(:mul), do: "op_mul"
-  defp operator_field_name(:div), do: "op_div"
-  defp operator_field_name(:mod), do: "op_mod"
-  defp operator_field_name(:eq), do: "op_eq"
-  defp operator_field_name(:neq), do: "op_neq"
-  defp operator_field_name(:lt), do: "op_lt"
-  defp operator_field_name(:gt), do: "op_gt"
-  defp operator_field_name(:lte), do: "op_lte"
-  defp operator_field_name(:gte), do: "op_gte"
 
   defp build_list_form(line, []), do: {:nil, line}
 

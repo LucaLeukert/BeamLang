@@ -932,8 +932,8 @@ defmodule BeamLang.Semantic do
     with {:ok, left_type} <- type_of_expr(left, func_table, type_table, env, nil),
          {:ok, right_type} <- type_of_expr(right, func_table, type_table, env, nil) do
       # First check if left type has operator overload
-      case check_operator_overload(op, left_type, right_type, type_table) do
-        {:ok, result_type} ->
+      case check_operator_overload(op, left_type, right_type, type_table, func_table) do
+        {:ok, result_type, _func_name} ->
           {:ok, result_type}
 
         :no_overload ->
@@ -956,17 +956,17 @@ defmodule BeamLang.Semantic do
     end
   end
 
-  @spec check_operator_overload(atom(), BeamLang.AST.type_name(), BeamLang.AST.type_name(), map()) ::
-          {:ok, BeamLang.AST.type_name()} | :no_overload
-  defp check_operator_overload(op, left_type, right_type, type_table) do
+  @spec check_operator_overload(atom(), BeamLang.AST.type_name(), BeamLang.AST.type_name(), map(), map()) ::
+          {:ok, BeamLang.AST.type_name(), binary()} | :no_overload
+  defp check_operator_overload(op, left_type, right_type, type_table, func_table) do
     case get_type_name(left_type) do
       {:ok, type_name} ->
         case Map.fetch(type_table, type_name) do
           {:ok, %{operators: operators}} when is_map(operators) ->
             case Map.fetch(operators, op) do
-              {:ok, op_types} ->
-                # Find matching operator signature
-                find_matching_operator(op_types, left_type, right_type)
+              {:ok, func_names} ->
+                # Find matching operator function
+                find_matching_operator(func_names, left_type, right_type, func_table)
 
               :error ->
                 :no_overload
@@ -981,22 +981,29 @@ defmodule BeamLang.Semantic do
     end
   end
 
-  @spec find_matching_operator([BeamLang.AST.type_name()], BeamLang.AST.type_name(), BeamLang.AST.type_name()) ::
-          {:ok, BeamLang.AST.type_name()} | :no_overload
-  defp find_matching_operator([], _left_type, _right_type), do: :no_overload
+  @spec find_matching_operator([binary()], BeamLang.AST.type_name(), BeamLang.AST.type_name(), map()) ::
+          {:ok, BeamLang.AST.type_name(), binary()} | :no_overload
+  defp find_matching_operator([], _left_type, _right_type, _func_table), do: :no_overload
 
-  defp find_matching_operator([op_type | rest], left_type, right_type) do
-    case op_type do
-      {:fn, [param1, param2], return_type} ->
-        if types_match?(normalize_type(param1), normalize_type(left_type)) and
-             types_match?(normalize_type(param2), normalize_type(right_type)) do
-          {:ok, return_type}
+  defp find_matching_operator([func_name | rest], left_type, right_type, func_table) do
+    case Map.fetch(func_table, func_name) do
+      {:ok, func_info} ->
+        # params is a list of normalized types, not maps
+        params = func_info.params
+        if length(params) == 2 do
+          [param1_type, param2_type] = params
+          if types_match?(param1_type, normalize_type(left_type)) and
+               types_match?(param2_type, normalize_type(right_type)) do
+            {:ok, func_info.return, func_name}
+          else
+            find_matching_operator(rest, left_type, right_type, func_table)
+          end
         else
-          find_matching_operator(rest, left_type, right_type)
+          find_matching_operator(rest, left_type, right_type, func_table)
         end
 
-      _ ->
-        find_matching_operator(rest, left_type, right_type)
+      :error ->
+        find_matching_operator(rest, left_type, right_type, func_table)
     end
   end
 
@@ -2128,9 +2135,9 @@ defmodule BeamLang.Semantic do
           end)
 
         operator_map =
-          Enum.reduce(operators, %{}, fn %{op: op, type: op_type}, op_acc ->
+          Enum.reduce(operators, %{}, fn %{op: op, func: func_name}, op_acc ->
             existing = Map.get(op_acc, op, [])
-            Map.put(op_acc, op, [normalize_type(op_type) | existing])
+            Map.put(op_acc, op, [func_name | existing])
           end)
 
         Map.put(acc, name, %{params: params, fields: field_map, field_order: field_order, operators: operator_map})
@@ -3584,9 +3591,9 @@ defmodule BeamLang.Semantic do
     # Check if operator is overloaded
     operator_info =
       if inferred_left_type != nil do
-        case check_operator_overload(op, inferred_left_type, inferred_right_type, type_table) do
-          {:ok, result_type} ->
-            %{overloaded: true, left_type: inferred_left_type, right_type: inferred_right_type, result_type: result_type}
+        case check_operator_overload(op, inferred_left_type, inferred_right_type, type_table, func_table) do
+          {:ok, result_type, func_name} ->
+            %{overloaded: true, left_type: inferred_left_type, right_type: inferred_right_type, result_type: result_type, func_name: func_name}
           :no_overload ->
             nil
         end

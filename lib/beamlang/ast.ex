@@ -50,7 +50,7 @@ defmodule BeamLang.AST do
   @type binary_op :: :eq | :neq | :lt | :gt | :lte | :gte | :add | :sub | :mul | :div | :mod
 
   @type operator_def ::
-          %{op: binary_op(), type: type_name(), span: BeamLang.Span.t()}
+          %{op: binary_op(), func: binary(), span: BeamLang.Span.t()}
 
   @type pattern ::
           literal()

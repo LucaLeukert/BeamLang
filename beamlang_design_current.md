@@ -104,56 +104,58 @@ let user: User = { name = "Ada", age = 30 };
 
 ### Operator Overloading
 
-Types can define custom behavior for operators using the `operator` keyword. Each operator definition specifies a function type that takes two arguments (the left and right operands) and returns a result.
+Types can define custom behavior for operators using the `operator` keyword. Each operator definition maps an operator symbol to a function name. The function must take two arguments (the left and right operands) and return a result.
 
 ```beamlang
 type Path {
     path: String,
-    operator /: fn(Path, Path) -> Path,
-    operator /: fn(Path, String) -> Path,
-    op_div: fn(Path, Path) -> Path,
-    op_div_str: fn(Path, String) -> Path
+    operator / = path_join
+}
+
+fn path_join(self: Path, segment: String) -> Path {
+    return { path = self->path + "/" + segment };
 }
 ```
 
-The operator function must be provided as a field on the type (e.g., `op_div` for `/`). The naming convention for operator fields is:
+The `operator` declaration specifies which function to call when the operator is used with the type as the left operand. Supported operators:
 
-| Operator | Field Name |
-|----------|------------|
-| `+`      | `op_add`   |
-| `-`      | `op_sub`   |
-| `*`      | `op_mul`   |
-| `/`      | `op_div`   |
-| `%`      | `op_mod`   |
-| `==`     | `op_eq`    |
-| `!=`     | `op_neq`   |
-| `<`      | `op_lt`    |
-| `>`      | `op_gt`    |
-| `<=`     | `op_lte`   |
-| `>=`     | `op_gte`   |
+| Operator | Description        |
+|----------|--------------------|
+| `+`      | Addition           |
+| `-`      | Subtraction        |
+| `*`      | Multiplication     |
+| `/`      | Division           |
+| `%`      | Modulo             |
+| `==`     | Equality           |
+| `!=`     | Inequality         |
+| `<`      | Less than          |
+| `>`      | Greater than       |
+| `<=`     | Less or equal      |
+| `>=`     | Greater or equal   |
 
 Example with Path type:
 
 ```beamlang
-export type Path {
+type Path {
     path: String,
-    operator /: fn(Path, String) -> Path,
-    op_div: fn(Path, String) -> Path
+    operator / = path_join
 }
 
-internal fn path_join(self: Path, other: String) -> Path {
-    let new_path = self->path + "/" + other;
+fn path_join(self: Path, segment: String) -> Path {
+    let sep = "/";
+    let with_sep = self->path->concat(sep);
+    let new_path = with_sep->concat(segment);
     return path_new(new_path);
 }
 
-export fn path_new(p: String) -> Path {
-    return { path = p, op_div = path_join };
+fn path_new(p: String) -> Path {
+    return { path = p };
 }
 
 fn main(args: [String]) -> number {
     let base = path_new("/home");
     let full = base / "user" / "documents";
-    println(full->path);  // /home/user/documents
+    println("${full->path}");  // /home/user/documents
     return 0;
 }
 ```
