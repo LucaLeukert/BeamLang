@@ -19,6 +19,10 @@ done
 
 (
   cd "${project_root}"
+  if [ -x "${project_root}/beamlang" ]; then
+    exec "${project_root}/beamlang" "$@"
+  fi
+
   if [ -n "${quiet}" ]; then
     MIX_QUIET=1 mix beamlang -- "$@"
   else

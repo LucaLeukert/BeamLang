@@ -58,13 +58,13 @@ Once installed, the extension automatically activates for any file with the `.bl
 2. Click the language indicator in the bottom-right corner
 3. Select "BeamLang" from the list
 
-To enable LSP features, ensure the `beamlang` CLI is on your PATH (or configure the path in settings). If you use the repo script, set the working directory too.
+To enable LSP features, ensure the `beamlang` CLI is on your PATH (or configure the path in settings). For the most stable startup, build the escript and point the extension to it. If you use the repo script, set the working directory too.
 
 Suggested settings:
 
 ```json
 {
-  "beamlang.lsp.serverPath": "/Users/lucaleukert/src/BeamLang/bin/beamlang",
+  "beamlang.lsp.serverPath": "/Users/lucaleukert/src/BeamLang/beamlang",
   "beamlang.lsp.serverArgs": ["--lsp"],
   "beamlang.lsp.serverCwd": "/Users/lucaleukert/src/BeamLang"
 }

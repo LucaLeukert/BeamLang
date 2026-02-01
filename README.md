@@ -36,6 +36,13 @@ Start the language server:
 mix beamlang --lsp
 ```
 
+For editor integration, build the escript once and point the editor to it:
+
+```sh
+mix escript.build
+./beamlang --lsp
+```
+
 ## Tests
 
 ```sh
