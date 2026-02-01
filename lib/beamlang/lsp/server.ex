@@ -218,8 +218,8 @@ defmodule BeamLang.LSP.Server do
          {:ok, info} <- lookup_hover(doc, name, offset) do
       %{
         "contents" => %{
-          "kind" => "plaintext",
-          "value" => info
+          "kind" => "markdown",
+          "value" => "```beamlang\n" <> info <> "\n```"
         }
       }
     else
