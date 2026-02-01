@@ -362,6 +362,7 @@ defmodule BeamLang.LSP.Server do
     functions =
       doc.index
       |> Map.get(:functions, %{})
+      |> Enum.filter(fn {name, info} -> public_function?(doc, name, info) end)
       |> Enum.map(fn {name, _} -> %{"label" => name, "kind" => 3} end)
 
     types =
@@ -382,6 +383,7 @@ defmodule BeamLang.LSP.Server do
     locals =
       doc.index
       |> Map.get(:locals, [])
+      |> Enum.filter(fn local -> local.func_span.file_id == doc.path end)
       |> Enum.map(fn local -> %{"label" => local.name, "kind" => 6} end)
 
     keywords = [
@@ -531,8 +533,17 @@ defmodule BeamLang.LSP.Server do
   end
 
   defp index_functions(functions) do
-    Enum.reduce(functions, %{}, fn {:function, %{name: name, params: params, return_type: return_type, span: span}}, acc ->
-      Map.put(acc, name, %{params: params, return_type: return_type, span: span})
+    Enum.reduce(functions, %{}, fn {:function, %{name: name, params: params, return_type: return_type, span: span} = func}, acc ->
+      info = %{
+        params: params,
+        return_type: return_type,
+        span: span,
+        exported: Map.get(func, :exported, false),
+        internal: Map.get(func, :internal, false),
+        external: Map.get(func, :external)
+      }
+
+      Map.put(acc, name, info)
     end)
   end
 
@@ -639,6 +650,17 @@ defmodule BeamLang.LSP.Server do
   defp kind_label(:let), do: "let"
   defp kind_label(:for), do: "for"
   defp kind_label(_), do: "local"
+
+  defp public_function?(doc, name, info) do
+    cond do
+      info.internal -> false
+      info.span.file_id == doc.path -> true
+      info.span.file_id == "<source>" -> true
+      info.exported -> true
+      is_map(info.external) and not String.ends_with?(name, "_data") -> true
+      true -> false
+    end
+  end
 
   defp document_symbol(name, kind, source, span) do
     %{
