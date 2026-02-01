@@ -9,14 +9,16 @@ function activate(context) {
   const serverPath = config.get('lsp.serverPath', 'beamlang');
   const serverArgs = config.get('lsp.serverArgs', ['--lsp']);
   const serverCwd = config.get('lsp.serverCwd', '');
+  const debug = config.get('lsp.debug', false);
 
   const serverOptions = {
     command: serverPath,
     args: serverArgs,
     transport: TransportKind.stdio,
-    options: serverCwd
-      ? { cwd: serverCwd }
-      : { cwd: path.dirname(serverPath) }
+    options: {
+      cwd: serverCwd ? serverCwd : path.dirname(serverPath),
+      env: Object.assign({}, process.env, debug ? { BEAMLANG_LSP_DEBUG: '1' } : {})
+    }
   };
 
   const clientOptions = {

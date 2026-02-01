@@ -2,7 +2,7 @@
   "name": "beamlang",
   "displayName": "BeamLang",
   "description": "Syntax highlighting and language server support for BeamLang",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -53,6 +53,11 @@
           "type": "string",
           "default": "",
           "description": "Working directory for launching the BeamLang LSP server (optional)."
+        },
+        "beamlang.lsp.debug": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable debug logging for the BeamLang LSP server."
         }
       }
     }

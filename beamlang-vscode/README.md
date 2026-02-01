@@ -27,6 +27,9 @@ A Visual Studio Code extension that provides syntax highlighting and LSP-powered
   - Hover
   - Go-to definition
   - Completion
+  - Document symbols
+  - Workspace symbols
+  - Signature help
 
 ## Installation
 
@@ -66,7 +69,8 @@ Suggested settings:
 {
   "beamlang.lsp.serverPath": "/Users/lucaleukert/src/BeamLang/beamlang",
   "beamlang.lsp.serverArgs": ["--lsp"],
-  "beamlang.lsp.serverCwd": "/Users/lucaleukert/src/BeamLang"
+  "beamlang.lsp.serverCwd": "/Users/lucaleukert/src/BeamLang",
+  "beamlang.lsp.debug": false
 }
 ```
 

@@ -43,6 +43,12 @@ mix escript.build
 ./beamlang --lsp
 ```
 
+Enable LSP debug logs:
+
+```sh
+./beamlang --lsp --lsp-debug
+```
+
 ## Tests
 
 ```sh

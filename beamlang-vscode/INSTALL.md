@@ -73,6 +73,7 @@ If you want to create a proper VSIX package:
 - If you need custom args, update `beamlang.lsp.serverArgs`
 - If you use the repo script, set `beamlang.lsp.serverCwd` to the repo root
 - For best results, run `mix escript.build` and set `beamlang.lsp.serverPath` to the built `beamlang` escript
+- To debug startup, set `beamlang.lsp.debug` to `true` and check the output panel
 
 **Syntax highlighting looks wrong?**
 - Some themes may display colors differently

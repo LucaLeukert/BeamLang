@@ -8,6 +8,10 @@ defmodule BeamLang.CLI do
     {opts, rest} = parse_args(args)
 
     if opts[:lsp] do
+      if opts[:lsp_debug] do
+        System.put_env("BEAMLANG_LSP_DEBUG", "1")
+      end
+
       BeamLang.LSP.Server.start()
       :ok
     else
@@ -38,7 +42,8 @@ defmodule BeamLang.CLI do
           print_forms: :boolean,
           emit_beam: :string,
           no_run: :boolean,
-          lsp: :boolean
+          lsp: :boolean,
+          lsp_debug: :boolean
         ]
       )
 

@@ -35,7 +35,10 @@ defmodule BeamLang.LSP.Server do
         "textDocumentSync" => %{"openClose" => true, "change" => 1},
         "hoverProvider" => true,
         "definitionProvider" => true,
-        "completionProvider" => %{"resolveProvider" => false}
+        "completionProvider" => %{"resolveProvider" => false},
+        "documentSymbolProvider" => true,
+        "workspaceSymbolProvider" => true,
+        "signatureHelpProvider" => %{"triggerCharacters" => ["(", ","]}
       }
     })
 
@@ -109,6 +112,39 @@ defmodule BeamLang.LSP.Server do
       end
 
     Protocol.send_response(id, completion)
+    state
+  end
+
+  defp handle_message(state, %{"method" => "textDocument/documentSymbol", "id" => id, "params" => params}) do
+    symbols =
+      with %{"textDocument" => %{"uri" => uri}} <- params,
+           doc when not is_nil(doc) <- Map.get(state.documents, uri) do
+        document_symbols_for(doc)
+      else
+        _ -> []
+      end
+
+    Protocol.send_response(id, symbols)
+    state
+  end
+
+  defp handle_message(state, %{"method" => "workspace/symbol", "id" => id, "params" => params}) do
+    %{"query" => query} = params
+    symbols = workspace_symbols_for(state, query || "")
+    Protocol.send_response(id, symbols)
+    state
+  end
+
+  defp handle_message(state, %{"method" => "textDocument/signatureHelp", "id" => id, "params" => params}) do
+    signature =
+      with %{"textDocument" => %{"uri" => uri}, "position" => position} <- params,
+           doc when not is_nil(doc) <- Map.get(state.documents, uri) do
+        signature_help_for(doc, position)
+      else
+        _ -> nil
+      end
+
+    Protocol.send_response(id, signature)
     state
   end
 
@@ -211,6 +247,79 @@ defmodule BeamLang.LSP.Server do
     %{"isIncomplete" => false, "items" => completion_items(doc.index)}
   end
 
+  defp document_symbols_for(doc) do
+    functions =
+      doc.index
+      |> Map.get(:functions, %{})
+      |> Enum.map(fn {name, info} ->
+        document_symbol(name, 12, doc.text, info.span)
+      end)
+
+    types =
+      doc.index
+      |> Map.get(:types, %{})
+      |> Enum.map(fn {name, info} ->
+        document_symbol(name, 23, doc.text, info.span)
+      end)
+
+    errors =
+      doc.index
+      |> Map.get(:errors, %{})
+      |> Enum.map(fn {name, info} ->
+        document_symbol(name, 23, doc.text, info.span)
+      end)
+
+    functions ++ types ++ errors
+  end
+
+  defp workspace_symbols_for(state, query) do
+    state.documents
+    |> Enum.flat_map(fn {_uri, doc} ->
+      doc.index
+      |> symbol_matches(query)
+      |> Enum.map(fn {name, kind, span} ->
+        %{
+          "name" => name,
+          "kind" => kind,
+          "location" => %{
+            "uri" => doc.uri,
+            "range" => range_for_span(doc.text, span)
+          }
+        }
+      end)
+    end)
+  end
+
+  defp signature_help_for(doc, %{"line" => line, "character" => character}) do
+    offset = position_to_offset(doc.text, line, character)
+    case infer_call_name(doc.tokens, offset) do
+      nil ->
+        nil
+
+      name ->
+        case Map.get(doc.index[:functions] || %{}, name) do
+          nil ->
+            nil
+
+          info ->
+            label = format_function_info(name, info.params, info.return_type)
+            %{
+              "signatures" => [
+                %{
+                  "label" => label,
+                  "parameters" =>
+                    Enum.map(info.params, fn %{name: param_name, type: type} ->
+                      %{"label" => "#{param_name}: #{format_type(type)}"}
+                    end)
+                }
+              ],
+              "activeSignature" => 0,
+              "activeParameter" => 0
+            }
+        end
+    end
+  end
+
   defp completion_items(index) do
     functions =
       index
@@ -227,7 +336,30 @@ defmodule BeamLang.LSP.Server do
       |> Map.get(:errors, %{})
       |> Enum.map(fn {name, _} -> %{"label" => name, "kind" => 7} end)
 
-    functions ++ types ++ errors
+    keywords = [
+      "fn",
+      "type",
+      "error",
+      "let",
+      "mut",
+      "import",
+      "export",
+      "internal",
+      "if",
+      "else",
+      "match",
+      "case",
+      "while",
+      "loop",
+      "for",
+      "return",
+      "guard"
+    ]
+
+    keyword_items =
+      Enum.map(keywords, fn keyword -> %{"label" => keyword, "kind" => 14} end)
+
+    functions ++ types ++ errors ++ keyword_items
   end
 
   defp lookup_hover(index, name) do
@@ -267,6 +399,33 @@ defmodule BeamLang.LSP.Server do
         {:ok, %{span: info.span, path: path}}
     end
   end
+
+  defp symbol_matches(index, query) do
+    query = String.downcase(query)
+
+    functions =
+      index
+      |> Map.get(:functions, %{})
+      |> Enum.filter(fn {name, _} -> match_query?(name, query) end)
+      |> Enum.map(fn {name, info} -> {name, 12, info.span} end)
+
+    types =
+      index
+      |> Map.get(:types, %{})
+      |> Enum.filter(fn {name, _} -> match_query?(name, query) end)
+      |> Enum.map(fn {name, info} -> {name, 23, info.span} end)
+
+    errors =
+      index
+      |> Map.get(:errors, %{})
+      |> Enum.filter(fn {name, _} -> match_query?(name, query) end)
+      |> Enum.map(fn {name, info} -> {name, 23, info.span} end)
+
+    functions ++ types ++ errors
+  end
+
+  defp match_query?(_name, ""), do: true
+  defp match_query?(name, query), do: String.contains?(String.downcase(name), query)
 
   defp build_index(nil), do: %{}
 
@@ -342,11 +501,35 @@ defmodule BeamLang.LSP.Server do
 
   defp format_type(type) when is_atom(type), do: Atom.to_string(type)
 
+  defp document_symbol(name, kind, source, span) do
+    %{
+      "name" => name,
+      "kind" => kind,
+      "range" => range_for_span(source, span),
+      "selectionRange" => range_for_span(source, span)
+    }
+  end
+
   defp token_at(tokens, offset) do
     Enum.find(tokens, fn %BeamLang.Token{span: span} ->
       span.start <= offset and offset < span.end
     end)
   end
+
+  defp infer_call_name(tokens, offset) do
+    tokens
+    |> Enum.filter(fn %BeamLang.Token{span: span} -> span.start <= offset end)
+    |> Enum.reverse()
+    |> find_call_name()
+  end
+
+  defp find_call_name([]), do: nil
+
+  defp find_call_name([%BeamLang.Token{type: :identifier, value: name}, %BeamLang.Token{type: :lparen} | _]) do
+    name
+  end
+
+  defp find_call_name([_ | rest]), do: find_call_name(rest)
 
   defp range_for_span(source, %BeamLang.Span{start: start_offset, end: end_offset}) do
     %{

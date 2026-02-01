@@ -17,7 +17,9 @@ defmodule BeamLang.LSP.Protocol do
 
             case IO.binread(:stdio, length) do
               :eof -> :eof
-              body -> {:ok, Jason.decode!(body)}
+              body ->
+                BeamLang.LSP.Debug.log(fn -> "recv: " <> body end)
+                {:ok, Jason.decode!(body)}
             end
         end
     end
@@ -45,6 +47,7 @@ defmodule BeamLang.LSP.Protocol do
   @spec send_message(map()) :: :ok
   def send_message(payload) when is_map(payload) do
     json = Jason.encode!(payload)
+    BeamLang.LSP.Debug.log(fn -> "send: " <> json end)
     IO.binwrite(:stdio, "Content-Length: #{byte_size(json)}\r\n\r\n")
     IO.binwrite(:stdio, json)
   end
