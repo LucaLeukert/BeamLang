@@ -2,6 +2,11 @@
 // Usage: beamlang cat.bl <file>
 
 fn cat_file(filename: String) -> number {
+    if (file_exists(filename) == false) {
+        println("cat: ${filename}: No such file or directory");
+        return 1;
+    }
+    
     let result = read_file(filename);
     match (result) {
         case!ok content => {
