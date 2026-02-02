@@ -432,8 +432,8 @@ defmodule BeamLang.LSP.Server do
                 %{
                   "label" => label,
                   "parameters" =>
-                    Enum.map(info.params, fn %{name: param_name, type: type} ->
-                      %{"label" => "#{param_name}: #{format_type(type)}"}
+                    Enum.map(info.params, fn param ->
+                      %{"label" => format_param(param)}
                     end)
                 }
               ],
@@ -670,9 +670,10 @@ defmodule BeamLang.LSP.Server do
         end
 
       {env, param_entries} =
-        Enum.reduce(params, {%{}, []}, fn %{name: name, type: type, span: span}, {env, acc} ->
-          entry = %{name: name, type: type, span: span, func_span: func_span, scope_span: scope_span, kind: :param}
-          {Map.put(env, name, type), [entry | acc]}
+        Enum.reduce(params, {%{}, []}, fn param, {env, acc} ->
+          bindings = extract_param_bindings(param, func_span, scope_span)
+          new_env = Enum.reduce(bindings, env, fn entry, e -> Map.put(e, entry.name, entry.type) end)
+          {new_env, bindings ++ acc}
         end)
 
       {locals, _env} = collect_block_locals(body, func_span, func_table, env)
@@ -680,12 +681,46 @@ defmodule BeamLang.LSP.Server do
     end)
   end
 
+  # Extract bindings from a function parameter (handles both regular and pattern params)
+  defp extract_param_bindings(%{name: name, type: type, span: span}, func_span, scope_span) do
+    [%{name: name, type: type, span: span, func_span: func_span, scope_span: scope_span, kind: :param}]
+  end
+
+  defp extract_param_bindings(%{pattern: pattern, type: type, span: _span}, func_span, scope_span) do
+    pattern_bindings_with_type(pattern, type)
+    |> Enum.map(fn {name, span, var_type} ->
+      %{name: name, type: var_type, span: span, func_span: func_span, scope_span: scope_span, kind: :param}
+    end)
+  end
+
+  defp extract_param_bindings(_param, _func_span, _scope_span), do: []
+
+  # Format a single parameter for display (handles both regular and pattern params)
+  defp format_param(%{name: param_name, type: type}) do
+    "#{param_name}: #{format_type(type)}"
+  end
+
+  defp format_param(%{pattern: pattern, type: type}) do
+    "#{format_pattern(pattern)}: #{format_type(type)}"
+  end
+
+  defp format_param(_), do: "_"
+
+  defp format_pattern({:pat_identifier, %{name: name}}), do: name
+  defp format_pattern({:struct_pattern, %{name: type_name, fields: fields}}) do
+    field_names = Enum.map_join(fields, ", ", fn %{name: n} -> n end)
+    "#{type_name} { #{field_names} }"
+  end
+  defp format_pattern({:tuple_pattern, %{elements: elements}}) do
+    elem_names = Enum.map_join(elements, ", ", &format_pattern/1)
+    "(#{elem_names})"
+  end
+  defp format_pattern(_), do: "_"
+
   defp format_function_info(name, params, return_type) do
     param_list =
       params
-      |> Enum.map(fn %{name: param_name, type: type} ->
-        "#{param_name}: #{format_type(type)}"
-      end)
+      |> Enum.map(&format_param/1)
       |> Enum.join(", ")
 
     "fn #{name}(#{param_list}) -> #{format_type(return_type)}"
@@ -694,9 +729,7 @@ defmodule BeamLang.LSP.Server do
   defp format_method_info(type_name, name, params, return_type) do
     param_list =
       params
-      |> Enum.map(fn %{name: param_name, type: type} ->
-        "#{param_name}: #{format_type(type)}"
-      end)
+      |> Enum.map(&format_param/1)
       |> Enum.join(", ")
 
     "fn #{type_name}::#{name}(#{param_list}) -> #{format_type(return_type)}"
@@ -740,8 +773,8 @@ defmodule BeamLang.LSP.Server do
             else
               param_list =
                 info.params
-                |> Enum.map(fn %{name: param_name, type: type} ->
-                  "#{param_name}: #{format_type(substitute_type(type, subst))}"
+                |> Enum.map(fn param ->
+                  format_param_with_subst(param, subst)
                 end)
                 |> Enum.join(", ")
 
@@ -751,6 +784,16 @@ defmodule BeamLang.LSP.Server do
         end
     end
   end
+
+  defp format_param_with_subst(%{name: param_name, type: type}, subst) do
+    "#{param_name}: #{format_type(substitute_type(type, subst))}"
+  end
+
+  defp format_param_with_subst(%{pattern: pattern, type: type}, subst) do
+    "#{format_pattern(pattern)}: #{format_type(substitute_type(type, subst))}"
+  end
+
+  defp format_param_with_subst(_, _), do: "_"
 
   defp build_type_subst(doc, args, params, offset) do
     Enum.zip(args, params)
@@ -1349,6 +1392,16 @@ defmodule BeamLang.LSP.Server do
   defp pattern_bindings_with_type({:struct_pattern, %{name: type_name, fields: fields}}, _type) do
     Enum.flat_map(fields, fn %{pattern: pat} -> pattern_bindings_with_type(pat, {:named, type_name}) end)
   end
+
+  defp pattern_bindings_with_type({:tuple_pattern, %{elements: elements}}, {:tuple, element_types}) do
+    Enum.zip(elements, element_types)
+    |> Enum.flat_map(fn {pat, elem_type} -> pattern_bindings_with_type(pat, elem_type) end)
+  end
+
+  defp pattern_bindings_with_type({:tuple_pattern, %{elements: elements}}, _type) do
+    Enum.flat_map(elements, fn pat -> pattern_bindings_with_type(pat, nil) end)
+  end
+
   defp pattern_bindings_with_type(_pattern, _type), do: []
 
   defp normalize_match_type({:generic, {:named, "Result"}, [ok_type, err_type]}),
@@ -1388,6 +1441,56 @@ defmodule BeamLang.LSP.Server do
     end
   end
 
+  # List literal: infer element type from first element if available
+  defp infer_expr_type({:list, %{elements: [first | _]}}) do
+    case infer_expr_type(first) do
+      nil -> {:generic, {:named, "List"}, [:any]}
+      elem_type -> {:generic, {:named, "List"}, [elem_type]}
+    end
+  end
+
+  defp infer_expr_type({:list, %{elements: []}}), do: {:generic, {:named, "List"}, [:any]}
+
+  # Tuple literal
+  defp infer_expr_type({:tuple, %{elements: elements}}) do
+    types = Enum.map(elements, fn elem ->
+      infer_expr_type(elem) || :any
+    end)
+    {:tuple, types}
+  end
+
+  # Range literal
+  defp infer_expr_type({:range, _}), do: {:named, "Range"}
+
+  # Map literal
+  defp infer_expr_type({:map, _}), do: {:generic, {:named, "Map"}, [:any, :any]}
+
+  # Set literal
+  defp infer_expr_type({:set, _}), do: {:generic, {:named, "Set"}, [:any]}
+
+  # Lambda/anonymous function
+  defp infer_expr_type({:lambda, %{params: params, return_type: return_type}}) do
+    param_types = Enum.map(params, fn %{type: type} -> type || :any end)
+    {:fn, param_types, return_type || :any}
+  end
+
+  # Unary expressions
+  defp infer_expr_type({:unary, %{op: :not}}), do: :bool
+  defp infer_expr_type({:unary, %{op: :minus, expr: expr}}), do: infer_expr_type(expr)
+
+  # Binary expressions - infer type based on operator
+  defp infer_expr_type({:binary, %{op: op}}) when op in [:eq, :neq, :lt, :lte, :gt, :gte, :and, :or], do: :bool
+  defp infer_expr_type({:binary, %{op: op, left: left}}) when op in [:add, :sub, :mul, :div, :mod] do
+    infer_expr_type(left) || :number
+  end
+  defp infer_expr_type({:binary, %{op: :concat}}), do: :String
+
+  # Index access on list
+  defp infer_expr_type({:index, _}), do: nil  # Would need type context
+
+  # Interpolated string
+  defp infer_expr_type({:interpolated_string, _}), do: :String
+
   defp infer_expr_type(_expr), do: nil
 
   defp infer_expr_type_with_env({:identifier, %{name: name}}, _func_table, env) do
@@ -1402,19 +1505,143 @@ defmodule BeamLang.LSP.Server do
   end
 
   defp infer_expr_type_with_env({:method_call, %{target: target, name: name}}, func_table, env) do
+    target_type = infer_expr_type_with_env(target, func_table, env)
+    infer_method_return_type(target_type, name)
+  end
+
+  # Field access on struct
+  defp infer_expr_type_with_env({:field_access, %{target: target, field: _field}}, func_table, env) do
     case infer_expr_type_with_env(target, func_table, env) do
-      {:generic, {:named, "List"}, [elem_type]} when name == "first" ->
-        {:optional, elem_type}
+      {:named, _type_name} -> nil  # Would need type definitions to look up field type
+      _ -> nil
+    end
+  end
 
-      {:generic, {:named, "Iterator"}, [elem_type]} when name == "next" ->
-        {:optional, elem_type}
+  # Binary expression with environment
+  defp infer_expr_type_with_env({:binary, %{op: op, left: left, right: _right}}, func_table, env)
+       when op in [:add, :sub, :mul, :div, :mod] do
+    infer_expr_type_with_env(left, func_table, env) || :number
+  end
 
-      other ->
-        other
+  defp infer_expr_type_with_env({:binary, %{op: op}}, _func_table, _env)
+       when op in [:eq, :neq, :lt, :lte, :gt, :gte, :and, :or], do: :bool
+
+  # List with type inference from elements
+  defp infer_expr_type_with_env({:list, %{elements: [first | _]}}, func_table, env) do
+    case infer_expr_type_with_env(first, func_table, env) do
+      nil -> {:generic, {:named, "List"}, [:any]}
+      elem_type -> {:generic, {:named, "List"}, [elem_type]}
     end
   end
 
   defp infer_expr_type_with_env(expr, _func_table, _env), do: infer_expr_type(expr)
+
+  # Infer return type of method calls on known types
+  defp infer_method_return_type({:generic, {:named, "List"}, [elem_type]}, name) do
+    case name do
+      "first" -> {:optional, elem_type}
+      "last" -> {:optional, elem_type}
+      "get" -> {:optional, elem_type}
+      "length" -> :number
+      "is_empty" -> :bool
+      "iter" -> {:generic, {:named, "Iterator"}, [elem_type]}
+      "map" -> {:generic, {:named, "List"}, [:any]}  # Would need lambda type inference
+      "filter" -> {:generic, {:named, "List"}, [elem_type]}
+      "push" -> {:generic, {:named, "List"}, [elem_type]}
+      "pop" -> {:optional, elem_type}
+      "reverse" -> {:generic, {:named, "List"}, [elem_type]}
+      "concat" -> {:generic, {:named, "List"}, [elem_type]}
+      _ -> nil
+    end
+  end
+
+  defp infer_method_return_type({:generic, {:named, "Iterator"}, [elem_type]}, name) do
+    case name do
+      "next" -> {:optional, elem_type}
+      "collect" -> {:generic, {:named, "List"}, [elem_type]}
+      "map" -> {:generic, {:named, "Iterator"}, [:any]}
+      "filter" -> {:generic, {:named, "Iterator"}, [elem_type]}
+      "take" -> {:generic, {:named, "Iterator"}, [elem_type]}
+      "skip" -> {:generic, {:named, "Iterator"}, [elem_type]}
+      "count" -> :number
+      "any" -> :bool
+      "all" -> :bool
+      _ -> nil
+    end
+  end
+
+  defp infer_method_return_type({:generic, {:named, "Map"}, [_k, v]}, name) do
+    case name do
+      "get" -> {:optional, v}
+      "contains_key" -> :bool
+      "keys" -> {:generic, {:named, "List"}, [:any]}
+      "values" -> {:generic, {:named, "List"}, [v]}
+      "length" -> :number
+      "is_empty" -> :bool
+      _ -> nil
+    end
+  end
+
+  defp infer_method_return_type({:generic, {:named, "Set"}, [elem_type]}, name) do
+    case name do
+      "contains" -> :bool
+      "length" -> :number
+      "is_empty" -> :bool
+      "iter" -> {:generic, {:named, "Iterator"}, [elem_type]}
+      _ -> nil
+    end
+  end
+
+  defp infer_method_return_type({:optional, inner}, name) do
+    case name do
+      "unwrap" -> inner
+      "unwrap_or" -> inner
+      "is_some" -> :bool
+      "is_none" -> :bool
+      "map" -> {:optional, :any}
+      _ -> nil
+    end
+  end
+
+  defp infer_method_return_type({:result, ok_type, err_type}, name) do
+    case name do
+      "unwrap" -> ok_type
+      "unwrap_err" -> err_type
+      "is_ok" -> :bool
+      "is_err" -> :bool
+      "map" -> {:result, :any, err_type}
+      "map_err" -> {:result, ok_type, :any}
+      _ -> nil
+    end
+  end
+
+  defp infer_method_return_type(:String, name) do
+    case name do
+      "length" -> :number
+      "is_empty" -> :bool
+      "chars" -> {:generic, {:named, "Iterator"}, [:char]}
+      "split" -> {:generic, {:named, "List"}, [:String]}
+      "trim" -> :String
+      "to_uppercase" -> :String
+      "to_lowercase" -> :String
+      "contains" -> :bool
+      "starts_with" -> :bool
+      "ends_with" -> :bool
+      "replace" -> :String
+      "substring" -> :String
+      _ -> nil
+    end
+  end
+
+  defp infer_method_return_type({:named, "Range"}, name) do
+    case name do
+      "iter" -> {:generic, {:named, "Iterator"}, [:number]}
+      "contains" -> :bool
+      _ -> nil
+    end
+  end
+
+  defp infer_method_return_type(_, _), do: nil
 
   defp span_contains?(nil, _offset), do: false
   defp span_contains?(%BeamLang.Span{start: start_pos, end: end_pos}, offset) do
