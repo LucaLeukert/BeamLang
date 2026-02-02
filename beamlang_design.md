@@ -429,6 +429,13 @@ Match expressions must be exhaustive. Use `case _` or cover all variants (e.g. `
 let value = if (cond) { 1; } else { 2; };
 ```
 
+- String literals use double quotes. Multiline strings use triple quotes and may include newlines and interpolation:
+
+```beamlang
+let text = """Line one
+Line two ${value}""";
+```
+
 ## Standard Library (.bl)
 
 The stdlib is split into multiple `.bl` files under `stdlib/`.

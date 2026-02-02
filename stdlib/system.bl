@@ -21,6 +21,9 @@ fn file_read_data(path: String) -> String!String;
 @external(elixir, "BeamLang.Runtime", "file_exists")
 fn file_exists_data(path: String) -> bool;
 
+@external(elixir, "BeamLang.Runtime", "read_stdin")
+fn read_stdin_data() -> String;
+
 @external(elixir, "BeamLang.Runtime", "get_env")
 fn get_env_data(name: String) -> any;
 
@@ -79,6 +82,11 @@ fn read_file(path: String) -> String!IoError {
 /** Check if a file exists **/
 fn file_exists(path: String) -> bool {
     return file_exists_data(path);
+}
+
+/** Read all data from stdin **/
+fn read_stdin() -> String {
+    return read_stdin_data();
 }
 
 /** Get an environment variable, returns None if not set **/

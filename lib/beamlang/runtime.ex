@@ -424,6 +424,16 @@ defmodule BeamLang.Runtime do
     File.exists?(path_str)
   end
 
+  @spec read_stdin() :: map()
+  def read_stdin() do
+    case IO.read(:stdio, :all) do
+      data when is_binary(data) ->
+        stdlib_string_new(data)
+      _ ->
+        stdlib_string_new("")
+    end
+  end
+
   @spec get_env(term()) :: map()
   def get_env(name) do
     name_str = string_data(name) |> to_string()

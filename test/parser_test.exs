@@ -471,6 +471,23 @@ defmodule BeamLang.ParserTest do
     assert {:assign, %{target: {:identifier, %{name: "value"}}}} = e1
   end
 
+  test "parses multiline string literal" do
+    source =
+      "fn main() -> number {\n" <>
+        "    let usage = \"\"\"Usage: hello\n" <>
+        "Line two\"\"\";\n" <>
+        "    return 0;\n" <>
+        "}\n"
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{functions: [func]}} = ast
+    assert {:function, %{body: {:block, %{stmts: [s1, _s2]}}}} = func
+    assert {:let, %{name: "usage", expr: {:string, %{value: value}}}} = s1
+    assert value == "Usage: hello\nLine two"
+  end
+
   test "parses if expression" do
     source = """
     fn main() -> number {

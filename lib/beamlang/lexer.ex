@@ -242,6 +242,18 @@ defmodule BeamLang.Lexer do
     do_tokenize(rest_after, file, offset + width, line, col + width, [token | acc])
   end
 
+  defp do_tokenize(<<"\"\"\"", rest::binary>>, file, offset, line, col, acc) do
+    case read_multiline_string(rest, "", line, col + 3, 3) do
+      {:ok, value, rest_after, width, new_line, new_col} ->
+        span = BeamLang.Span.new(file, offset, offset + width)
+        token = %Token{type: :string, value: value, line: line, col: col, span: span}
+        do_tokenize(rest_after, file, offset + width, new_line, new_col, [token | acc])
+
+      {:error, message} ->
+        {:error, error(message, file, offset, line, col)}
+    end
+  end
+
   defp do_tokenize(<<"\"", rest::binary>>, file, offset, line, col, acc) do
     case read_string(rest, "") do
       {:ok, value, rest_after, width} ->
@@ -351,6 +363,26 @@ defmodule BeamLang.Lexer do
   end
 
   defp read_string(<<>>, _acc), do: {:error, "Unterminated string literal."}
+
+  @spec read_multiline_string(binary(), binary(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          {:ok, binary(), binary(), non_neg_integer(), non_neg_integer(), non_neg_integer()}
+          | {:error, binary()}
+  defp read_multiline_string(<<"\"\"\"", rest::binary>>, acc, line, col, width) do
+    total_width = width + 3
+    {:ok, acc, rest, total_width, line, col + 3}
+  end
+
+  defp read_multiline_string(<<"\n", rest::binary>>, acc, line, _col, width) do
+    read_multiline_string(rest, acc <> "\n", line + 1, 1, width + 1)
+  end
+
+  defp read_multiline_string(<<c, rest::binary>>, acc, line, col, width) do
+    read_multiline_string(rest, acc <> <<c>>, line, col + 1, width + 1)
+  end
+
+  defp read_multiline_string(<<>>, _acc, _line, _col, _width) do
+    {:error, "Unterminated multiline string literal."}
+  end
 
   @spec read_char(binary()) :: {:ok, integer(), binary(), non_neg_integer()} | {:error, binary()}
   defp read_char(<<"\\", esc, "'", rest::binary>>) do
