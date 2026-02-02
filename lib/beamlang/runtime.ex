@@ -430,18 +430,23 @@ defmodule BeamLang.Runtime do
     case File.ls(path_str) do
       {:ok, entries} ->
         # Create a list of maps with name, is_dir, and size
-        entries_list = Enum.map(entries, fn entry ->
+        entries_list = Enum.flat_map(entries, fn entry ->
           full_path = Path.join(path_str, entry)
-          stat = File.stat!(full_path, time: :posix)
-          is_dir = stat.type == :directory
-          size = stat.size
-          
-          %{
-            __beamlang_type__: "FileEntry",
-            name: stdlib_string_new(entry),
-            is_dir: is_dir,
-            size: size
-          }
+          case File.stat(full_path, time: :posix) do
+            {:ok, stat} ->
+              is_dir = stat.type == :directory
+              size = stat.size
+              
+              [%{
+                __beamlang_type__: "FileEntry",
+                name: stdlib_string_new(entry),
+                is_dir: is_dir,
+                size: size
+              }]
+            {:error, _reason} ->
+              # Skip files that cannot be stat'd (deleted, permission denied, etc.)
+              []
+          end
         end)
         
         # Convert to BeamLang list and wrap in Result.ok

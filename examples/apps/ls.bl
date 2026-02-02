@@ -23,16 +23,17 @@ type Args {
 }
 
 // Format file size in human-readable format
+// Uses integer division for simplicity (e.g., 1.5GB shows as 1GB)
 fn format_size(size: number) -> String {
-    if (size >= 1073741824) {
+    if (size >= 1073741824) {  // 1GB in bytes
         let gb = size / 1073741824;
         return "${gb}G";
     }
-    if (size >= 1048576) {
+    if (size >= 1048576) {  // 1MB in bytes
         let mb = size / 1048576;
         return "${mb}M";
     }
-    if (size >= 1024) {
+    if (size >= 1024) {  // 1KB in bytes
         let kb = size / 1024;
         return "${kb}K";
     }
