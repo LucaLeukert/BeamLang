@@ -2174,7 +2174,7 @@ defmodule BeamLang.Semantic do
         {:let_destruct, %{pattern: pattern, expr: expr}} ->
           # Extract bindings from the pattern
           bindings = destruct_pattern_bindings(pattern)
-          
+
           # Type check the expression
           case type_of_expr(expr, func_table, type_table, acc_env, nil) do
             {:error, reason} when is_atom(reason) ->

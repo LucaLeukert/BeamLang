@@ -752,6 +752,10 @@ defmodule BeamLang.LSP.Server do
     "#{format_type(base)}<#{Enum.map_join(args, ", ", &format_type/1)}>"
   end
 
+  defp format_type({:tuple, element_types}) do
+    "(#{Enum.map_join(element_types, ", ", &format_type/1)})"
+  end
+
   defp format_type({:type_var, name}) when is_binary(name), do: name
   defp format_type({:named, name}) when is_binary(name), do: name
   defp format_type({:optional, inner}), do: "#{format_type(inner)}?"
