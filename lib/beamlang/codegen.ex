@@ -1489,10 +1489,14 @@ defmodule BeamLang.Codegen do
     {:match, line, {:map, line, entries}, expr_form}
   end
 
-  @spec destruct_tuple_bindings([binary()], map(), non_neg_integer()) ::
+  @spec destruct_tuple_bindings([binary() | map()], map(), non_neg_integer()) ::
           {[atom()], map(), non_neg_integer()}
   defp destruct_tuple_bindings(elements, env, counter) do
-    Enum.reduce(elements, {[], env, counter}, fn name, {vars, env, counter} ->
+    Enum.reduce(elements, {[], env, counter}, fn elem, {vars, env, counter} ->
+      name = case elem do
+        %{name: n} -> n
+        n when is_binary(n) -> n
+      end
       {var, counter} = fresh_var(name, counter)
       env = Map.put(env, name, var)
       {[var | vars], env, counter}

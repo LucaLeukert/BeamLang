@@ -676,16 +676,17 @@ defmodule BeamLang.Parser do
     {:error, error("Expected field name or '}'.", tok)}
   end
 
-  @spec parse_tuple_destruct_elements([Token.t()], [binary()]) ::
-          {:ok, [binary()], [Token.t()]} | {:error, BeamLang.Error.t()}
+  @spec parse_tuple_destruct_elements([Token.t()], [map()]) ::
+          {:ok, [map()], [Token.t()]} | {:error, BeamLang.Error.t()}
   defp parse_tuple_destruct_elements([%Token{type: :rparen} | _] = rest, acc) do
     {:ok, Enum.reverse(acc), rest}
   end
 
   defp parse_tuple_destruct_elements([%Token{type: :identifier} = tok | rest], acc) do
+    element = %{name: tok.value, span: tok.span}
     case rest do
-      [%Token{type: :comma} | rest2] -> parse_tuple_destruct_elements(rest2, [tok.value | acc])
-      _ -> {:ok, Enum.reverse([tok.value | acc]), rest}
+      [%Token{type: :comma} | rest2] -> parse_tuple_destruct_elements(rest2, [element | acc])
+      _ -> {:ok, Enum.reverse([element | acc]), rest}
     end
   end
 

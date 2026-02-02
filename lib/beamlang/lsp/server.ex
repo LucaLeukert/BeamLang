@@ -1309,7 +1309,58 @@ defmodule BeamLang.LSP.Server do
     {collect_expr_locals(expr, func_span, scope_span, func_table, env), env}
   end
 
+  defp collect_stmt_locals({:let_destruct, %{pattern: pattern, expr: expr, span: span}}, func_span, scope_span, func_table, env) do
+    # Infer type of the expression (should be a tuple)
+    expr_type = infer_expr_type_with_env(expr, func_table, env)
+
+    # Extract element types if it's a tuple
+    element_types = case expr_type do
+      {:tuple, types} -> types
+      _ -> []
+    end
+
+    # Collect bindings from the pattern with their types
+    bindings = destruct_pattern_bindings_with_types(pattern, element_types, span, func_span, scope_span)
+
+    # Collect locals from the expression
+    expr_locals = collect_expr_locals(expr, func_span, scope_span, func_table, env)
+
+    # Update environment with new bindings
+    new_env = Enum.reduce(bindings, env, fn %{name: name, type: type}, acc ->
+      Map.put(acc, name, type)
+    end)
+
+    {expr_locals ++ bindings, new_env}
+  end
+
   defp collect_stmt_locals(_stmt, _func_span, _scope_span, _func_table, env), do: {[], env}
+
+  # Helper to extract bindings with types from destructuring patterns
+  defp destruct_pattern_bindings_with_types({:tuple_destruct, %{elements: elements}}, element_types, _span, func_span, scope_span) do
+    elements
+    |> Enum.with_index()
+    |> Enum.map(fn {elem, idx} ->
+      {name, elem_span} = case elem do
+        %{name: n, span: s} -> {n, s}
+        n when is_binary(n) -> {n, nil}
+      end
+      type = Enum.at(element_types, idx)
+      %{name: name, type: type, span: elem_span, func_span: func_span, scope_span: scope_span, kind: :let}
+    end)
+  end
+
+  defp destruct_pattern_bindings_with_types({:struct_destruct, %{fields: fields, span: pattern_span}}, _element_types, _span, func_span, scope_span) do
+    Enum.map(fields, fn field ->
+      name = case field do
+        %{binding: nil, name: n} -> n
+        %{binding: b} -> b
+      end
+      field_span = Map.get(field, :span, pattern_span)
+      %{name: name, type: :any, span: field_span, func_span: func_span, scope_span: scope_span, kind: :let}
+    end)
+  end
+
+  defp destruct_pattern_bindings_with_types(_, _, _, _, _), do: []
 
   defp collect_else_locals(nil, _func_span, _func_table, _env), do: []
 
