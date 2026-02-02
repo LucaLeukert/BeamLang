@@ -18,31 +18,32 @@ defmodule BeamLang.Parser do
   @spec parse_program([Token.t()]) ::
           {:ok, BeamLang.AST.t(), [Token.t()]} | {:error, BeamLang.Error.t()}
   defp parse_program(tokens) do
-    parse_decls(tokens, [], [], [], [])
+    parse_decls(tokens, [], [], [], [], [])
   end
 
-  @spec parse_decls([Token.t()], [BeamLang.AST.import()], [BeamLang.AST.type_def()], [BeamLang.AST.error_def()], [BeamLang.AST.func()]) ::
+  @spec parse_decls([Token.t()], [BeamLang.AST.import()], [BeamLang.AST.type_def()], [BeamLang.AST.enum_def()], [BeamLang.AST.error_def()], [BeamLang.AST.func()]) ::
           {:ok, BeamLang.AST.t(), [Token.t()]} | {:error, BeamLang.Error.t()}
-  defp parse_decls([], [], [], [], []) do
+  defp parse_decls([], [], [], [], [], []) do
     {:error, BeamLang.Error.new(:parser, "Expected at least one declaration.", eof_span("<source>"))}
   end
 
-  defp parse_decls([], imports, types, errors, functions) do
+  defp parse_decls([], imports, types, enums, errors, functions) do
     imports = Enum.reverse(imports)
     types = Enum.reverse(types)
+    enums = Enum.reverse(enums)
     errors = Enum.reverse(errors)
     functions = Enum.reverse(functions)
     span = program_span(imports, types, functions)
-    {:ok, {:program, %{module: nil, imports: imports, types: types, errors: errors, functions: functions, span: span}}, []}
+    {:ok, {:program, %{module: nil, imports: imports, types: types, enums: enums, errors: errors, functions: functions, span: span}}, []}
   end
 
-  defp parse_decls([%Token{type: :import_kw} | _] = tokens, imports, types, errors, functions) do
+  defp parse_decls([%Token{type: :import_kw} | _] = tokens, imports, types, enums, errors, functions) do
     with {:ok, import_stmt, rest} <- parse_import(tokens) do
-      parse_decls(rest, [import_stmt | imports], types, errors, functions)
+      parse_decls(rest, [import_stmt | imports], types, enums, errors, functions)
     end
   end
 
-  defp parse_decls([%Token{type: :export_kw} | rest] = tokens, imports, types, errors, functions) do
+  defp parse_decls([%Token{type: :export_kw} | rest] = tokens, imports, types, enums, errors, functions) do
     case rest do
       [%Token{type: :internal_kw} | _] ->
         {:error, error("Internal functions cannot be exported.", hd(rest))}
@@ -50,34 +51,40 @@ defmodule BeamLang.Parser do
       [%Token{type: :type_kw} | _] ->
         with {:ok, _export_tok, rest1} <- expect(tokens, :export_kw),
              {:ok, type_def, rest2} <- parse_type_def(rest1, true) do
-          parse_decls(rest2, imports, [type_def | types], errors, functions)
+          parse_decls(rest2, imports, [type_def | types], enums, errors, functions)
+        end
+
+      [%Token{type: :enum_kw} | _] ->
+        with {:ok, _export_tok, rest1} <- expect(tokens, :export_kw),
+             {:ok, enum_def, rest2} <- parse_enum_def(rest1, true) do
+          parse_decls(rest2, imports, types, [enum_def | enums], errors, functions)
         end
 
       [%Token{type: :error_kw} | _] ->
         with {:ok, _export_tok, rest1} <- expect(tokens, :export_kw),
              {:ok, error_def, rest2} <- parse_error_def(rest1, true) do
-          parse_decls(rest2, imports, types, [error_def | errors], functions)
+          parse_decls(rest2, imports, types, enums, [error_def | errors], functions)
         end
 
       [%Token{type: :at} | _] ->
         with {:ok, _export_tok, rest1} <- expect(tokens, :export_kw),
              {:ok, external, rest2} <- parse_external_attr(rest1),
              {:ok, func, rest3} <- parse_function(rest2, external, true, false) do
-          parse_decls(rest3, imports, types, errors, [func | functions])
+          parse_decls(rest3, imports, types, enums, errors, [func | functions])
         end
 
       [%Token{type: :fn} | _] ->
         with {:ok, _export_tok, rest1} <- expect(tokens, :export_kw),
              {:ok, func, rest2} <- parse_function(rest1, nil, true, false) do
-          parse_decls(rest2, imports, types, errors, [func | functions])
+          parse_decls(rest2, imports, types, enums, errors, [func | functions])
         end
 
       _ ->
-        {:error, error("Expected type, error, or fn after export.", hd(tokens))}
+        {:error, error("Expected type, enum, error, or fn after export.", hd(tokens))}
     end
   end
 
-  defp parse_decls([%Token{type: :internal_kw} | rest] = tokens, imports, types, errors, functions) do
+  defp parse_decls([%Token{type: :internal_kw} | rest] = tokens, imports, types, enums, errors, functions) do
     case rest do
       [%Token{type: :type_kw} | _] ->
         {:error, error("Expected fn after internal.", hd(rest))}
@@ -89,13 +96,13 @@ defmodule BeamLang.Parser do
         with {:ok, _internal_tok, rest1} <- expect(tokens, :internal_kw),
              {:ok, external, rest2} <- parse_external_attr(rest1),
              {:ok, func, rest3} <- parse_function(rest2, external, false, true) do
-          parse_decls(rest3, imports, types, errors, [func | functions])
+          parse_decls(rest3, imports, types, enums, errors, [func | functions])
         end
 
       [%Token{type: :fn} | _] ->
         with {:ok, _internal_tok, rest1} <- expect(tokens, :internal_kw),
              {:ok, func, rest2} <- parse_function(rest1, nil, false, true) do
-          parse_decls(rest2, imports, types, errors, [func | functions])
+          parse_decls(rest2, imports, types, enums, errors, [func | functions])
         end
 
       _ ->
@@ -103,28 +110,34 @@ defmodule BeamLang.Parser do
     end
   end
 
-  defp parse_decls([%Token{type: :type_kw} | _] = tokens, imports, types, errors, functions) do
+  defp parse_decls([%Token{type: :type_kw} | _] = tokens, imports, types, enums, errors, functions) do
     with {:ok, type_def, rest} <- parse_type_def(tokens, false) do
-      parse_decls(rest, imports, [type_def | types], errors, functions)
+      parse_decls(rest, imports, [type_def | types], enums, errors, functions)
     end
   end
 
-  defp parse_decls([%Token{type: :error_kw} | _] = tokens, imports, types, errors, functions) do
+  defp parse_decls([%Token{type: :enum_kw} | _] = tokens, imports, types, enums, errors, functions) do
+    with {:ok, enum_def, rest} <- parse_enum_def(tokens, false) do
+      parse_decls(rest, imports, types, [enum_def | enums], errors, functions)
+    end
+  end
+
+  defp parse_decls([%Token{type: :error_kw} | _] = tokens, imports, types, enums, errors, functions) do
     with {:ok, error_def, rest} <- parse_error_def(tokens, false) do
-      parse_decls(rest, imports, types, [error_def | errors], functions)
+      parse_decls(rest, imports, types, enums, [error_def | errors], functions)
     end
   end
 
-  defp parse_decls([%Token{type: :at} | _] = tokens, imports, types, errors, functions) do
+  defp parse_decls([%Token{type: :at} | _] = tokens, imports, types, enums, errors, functions) do
     with {:ok, external, rest1} <- parse_external_attr(tokens),
          {:ok, func, rest2} <- parse_function(rest1, external, false, false) do
-      parse_decls(rest2, imports, types, errors, [func | functions])
+      parse_decls(rest2, imports, types, enums, errors, [func | functions])
     end
   end
 
-  defp parse_decls(tokens, imports, types, errors, functions) do
+  defp parse_decls(tokens, imports, types, enums, errors, functions) do
     with {:ok, func, rest} <- parse_function(tokens, nil, false, false) do
-      parse_decls(rest, imports, types, errors, [func | functions])
+      parse_decls(rest, imports, types, enums, errors, [func | functions])
     end
   end
 
@@ -388,6 +401,10 @@ defmodule BeamLang.Parser do
       {:ok, target, [%Token{type: :equals} = eq_tok | rest]} ->
         parse_assignment(target, eq_tok, rest)
 
+      {:ok, target, [%Token{type: op_type} = op_tok | rest]}
+          when op_type in [:plus_eq, :minus_eq, :star_eq, :slash_eq, :percent_eq] ->
+        parse_compound_assignment(target, op_tok, rest)
+
       _ ->
         parse_expr_statement(tokens)
     end
@@ -561,8 +578,26 @@ defmodule BeamLang.Parser do
 
   @spec parse_let([Token.t()]) :: {:ok, BeamLang.AST.stmt(), [Token.t()]} | {:error, BeamLang.Error.t()}
   defp parse_let(tokens) do
-    with {:ok, let_tok, rest1} <- expect(tokens, :let),
-         {mutable, rest2} <- parse_mut(rest1),
+    with {:ok, let_tok, rest1} <- expect(tokens, :let) do
+      case rest1 do
+        # Destructuring: let { ... } = expr
+        [%Token{type: :lbrace} | _] ->
+          parse_let_destruct_struct(let_tok, rest1)
+
+        # Destructuring: let ( ... ) = expr  (tuple destructuring)
+        [%Token{type: :lparen} | _] ->
+          parse_let_destruct_tuple(let_tok, rest1)
+
+        # Normal let
+        _ ->
+          parse_let_normal(let_tok, rest1)
+      end
+    end
+  end
+
+  @spec parse_let_normal(Token.t(), [Token.t()]) :: {:ok, BeamLang.AST.stmt(), [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_let_normal(let_tok, rest1) do
+    with {mutable, rest2} <- parse_mut(rest1),
          {:ok, name_tok, rest3} <- expect(rest2, :identifier),
          {type_ann, rest4} <- parse_optional_type(rest3),
          {:ok, _eq, rest5} <- expect(rest4, :equals),
@@ -582,6 +617,92 @@ defmodule BeamLang.Parser do
     end
   end
 
+  @spec parse_let_destruct_struct(Token.t(), [Token.t()]) :: {:ok, BeamLang.AST.stmt(), [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_let_destruct_struct(let_tok, tokens) do
+    with {:ok, lbrace_tok, rest1} <- expect(tokens, :lbrace),
+         {:ok, fields, rest2} <- parse_destruct_fields(rest1, []),
+         {:ok, _rbrace, rest3} <- expect(rest2, :rbrace),
+         {type_ann, rest4} <- parse_optional_type_annotation(rest3),
+         {:ok, _eq, rest5} <- expect(rest4, :equals),
+         {:ok, expr, rest6} <- parse_expression(rest5),
+         {:ok, _semi, rest7} <- expect(rest6, :semicolon) do
+      span = BeamLang.Span.merge(let_tok.span, semicolon_span(rest6, rest7))
+      pattern = {:struct_destruct, %{type_name: nil, fields: fields, span: BeamLang.Span.merge(lbrace_tok.span, span)}}
+      {:ok, {:let_destruct, %{pattern: pattern, type: type_ann, expr: expr, span: span}}, rest7}
+    end
+  end
+
+  @spec parse_let_destruct_tuple(Token.t(), [Token.t()]) :: {:ok, BeamLang.AST.stmt(), [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_let_destruct_tuple(let_tok, tokens) do
+    with {:ok, lparen_tok, rest1} <- expect(tokens, :lparen),
+         {:ok, elements, rest2} <- parse_tuple_destruct_elements(rest1, []),
+         {:ok, _rparen, rest3} <- expect(rest2, :rparen),
+         {:ok, _eq, rest4} <- expect(rest3, :equals),
+         {:ok, expr, rest5} <- parse_expression(rest4),
+         {:ok, _semi, rest6} <- expect(rest5, :semicolon) do
+      span = BeamLang.Span.merge(let_tok.span, semicolon_span(rest5, rest6))
+      pattern = {:tuple_destruct, %{elements: elements, span: BeamLang.Span.merge(lparen_tok.span, span)}}
+      {:ok, {:let_destruct, %{pattern: pattern, type: nil, expr: expr, span: span}}, rest6}
+    end
+  end
+
+  @spec parse_destruct_fields([Token.t()], [map()]) ::
+          {:ok, [map()], [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_destruct_fields([%Token{type: :rbrace} | _] = rest, acc) do
+    {:ok, Enum.reverse(acc), rest}
+  end
+
+  defp parse_destruct_fields([%Token{type: :identifier} = name_tok | rest], acc) do
+    case rest do
+      # Field with alias: { name: alias }
+      [%Token{type: :colon}, %Token{type: :identifier} = alias_tok | rest2] ->
+        field = %{name: name_tok.value, binding: alias_tok.value, span: BeamLang.Span.merge(name_tok.span, alias_tok.span)}
+        case rest2 do
+          [%Token{type: :comma} | rest3] -> parse_destruct_fields(rest3, [field | acc])
+          _ -> parse_destruct_fields(rest2, [field | acc])
+        end
+
+      # Field without alias: { name }
+      _ ->
+        field = %{name: name_tok.value, binding: nil, span: name_tok.span}
+        case rest do
+          [%Token{type: :comma} | rest2] -> parse_destruct_fields(rest2, [field | acc])
+          _ -> parse_destruct_fields(rest, [field | acc])
+        end
+    end
+  end
+
+  defp parse_destruct_fields([%Token{} = tok | _], _acc) do
+    {:error, error("Expected field name or '}'.", tok)}
+  end
+
+  @spec parse_tuple_destruct_elements([Token.t()], [binary()]) ::
+          {:ok, [binary()], [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_tuple_destruct_elements([%Token{type: :rparen} | _] = rest, acc) do
+    {:ok, Enum.reverse(acc), rest}
+  end
+
+  defp parse_tuple_destruct_elements([%Token{type: :identifier} = tok | rest], acc) do
+    case rest do
+      [%Token{type: :comma} | rest2] -> parse_tuple_destruct_elements(rest2, [tok.value | acc])
+      _ -> {:ok, Enum.reverse([tok.value | acc]), rest}
+    end
+  end
+
+  defp parse_tuple_destruct_elements([%Token{} = tok | _], _acc) do
+    {:error, error("Expected identifier or ')'.", tok)}
+  end
+
+  @spec parse_optional_type_annotation([Token.t()]) :: {BeamLang.AST.type_name() | nil, [Token.t()]}
+  defp parse_optional_type_annotation([%Token{type: :colon} | rest]) do
+    case parse_type_name(rest) do
+      {:ok, {type_name, _span}, rest2} -> {type_name, rest2}
+      {:error, _} -> {nil, rest}
+    end
+  end
+
+  defp parse_optional_type_annotation(tokens), do: {nil, tokens}
+
   @spec parse_assignment(BeamLang.AST.expr(), Token.t(), [Token.t()]) ::
           {:ok, BeamLang.AST.stmt(), [Token.t()]} | {:error, BeamLang.Error.t()}
   defp parse_assignment(target, eq_tok, tokens) do
@@ -592,6 +713,25 @@ defmodule BeamLang.Parser do
       {:ok, {:assign, %{target: target, expr: expr, span: span}}, rest2}
     end
   end
+
+  @spec parse_compound_assignment(BeamLang.AST.expr(), Token.t(), [Token.t()]) ::
+          {:ok, BeamLang.AST.stmt(), [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_compound_assignment(target, op_tok, tokens) do
+    with {:ok, expr, rest1} <- parse_expression(tokens),
+         {:ok, _semi, rest2} <- expect(rest1, :semicolon) do
+      op = compound_op_to_binary_op(op_tok.type)
+      span = BeamLang.Span.merge(expr_span(target), op_tok.span)
+      span = BeamLang.Span.merge(span, semicolon_span(rest1, rest2))
+      {:ok, {:compound_assign, %{target: target, op: op, expr: expr, span: span}}, rest2}
+    end
+  end
+
+  @spec compound_op_to_binary_op(atom()) :: BeamLang.AST.binary_op()
+  defp compound_op_to_binary_op(:plus_eq), do: :add
+  defp compound_op_to_binary_op(:minus_eq), do: :sub
+  defp compound_op_to_binary_op(:star_eq), do: :mul
+  defp compound_op_to_binary_op(:slash_eq), do: :div
+  defp compound_op_to_binary_op(:percent_eq), do: :mod
 
   @spec parse_lvalue([Token.t()]) ::
           {:ok, BeamLang.AST.expr(), [Token.t()]} | {:error, BeamLang.Error.t()}
@@ -783,10 +923,26 @@ defmodule BeamLang.Parser do
   defp parse_term(tokens) do
     with {:ok, expr, rest} <- parse_primary(tokens) do
       with {:ok, expr, rest1} <- parse_field_access(expr, rest) do
-        parse_method_call(expr, rest1)
+        with {:ok, expr, rest2} <- parse_method_call(expr, rest1) do
+          parse_try_operator(expr, rest2)
+        end
       end
     end
   end
+
+  @spec parse_try_operator(BeamLang.AST.expr(), [Token.t()]) ::
+          {:ok, BeamLang.AST.expr(), [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_try_operator(expr, [%Token{type: :question} = q_tok | rest]) do
+    # Don't consume ? if it's followed by an identifier (Optional literal)
+    case rest do
+      [%Token{type: :identifier} | _] -> {:ok, expr, [q_tok | rest]}
+      _ ->
+        span = BeamLang.Span.merge(expr_span(expr), q_tok.span)
+        {:ok, {:try_expr, %{expr: expr, kind: :result, span: span}}, rest}
+    end
+  end
+
+  defp parse_try_operator(expr, tokens), do: {:ok, expr, tokens}
 
   @spec parse_primary([Token.t()]) ::
           {:ok, BeamLang.AST.expr(), [Token.t()]} | {:error, BeamLang.Error.t()}
@@ -834,14 +990,52 @@ defmodule BeamLang.Parser do
   end
 
   defp parse_primary([%Token{type: :lparen} | rest]) do
-    with {:ok, expr, rest1} <- parse_expression(rest),
-         {:ok, _rparen, rest2} <- expect(rest1, :rparen) do
-      {:ok, expr, rest2}
+    # Could be tuple expression or grouped expression
+    case rest do
+      [%Token{type: :rparen} | rest2] ->
+        # Empty tuple ()
+        span = BeamLang.Span.new("<source>", 0, 0)
+        {:ok, {:tuple, %{elements: [], span: span}}, rest2}
+
+      _ ->
+        with {:ok, first_expr, rest1} <- parse_expression(rest) do
+          case rest1 do
+            [%Token{type: :comma} | rest2] ->
+              # Tuple with multiple elements
+              with {:ok, more_exprs, rest3} <- parse_tuple_elements(rest2, [first_expr]),
+                   {:ok, _rparen, rest4} <- expect(rest3, :rparen) do
+                span = expr_span(first_expr)
+                {:ok, {:tuple, %{elements: more_exprs, span: span}}, rest4}
+              end
+
+            [%Token{type: :rparen} | rest2] ->
+              # Single expression in parentheses - NOT a tuple
+              {:ok, first_expr, rest2}
+
+            _ ->
+              {:error, error("Expected ')' or ','.", hd(rest1))}
+          end
+        end
     end
   end
 
   defp parse_primary([%Token{type: :lbracket} = lbracket_tok | rest]) do
     parse_list_literal(lbracket_tok, rest)
+  end
+
+  @spec parse_tuple_elements([Token.t()], [BeamLang.AST.expr()]) ::
+          {:ok, [BeamLang.AST.expr()], [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_tuple_elements([%Token{type: :rparen} | _] = rest, acc) do
+    {:ok, Enum.reverse(acc), rest}
+  end
+
+  defp parse_tuple_elements(tokens, acc) do
+    with {:ok, expr, rest} <- parse_expression(tokens) do
+      case rest do
+        [%Token{type: :comma} | rest2] -> parse_tuple_elements(rest2, [expr | acc])
+        _ -> {:ok, Enum.reverse([expr | acc]), rest}
+      end
+    end
   end
 
   defp parse_primary([%Token{type: :string} | _] = tokens) do
@@ -957,6 +1151,7 @@ defmodule BeamLang.Parser do
              rest5}
           end
         else
+          # Could be an enum variant - return error to fall through to enum variant parsing
           {:error, error("Expected function call.", mod_tok)}
         end
 
@@ -971,8 +1166,18 @@ defmodule BeamLang.Parser do
            rest3}
         end
 
+      # Enum variant with fields: Enum::Variant { field = value }
+      [%Token{type: :lbrace} | rest1] ->
+        with {:ok, fields, rest2} <- parse_enum_variant_literal_fields(rest1, []),
+             {:ok, rbrace, rest3} <- expect(rest2, :rbrace) do
+          span = BeamLang.Span.merge(mod_tok.span, rbrace.span)
+          {:ok, {:enum_variant, %{enum_name: mod_tok.value, variant: name_tok.value, fields: fields, span: span}}, rest3}
+        end
+
+      # Enum unit variant: Enum::Variant
       _ ->
-        {:error, error("Expected function call.", mod_tok)}
+        span = BeamLang.Span.merge(mod_tok.span, name_tok.span)
+        {:ok, {:enum_variant, %{enum_name: mod_tok.value, variant: name_tok.value, fields: [], span: span}}, rest}
     end
   end
 
@@ -1045,6 +1250,42 @@ defmodule BeamLang.Parser do
           {:ok, [BeamLang.AST.func_param()], [Token.t()]} | {:error, BeamLang.Error.t()}
   defp parse_params([%Token{type: :rparen} | _] = rest, acc) do
     {:ok, Enum.reverse(acc), rest}
+  end
+
+  # Pattern parameter: Type { field1, field2 }: Type
+  defp parse_params([%Token{type: :identifier, value: type_name} = type_tok, %Token{type: :lbrace} | rest], acc) do
+    with {:ok, fields, rest1} <- parse_struct_pattern_fields(rest, []),
+         {:ok, _rbrace, rest2} <- expect(rest1, :rbrace),
+         {:ok, _colon, rest3} <- expect(rest2, :colon),
+         {:ok, {type, type_span}, rest4} <- parse_type_name(rest3) do
+      pattern_span = BeamLang.Span.merge(type_tok.span, hd(rest1).span)
+      pattern = {:struct_pattern, %{name: type_name, fields: fields, span: pattern_span}}
+      param_span = BeamLang.Span.merge(type_tok.span, type_span)
+      param = %{pattern: pattern, type: type, span: param_span}
+
+      case rest4 do
+        [%Token{type: :comma} | rest5] -> parse_params(rest5, [param | acc])
+        _ -> parse_params(rest4, [param | acc])
+      end
+    end
+  end
+
+  # Pattern parameter: (elem1, elem2): (Type1, Type2)
+  defp parse_params([%Token{type: :lparen} = lparen_tok | rest], acc) do
+    with {:ok, elements, rest1} <- parse_tuple_pattern_elements(rest, []),
+         {:ok, rparen_tok, rest2} <- expect(rest1, :rparen),
+         {:ok, _colon, rest3} <- expect(rest2, :colon),
+         {:ok, {type, type_span}, rest4} <- parse_type_name(rest3) do
+      pattern_span = BeamLang.Span.merge(lparen_tok.span, rparen_tok.span)
+      pattern = {:tuple_pattern, %{elements: elements, span: pattern_span}}
+      param_span = BeamLang.Span.merge(lparen_tok.span, type_span)
+      param = %{pattern: pattern, type: type, span: param_span}
+
+      case rest4 do
+        [%Token{type: :comma} | rest5] -> parse_params(rest5, [param | acc])
+        _ -> parse_params(rest4, [param | acc])
+      end
+    end
   end
 
   defp parse_params(tokens, acc) do
@@ -1427,6 +1668,31 @@ defmodule BeamLang.Parser do
     {:ok, {:wildcard, %{span: tok.span}}, rest}
   end
 
+  # Enum pattern: Enum::Variant or Enum::Variant { fields }
+  defp parse_pattern([%Token{type: :identifier} = enum_tok, %Token{type: :double_colon}, %Token{type: :identifier} = variant_tok | rest]) do
+    case rest do
+      [%Token{type: :lbrace} | rest1] ->
+        with {:ok, fields, rest2} <- parse_enum_pattern_fields(rest1, []),
+             {:ok, rbrace, rest3} <- expect(rest2, :rbrace) do
+          span = BeamLang.Span.merge(enum_tok.span, rbrace.span)
+          {:ok, {:enum_pattern, %{enum_name: enum_tok.value, variant: variant_tok.value, fields: fields, span: span}}, rest3}
+        end
+
+      _ ->
+        span = BeamLang.Span.merge(enum_tok.span, variant_tok.span)
+        {:ok, {:enum_pattern, %{enum_name: enum_tok.value, variant: variant_tok.value, fields: [], span: span}}, rest}
+    end
+  end
+
+  # Tuple pattern: (a, b, c)
+  defp parse_pattern([%Token{type: :lparen} = lparen_tok | rest]) do
+    with {:ok, patterns, rest1} <- parse_tuple_pattern_elements(rest, []),
+         {:ok, rparen, rest2} <- expect(rest1, :rparen) do
+      span = BeamLang.Span.merge(lparen_tok.span, rparen.span)
+      {:ok, {:tuple_pattern, %{elements: patterns, span: span}}, rest2}
+    end
+  end
+
   defp parse_pattern([%Token{type: :identifier} = _tok, %Token{type: :lbrace} | _] = tokens) do
     parse_struct_pattern(tokens)
   end
@@ -1435,6 +1701,55 @@ defmodule BeamLang.Parser do
     case parse_literal(tokens) do
       {:ok, _expr, _rest} = ok -> ok
       {:error, _} -> parse_pattern_identifier(tokens)
+    end
+  end
+
+  @spec parse_tuple_pattern_elements([Token.t()], [BeamLang.AST.pattern()]) ::
+          {:ok, [BeamLang.AST.pattern()], [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_tuple_pattern_elements([%Token{type: :rparen} | _] = rest, acc) do
+    {:ok, Enum.reverse(acc), rest}
+  end
+
+  defp parse_tuple_pattern_elements(tokens, acc) do
+    with {:ok, pattern, rest} <- parse_pattern(tokens) do
+      case rest do
+        [%Token{type: :comma} | rest1] -> parse_tuple_pattern_elements(rest1, [pattern | acc])
+        _ -> {:ok, Enum.reverse([pattern | acc]), rest}
+      end
+    end
+  end
+
+  @spec parse_enum_pattern_fields([Token.t()], [BeamLang.AST.pattern_field()]) ::
+          {:ok, [BeamLang.AST.pattern_field()], [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_enum_pattern_fields([%Token{type: :rbrace} | _] = rest, acc) do
+    {:ok, Enum.reverse(acc), rest}
+  end
+
+  defp parse_enum_pattern_fields(tokens, acc) do
+    with {:ok, name_tok, rest1} <- expect(tokens, :identifier) do
+      case rest1 do
+        # Explicit pattern: field = pattern
+        [%Token{type: :equals} | rest2] ->
+          with {:ok, pattern, rest3} <- parse_pattern(rest2) do
+            span = BeamLang.Span.merge(name_tok.span, pattern_span(pattern))
+            field = %{name: name_tok.value, pattern: pattern, span: span}
+
+            case rest3 do
+              [%Token{type: :comma} | rest4] -> parse_enum_pattern_fields(rest4, [field | acc])
+              _ -> parse_enum_pattern_fields(rest3, [field | acc])
+            end
+          end
+
+        # Shorthand: field (binds to variable with same name)
+        _ ->
+          pattern = {:pat_identifier, %{name: name_tok.value, span: name_tok.span}}
+          field = %{name: name_tok.value, pattern: pattern, span: name_tok.span}
+
+          case rest1 do
+            [%Token{type: :comma} | rest2] -> parse_enum_pattern_fields(rest2, [field | acc])
+            _ -> parse_enum_pattern_fields(rest1, [field | acc])
+          end
+      end
     end
   end
 
@@ -1553,6 +1868,9 @@ defmodule BeamLang.Parser do
   defp expr_span({:method_call, %{span: span}}), do: span
   defp expr_span({:list_literal, %{span: span}}), do: span
   defp expr_span({:range, %{span: span}}), do: span
+  defp expr_span({:try_expr, %{span: span}}), do: span
+  defp expr_span({:tuple, %{span: span}}), do: span
+  defp expr_span({:enum_variant, %{span: span}}), do: span
 
   @spec pattern_span(BeamLang.AST.pattern()) :: BeamLang.Span.t()
   defp pattern_span({:integer, %{span: span}}), do: span
@@ -1567,6 +1885,8 @@ defmodule BeamLang.Parser do
   defp pattern_span({:opt_none_pat, %{span: span}}), do: span
   defp pattern_span({:res_ok_pat, %{span: span}}), do: span
   defp pattern_span({:res_err_pat, %{span: span}}), do: span
+  defp pattern_span({:enum_pattern, %{span: span}}), do: span
+  defp pattern_span({:tuple_pattern, %{span: span}}), do: span
 
   @spec pattern_binding(BeamLang.AST.pattern()) ::
           {:ok, binary(), BeamLang.Span.t()} | {:error, BeamLang.Error.t()}
@@ -1613,7 +1933,9 @@ defmodule BeamLang.Parser do
   defp stmt_span({:return, %{span: span}}), do: span
   defp stmt_span({:expr, %{span: span}}), do: span
   defp stmt_span({:let, %{span: span}}), do: span
+  defp stmt_span({:let_destruct, %{span: span}}), do: span
   defp stmt_span({:assign, %{span: span}}), do: span
+  defp stmt_span({:compound_assign, %{span: span}}), do: span
   defp stmt_span({:guard, %{span: span}}), do: span
   defp stmt_span({:if_stmt, %{span: span}}), do: span
   defp stmt_span({:while, %{span: span}}), do: span
@@ -1693,6 +2015,103 @@ defmodule BeamLang.Parser do
   end
 
   defp parse_error_fields([%Token{} = tok | _], _acc) do
+    {:error, error("Expected field name or '}'.", tok)}
+  end
+
+  # ─── Enum Definitions ───────────────────────────────────────────────────────
+  @spec parse_enum_def([Token.t()], boolean()) ::
+          {:ok, BeamLang.AST.enum_def(), [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_enum_def(tokens, exported) do
+    with {:ok, enum_tok, rest1} <- expect(tokens, :enum_kw),
+         {:ok, name_tok, rest2} <- parse_type_def_name(rest1),
+         {:ok, {params, _params_span}, rest3} <- parse_type_params(rest2),
+         {:ok, _lbrace, rest4} <- expect(rest3, :lbrace),
+         {:ok, variants, rest5} <- parse_enum_variants(rest4, []),
+         {:ok, _rbrace, rest6} <- expect(rest5, :rbrace) do
+      span = BeamLang.Span.merge(enum_tok.span, rbrace_span(rest5, rest6))
+      {:ok, {:enum_def, %{name: name_tok.value, params: params, variants: variants, exported: exported, span: span}}, rest6}
+    end
+  end
+
+  @spec parse_enum_variants([Token.t()], [BeamLang.AST.enum_variant()]) ::
+          {:ok, [BeamLang.AST.enum_variant()], [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_enum_variants([%Token{type: :rbrace} | _] = rest, acc) do
+    {:ok, Enum.reverse(acc), rest}
+  end
+
+  defp parse_enum_variants([%Token{type: :identifier} = name_tok | rest], acc) do
+    case rest do
+      # Variant with fields: Variant { field: Type, ... }
+      [%Token{type: :lbrace} | rest1] ->
+        with {:ok, fields, rest2} <- parse_enum_variant_fields(rest1, []),
+             {:ok, _rbrace, rest3} <- expect(rest2, :rbrace) do
+          span = BeamLang.Span.merge(name_tok.span, rbrace_span(rest2, rest3))
+          variant = {:enum_variant, %{name: name_tok.value, fields: fields, span: span}}
+
+          case rest3 do
+            [%Token{type: :comma} | rest4] -> parse_enum_variants(rest4, [variant | acc])
+            _ -> parse_enum_variants(rest3, [variant | acc])
+          end
+        end
+
+      # Unit variant: Variant
+      _ ->
+        variant = {:enum_variant, %{name: name_tok.value, fields: [], span: name_tok.span}}
+
+        case rest do
+          [%Token{type: :comma} | rest1] -> parse_enum_variants(rest1, [variant | acc])
+          _ -> parse_enum_variants(rest, [variant | acc])
+        end
+    end
+  end
+
+  defp parse_enum_variants([%Token{} = tok | _], _acc) do
+    {:error, error("Expected variant name or '}'.", tok)}
+  end
+
+  @spec parse_enum_variant_fields([Token.t()], [BeamLang.AST.field_def()]) ::
+          {:ok, [BeamLang.AST.field_def()], [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_enum_variant_fields([%Token{type: :rbrace} | _] = rest, acc) do
+    {:ok, Enum.reverse(acc), rest}
+  end
+
+  defp parse_enum_variant_fields([%Token{type: :identifier} = name_tok | rest], acc) do
+    with {:ok, _colon, rest1} <- expect(rest, :colon),
+         {:ok, {type, type_span}, rest2} <- parse_type_name(rest1) do
+      span = BeamLang.Span.merge(name_tok.span, type_span)
+      field = %{name: name_tok.value, type: type, internal: false, span: span}
+
+      case rest2 do
+        [%Token{type: :comma} | rest3] -> parse_enum_variant_fields(rest3, [field | acc])
+        _ -> parse_enum_variant_fields(rest2, [field | acc])
+      end
+    end
+  end
+
+  defp parse_enum_variant_fields([%Token{} = tok | _], _acc) do
+    {:error, error("Expected field name or '}'.", tok)}
+  end
+
+  # ─── Enum Variant Literal Fields (for expressions like Option::Some { value = 42 }) ───
+  @spec parse_enum_variant_literal_fields([Token.t()], [{String.t(), BeamLang.AST.expr()}]) ::
+          {:ok, [{String.t(), BeamLang.AST.expr()}], [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_enum_variant_literal_fields([%Token{type: :rbrace} | _] = rest, acc) do
+    {:ok, Enum.reverse(acc), rest}
+  end
+
+  defp parse_enum_variant_literal_fields([%Token{type: :identifier} = name_tok | rest], acc) do
+    with {:ok, _eq, rest1} <- expect(rest, :equals),
+         {:ok, expr, rest2} <- parse_expression(rest1) do
+      field = {name_tok.value, expr}
+
+      case rest2 do
+        [%Token{type: :comma} | rest3] -> parse_enum_variant_literal_fields(rest3, [field | acc])
+        _ -> parse_enum_variant_literal_fields(rest2, [field | acc])
+      end
+    end
+  end
+
+  defp parse_enum_variant_literal_fields([%Token{} = tok | _], _acc) do
     {:error, error("Expected field name or '}'.", tok)}
   end
 
@@ -1810,6 +2229,37 @@ defmodule BeamLang.Parser do
     end
   end
 
+  # Tuple type: (T1, T2, ...)
+  defp parse_base_type([%Token{type: :lparen} = lparen_tok | rest]) do
+    case rest do
+      [%Token{type: :rparen} = rparen_tok | rest2] ->
+        # Empty tuple type
+        span = BeamLang.Span.merge(lparen_tok.span, rparen_tok.span)
+        {:ok, {{:tuple, []}, span}, rest2}
+
+      _ ->
+        with {:ok, {first_type, _span}, rest1} <- parse_type_name(rest) do
+          case rest1 do
+            [%Token{type: :comma} | rest2] ->
+              # Tuple type with multiple elements
+              with {:ok, more_types, rest3} <- parse_tuple_type_elements(rest2, [first_type]),
+                   {:ok, rparen_tok, rest4} <- expect(rest3, :rparen) do
+                span = BeamLang.Span.merge(lparen_tok.span, rparen_tok.span)
+                {:ok, {{:tuple, more_types}, span}, rest4}
+              end
+
+            [%Token{type: :rparen} = rparen_tok | rest2] ->
+              # Single-element tuple type
+              span = BeamLang.Span.merge(lparen_tok.span, rparen_tok.span)
+              {:ok, {{:tuple, [first_type]}, span}, rest2}
+
+            _ ->
+              {:error, error("Expected ')' or ',' in tuple type.", hd(rest1))}
+          end
+        end
+    end
+  end
+
   defp parse_base_type([%Token{type: :fn} = fn_tok | rest]) do
     with {:ok, _lparen, rest1} <- expect(rest, :lparen),
          {:ok, params, rest2} <- parse_type_params(rest1, []),
@@ -1825,6 +2275,21 @@ defmodule BeamLang.Parser do
     case parse_qualified_identifier(tokens) do
       {:ok, {name, span}, rest} -> {:ok, {{:named, name}, span}, rest}
       {:error, _} = error -> error
+    end
+  end
+
+  @spec parse_tuple_type_elements([Token.t()], [BeamLang.AST.type_name()]) ::
+          {:ok, [BeamLang.AST.type_name()], [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_tuple_type_elements([%Token{type: :rparen} | _] = rest, acc) do
+    {:ok, Enum.reverse(acc), rest}
+  end
+
+  defp parse_tuple_type_elements(tokens, acc) do
+    with {:ok, {type_name, _span}, rest1} <- parse_type_name(tokens) do
+      case rest1 do
+        [%Token{type: :comma} | rest2] -> parse_tuple_type_elements(rest2, [type_name | acc])
+        _ -> {:ok, Enum.reverse([type_name | acc]), rest1}
+      end
     end
   end
 

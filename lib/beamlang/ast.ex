@@ -15,6 +15,7 @@ defmodule BeamLang.AST do
           | {:optional, type_name()}
           | {:result, type_name(), type_name()}
           | {:fn, [type_name()], type_name()}
+          | {:tuple, [type_name()]}
 
   @type literal ::
           {:integer, %{value: integer(), span: BeamLang.Span.t()}}
@@ -46,6 +47,9 @@ defmodule BeamLang.AST do
           | {:opt_none, %{span: BeamLang.Span.t(), type: type_name() | nil}}
           | {:res_ok, %{expr: expr(), span: BeamLang.Span.t(), type: type_name() | nil}}
           | {:res_err, %{expr: expr(), span: BeamLang.Span.t(), type: type_name() | nil}}
+          | {:try_expr, %{expr: expr(), kind: :result | :optional, span: BeamLang.Span.t()}}
+          | {:tuple, %{elements: [expr()], span: BeamLang.Span.t()}}
+          | {:enum_variant, %{enum_name: binary(), variant: binary(), fields: [field_assign()] | nil, span: BeamLang.Span.t()}}
 
   @type binary_op :: :eq | :neq | :lt | :gt | :lte | :gte | :add | :sub | :mul | :div | :mod
 
@@ -64,6 +68,8 @@ defmodule BeamLang.AST do
           | {:opt_none_pat, %{span: BeamLang.Span.t()}}
           | {:res_ok_pat, %{name: binary(), span: BeamLang.Span.t()}}
           | {:res_err_pat, %{name: binary(), span: BeamLang.Span.t()}}
+          | {:enum_pattern, %{enum_name: binary(), variant: binary(), fields: [pattern_field()] | nil, span: BeamLang.Span.t()}}
+          | {:tuple_pattern, %{elements: [pattern()], span: BeamLang.Span.t()}}
 
   @type pattern_field ::
           %{name: binary(), pattern: pattern(), span: BeamLang.Span.t()}
@@ -85,13 +91,28 @@ defmodule BeamLang.AST do
                expr: expr(),
                span: BeamLang.Span.t()
              }}
+          | {:let_destruct,
+             %{
+               pattern: destruct_pattern(),
+               type: type_name() | nil,
+               expr: expr(),
+               span: BeamLang.Span.t()
+             }}
           | {:assign, %{target: expr(), expr: expr(), span: BeamLang.Span.t()}}
+          | {:compound_assign, %{target: expr(), op: binary_op(), expr: expr(), span: BeamLang.Span.t()}}
           | {:guard, %{cond: expr(), else_block: block(), span: BeamLang.Span.t()}}
           | {:if_stmt, %{cond: expr(), then_block: block(), else_branch: if_else_branch() | nil, span: BeamLang.Span.t()}}
           | {:while, %{cond: expr(), body: block(), span: BeamLang.Span.t()}}
           | {:loop, %{body: block(), span: BeamLang.Span.t()}}
           | {:for, %{name: binary(), collection: expr(), body: block(), span: BeamLang.Span.t()}}
           | {:break, %{span: BeamLang.Span.t()}}
+
+  @type destruct_pattern ::
+          {:struct_destruct, %{type_name: binary() | nil, fields: [destruct_field()], span: BeamLang.Span.t()}}
+          | {:tuple_destruct, %{elements: [binary()], span: BeamLang.Span.t()}}
+
+  @type destruct_field ::
+          %{name: binary(), binding: binary() | nil, span: BeamLang.Span.t()}
 
   @type if_else_branch :: {:else_block, %{block: block(), span: BeamLang.Span.t()}} | {:else_if, %{if: stmt(), span: BeamLang.Span.t()}}
 
@@ -100,6 +121,9 @@ defmodule BeamLang.AST do
 
   @type func_param ::
           %{name: binary(), type: type_name(), mutable: boolean(), span: BeamLang.Span.t()}
+          # Pattern param: destructure a struct/tuple in function params
+          # Example: fn foo(Point { x, y }: Point): number { ... }
+          | %{pattern: pattern(), type: type_name(), span: BeamLang.Span.t()}
 
   @type func ::
           {:function,
@@ -135,6 +159,23 @@ defmodule BeamLang.AST do
              span: BeamLang.Span.t()
            }}
 
+  @type enum_def ::
+          {:enum_def,
+           %{
+             name: binary(),
+             params: [binary()],
+             variants: [enum_variant()],
+             exported: boolean(),
+             span: BeamLang.Span.t()
+           }}
+
+  @type enum_variant ::
+          %{
+            name: binary(),
+            fields: [field_def()] | nil,
+            span: BeamLang.Span.t()
+          }
+
   @type field_def ::
           %{name: binary(), type: type_name(), internal: boolean(), span: BeamLang.Span.t()}
 
@@ -155,6 +196,7 @@ defmodule BeamLang.AST do
              module: binary() | nil,
              imports: [import()],
              types: [type_def()],
+             enums: [enum_def()],
              errors: [error_def()],
              functions: [func()],
              span: BeamLang.Span.t()

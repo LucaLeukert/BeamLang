@@ -192,8 +192,34 @@ defmodule BeamLang.Codegen do
     {form, Map.put(env, name, var), counter}
   end
 
+  defp stmt_form({:let_destruct, %{pattern: pattern, expr: expr}}, env, counter) do
+    case pattern do
+      {:struct_destruct, %{fields: fields}} ->
+        # Generate: {pattern_form, expr_form}
+        expr_form_val = expr_form(1, expr, env)
+        {bindings, env, counter} = destruct_struct_bindings(fields, expr_form_val, env, counter)
+        form = destruct_struct_form(1, bindings, expr_form_val)
+        {form, env, counter}
+
+      {:tuple_destruct, %{elements: elements}} ->
+        expr_form_val = expr_form(1, expr, env)
+        {bindings, env, counter} = destruct_tuple_bindings(elements, env, counter)
+        form = destruct_tuple_form(1, bindings, expr_form_val)
+        {form, env, counter}
+    end
+  end
+
   defp stmt_form({:assign, %{target: target, expr: expr}}, env, counter) do
     case assignment_form(1, target, expr, env, counter) do
+      {:ok, form, new_env, new_counter} -> {form, new_env, new_counter}
+      {:error, _} -> {{:atom, 1, :ok}, env, counter}
+    end
+  end
+
+  defp stmt_form({:compound_assign, %{target: target, op: op, expr: expr}}, env, counter) do
+    # Transform x += y into x = x + y
+    binary_expr = {:binary, %{op: op, left: target, right: expr, span: BeamLang.Span.new("<generated>", 0, 0)}}
+    case assignment_form(1, target, binary_expr, env, counter) do
       {:ok, form, new_env, new_counter} -> {form, new_env, new_counter}
       {:error, _} -> {{:atom, 1, :ok}, env, counter}
     end
@@ -475,6 +501,62 @@ defmodule BeamLang.Codegen do
   defp expr_form(line, {:res_err, %{expr: expr}}, env) do
     value = expr_form(line, expr, env)
     {:call, line, {:atom, line, :result_err}, [value]}
+  end
+
+  defp expr_form(line, {:try_expr, %{expr: inner_expr, kind: kind}}, env) do
+    # Generate: case inner_expr of
+    #   #{tag: 1, value: V} -> V   (ok/some)
+    #   #{tag: 0, value: E} = Err -> throw({:__try_propagate__, Err})  (err/none)
+    inner_form = expr_form(line, inner_expr, env)
+
+    ok_pattern = {:map, line, [
+      {:map_field_exact, line, {:atom, line, :tag}, {:integer, line, 1}},
+      {:map_field_exact, line, {:atom, line, :value}, {:var, line, :__TryValue__}}
+    ]}
+    ok_clause = {:clause, line, [ok_pattern], [], [{:var, line, :__TryValue__}]}
+
+    case kind do
+      :result ->
+        err_pattern = {:map, line, [
+          {:map_field_exact, line, {:atom, line, :tag}, {:integer, line, 0}},
+          {:map_field_exact, line, {:atom, line, :value}, {:var, line, :__TryErr__}}
+        ]}
+        # Return the error wrapped as result_err
+        err_result = {:call, line, {:atom, line, :result_err}, [{:var, line, :__TryErr__}]}
+        throw_expr = {:call, line, {:remote, line, {:atom, line, :erlang}, {:atom, line, :throw}},
+          [{:tuple, line, [{:atom, line, :__try_propagate__}, err_result]}]}
+        err_clause = {:clause, line, [err_pattern], [], [throw_expr]}
+        {:case, line, inner_form, [ok_clause, err_clause]}
+
+      :optional ->
+        none_pattern = {:map, line, [
+          {:map_field_exact, line, {:atom, line, :tag}, {:integer, line, 0}}
+        ]}
+        none_result = {:call, line, {:atom, line, :optional_none}, []}
+        throw_expr = {:call, line, {:remote, line, {:atom, line, :erlang}, {:atom, line, :throw}},
+          [{:tuple, line, [{:atom, line, :__try_propagate__}, none_result]}]}
+        none_clause = {:clause, line, [none_pattern], [], [throw_expr]}
+        {:case, line, inner_form, [ok_clause, none_clause]}
+    end
+  end
+
+  defp expr_form(line, {:tuple, %{elements: elements}}, env) do
+    elem_forms = Enum.map(elements, fn elem -> expr_form(line, elem, env) end)
+    {:tuple, line, elem_forms}
+  end
+
+  defp expr_form(line, {:enum_variant, %{enum_name: enum_name, variant: variant, fields: fields}}, env) do
+    # Generate: %{__enum__: "EnumName", __variant__: "Variant", field1: value1, ...}
+    base_fields = [
+      {:map_field_assoc, line, {:atom, line, :__enum__}, {:bin, line, [{:bin_element, line, {:string, line, String.to_charlist(enum_name)}, :default, :default}]}},
+      {:map_field_assoc, line, {:atom, line, :__variant__}, {:bin, line, [{:bin_element, line, {:string, line, String.to_charlist(variant)}, :default, :default}]}}
+    ]
+
+    field_forms = Enum.map(fields, fn {name, expr} ->
+      {:map_field_assoc, line, {:atom, line, String.to_atom(name)}, expr_form(line, expr, env)}
+    end)
+
+    {:map, line, base_fields ++ field_forms}
   end
 
   defp expr_form(line, {:range, %{start: start_expr, end: end_expr}}, env) do
@@ -993,11 +1075,70 @@ defmodule BeamLang.Codegen do
   @spec params_form([BeamLang.AST.func_param()], non_neg_integer(), map(), non_neg_integer()) ::
           {[tuple()], map(), non_neg_integer()}
   defp params_form(params, line, env, counter) do
-    Enum.reduce(params, {[], env, counter}, fn %{name: name}, {acc, env_acc, counter_acc} ->
-      {var, counter_acc} = fresh_var(name, counter_acc)
-      param = {:var, line, var}
-      {acc ++ [param], Map.put(env_acc, name, var), counter_acc}
+    Enum.reduce(params, {[], env, counter}, fn param, {acc, env_acc, counter_acc} ->
+      case param do
+        # Regular named parameter
+        %{name: name} ->
+          {var, counter_acc} = fresh_var(name, counter_acc)
+          param_form = {:var, line, var}
+          {acc ++ [param_form], Map.put(env_acc, name, var), counter_acc}
+
+        # Pattern parameter (struct or tuple destructuring)
+        %{pattern: pattern} ->
+          {param_form, new_env, counter_acc} = pattern_param_form(pattern, line, env_acc, counter_acc)
+          {acc ++ [param_form], new_env, counter_acc}
+      end
     end)
+  end
+
+  # Convert a pattern parameter to Erlang form and extract bindings
+  defp pattern_param_form({:struct_pattern, %{name: type_name, fields: fields}}, line, env, counter) do
+    # Create a map pattern that matches on __beamlang_type__ and extracts fields
+    {field_pairs, new_env, counter} =
+      Enum.reduce(fields, {[], env, counter}, fn field, {pairs_acc, env_acc, c} ->
+        name = field.name
+        {var, c} = fresh_var(name, c)
+        pair = {:map_field_exact, line, {:atom, line, String.to_atom(name)}, {:var, line, var}}
+        {pairs_acc ++ [pair], Map.put(env_acc, name, var), c}
+      end)
+
+    # Use __beamlang_type__ as a charlist (same as in pattern_form for match)
+    struct_pair = {:map_field_exact, line, {:atom, line, :__beamlang_type__}, {:string, line, to_charlist(type_name)}}
+    pattern_form = {:map, line, [struct_pair | field_pairs]}
+    {pattern_form, new_env, counter}
+  end
+
+  defp pattern_param_form({:tuple_pattern, %{elements: elements}}, line, env, counter) do
+    {elem_forms, new_env, counter} =
+      Enum.reduce(elements, {[], env, counter}, fn elem, {forms_acc, env_acc, c} ->
+        # Handle both keyword list format (from parser) and tuple format
+        {tag, info} = case elem do
+          {tag, info} when is_atom(tag) -> {tag, info}
+          other -> other
+        end
+
+        case tag do
+          :pat_identifier ->
+            name = info.name
+            {var, c} = fresh_var(name, c)
+            {forms_acc ++ [{:var, line, var}], Map.put(env_acc, name, var), c}
+
+          :var_pattern ->
+            name = info.name
+            {var, c} = fresh_var(name, c)
+            {forms_acc ++ [{:var, line, var}], Map.put(env_acc, name, var), c}
+
+          :wildcard ->
+            {forms_acc ++ [{:var, line, :_}], env_acc, c}
+
+          # Nested patterns could be handled here
+          _ ->
+            {forms_acc ++ [{:var, line, :_}], env_acc, c}
+        end
+      end)
+
+    pattern_form = {:tuple, line, elem_forms}
+    {pattern_form, new_env, counter}
   end
 
   @spec external_call(binary(), [BeamLang.AST.expr()], non_neg_integer(), map()) ::
@@ -1226,6 +1367,33 @@ defmodule BeamLang.Codegen do
     {{:map, line, entries}, env, counter}
   end
 
+  defp pattern_form(line, {:enum_pattern, %{enum_name: enum_name, variant: variant, fields: fields}}, counter) do
+    # Generate: %{__enum__: "EnumName", __variant__: "Variant", field1: Pat1, ...}
+    base_entries = [
+      {:map_field_exact, line, {:atom, line, :__enum__}, {:bin, line, [{:bin_element, line, {:string, line, String.to_charlist(enum_name)}, :default, :default}]}},
+      {:map_field_exact, line, {:atom, line, :__variant__}, {:bin, line, [{:bin_element, line, {:string, line, String.to_charlist(variant)}, :default, :default}]}}
+    ]
+
+    {field_entries, env, counter} =
+      Enum.reduce(fields, {[], %{}, counter}, fn field, {acc_entries, acc_env, acc_counter} ->
+        {pat_form, pat_env, new_counter} = pattern_form(line, field.pattern, acc_counter)
+        entry = {:map_field_exact, line, {:atom, line, String.to_atom(field.name)}, pat_form}
+        {[entry | acc_entries], Map.merge(acc_env, pat_env), new_counter}
+      end)
+
+    {{:map, line, base_entries ++ Enum.reverse(field_entries)}, env, counter}
+  end
+
+  defp pattern_form(line, {:tuple_pattern, %{elements: elements}}, counter) do
+    {elem_forms, env, counter} =
+      Enum.reduce(elements, {[], %{}, counter}, fn elem, {acc_forms, acc_env, acc_counter} ->
+        {pat_form, pat_env, new_counter} = pattern_form(line, elem, acc_counter)
+        {[pat_form | acc_forms], Map.merge(acc_env, pat_env), new_counter}
+      end)
+
+    {{:tuple, line, Enum.reverse(elem_forms)}, env, counter}
+  end
+
   @spec var_atom(binary()) :: atom()
   defp var_atom(name) do
     {first, rest} = String.split_at(name, 1)
@@ -1297,5 +1465,44 @@ defmodule BeamLang.Codegen do
       # Convert to string using to_string
       {:call, line, {:atom, line, :to_string}, [expr_form(line, expr, env)]}
     end
+  end
+
+  # Helper functions for destructuring
+  @spec destruct_struct_bindings([map()], tuple(), map(), non_neg_integer()) ::
+          {[{atom(), atom()}], map(), non_neg_integer()}
+  defp destruct_struct_bindings(fields, _expr_form, env, counter) do
+    Enum.reduce(fields, {[], env, counter}, fn field, {bindings, env, counter} ->
+      binding_name = field.binding || field.name
+      field_atom = String.to_atom(field.name)
+      {var, counter} = fresh_var(binding_name, counter)
+      env = Map.put(env, binding_name, var)
+      {[{field_atom, var} | bindings], env, counter}
+    end)
+  end
+
+  @spec destruct_struct_form(non_neg_integer(), [{atom(), atom()}], tuple()) :: tuple()
+  defp destruct_struct_form(line, bindings, expr_form) do
+    # Generate: #{field1 := Var1, field2 := Var2} = expr
+    entries = Enum.map(bindings, fn {field_atom, var} ->
+      {:map_field_exact, line, {:atom, line, field_atom}, {:var, line, var}}
+    end)
+    {:match, line, {:map, line, entries}, expr_form}
+  end
+
+  @spec destruct_tuple_bindings([binary()], map(), non_neg_integer()) ::
+          {[atom()], map(), non_neg_integer()}
+  defp destruct_tuple_bindings(elements, env, counter) do
+    Enum.reduce(elements, {[], env, counter}, fn name, {vars, env, counter} ->
+      {var, counter} = fresh_var(name, counter)
+      env = Map.put(env, name, var)
+      {[var | vars], env, counter}
+    end)
+  end
+
+  @spec destruct_tuple_form(non_neg_integer(), [atom()], tuple()) :: tuple()
+  defp destruct_tuple_form(line, vars, expr_form) do
+    # Generate: {Var1, Var2, ...} = expr
+    var_forms = Enum.reverse(vars) |> Enum.map(fn var -> {:var, line, var} end)
+    {:match, line, {:tuple, line, var_forms}, expr_form}
   end
 end

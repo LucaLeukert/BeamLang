@@ -6,6 +6,8 @@ This document reflects the current, implemented BeamLang language features and s
 
 BeamLang is a statically-typed language that compiles to BEAM. It emphasizes explicit control flow, typed data, and lightweight interop with the runtime through externals. The standard library is written in BeamLang (.bl) files and is loaded automatically.
 
+Internally, all values are represented as struct literals (similar to how everything in JavaScript is an object). This applies to primitives, optionals/results, and user-defined types.
+
 ## Tooling
 
 - The CLI can run as a Language Server Protocol (LSP) server using `beamlang --lsp`.

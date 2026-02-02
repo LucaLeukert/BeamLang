@@ -1,0 +1,49 @@
+// Pattern matching in function parameters
+// Demonstrates destructuring directly in function signatures
+
+type Point {
+    x: number,
+    y: number
+}
+
+// Destructure a struct in function parameters
+fn get_x(Point { x, y }: Point) -> number {
+    return x;
+}
+
+fn get_y(Point { x, y }: Point) -> number {
+    return y;
+}
+
+// Tuple destructuring in function parameters  
+fn first((a, b): (number, String)) -> number {
+    return a;
+}
+
+fn second((a, b): (number, String)) -> String {
+    return b;
+}
+
+// Mix of regular and pattern params
+fn add_x(p: Point, offset: number) -> number {
+    return p->x + offset;
+}
+
+fn main(args: [String]) -> number {
+    let p: Point = { x = 10, y = 20 };
+    
+    println("Point x via pattern param:");
+    println(to_string(get_x(p)));
+    
+    println("Point y via pattern param:");
+    println(to_string(get_y(p)));
+    
+    let t = (42, "hello");
+    println("First of tuple:");
+    println(to_string(first(t)));
+    
+    println("Second of tuple:");
+    println(second(t));
+    
+    return 0;
+}

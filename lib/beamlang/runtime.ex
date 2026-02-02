@@ -88,6 +88,92 @@ defmodule BeamLang.Runtime do
     Enum.map(value, fn ch -> {:char, ch} end)
   end
 
+  # New String methods
+
+  @spec string_split_data(term(), term()) :: list()
+  def string_split_data(value, separator) do
+    str = to_string(value)
+    sep = to_string(separator)
+    String.split(str, sep)
+    |> Enum.map(&String.to_charlist/1)
+  end
+
+  @spec string_contains_data(term(), term()) :: boolean()
+  def string_contains_data(value, needle) do
+    String.contains?(to_string(value), to_string(needle))
+  end
+
+  @spec string_starts_with_data(term(), term()) :: boolean()
+  def string_starts_with_data(value, prefix) do
+    String.starts_with?(to_string(value), to_string(prefix))
+  end
+
+  @spec string_ends_with_data(term(), term()) :: boolean()
+  def string_ends_with_data(value, suffix) do
+    String.ends_with?(to_string(value), to_string(suffix))
+  end
+
+  @spec string_trim_data(term()) :: term()
+  def string_trim_data(value) do
+    String.trim(to_string(value)) |> String.to_charlist()
+  end
+
+  @spec string_trim_start_data(term()) :: term()
+  def string_trim_start_data(value) do
+    String.trim_leading(to_string(value)) |> String.to_charlist()
+  end
+
+  @spec string_trim_end_data(term()) :: term()
+  def string_trim_end_data(value) do
+    String.trim_trailing(to_string(value)) |> String.to_charlist()
+  end
+
+  @spec string_replace_data(term(), term(), term()) :: term()
+  def string_replace_data(value, pattern, replacement) do
+    String.replace(to_string(value), to_string(pattern), to_string(replacement))
+    |> String.to_charlist()
+  end
+
+  @spec string_to_upper_data(term()) :: term()
+  def string_to_upper_data(value) do
+    String.upcase(to_string(value)) |> String.to_charlist()
+  end
+
+  @spec string_to_lower_data(term()) :: term()
+  def string_to_lower_data(value) do
+    String.downcase(to_string(value)) |> String.to_charlist()
+  end
+
+  @spec string_substring_data(term(), integer(), integer()) :: term()
+  def string_substring_data(value, start_idx, end_idx) do
+    str = to_string(value)
+    len = end_idx - start_idx
+    String.slice(str, start_idx, len) |> String.to_charlist()
+  end
+
+  @spec string_index_of_data(term(), term()) :: map()
+  def string_index_of_data(value, needle) do
+    str = to_string(value)
+    needle_str = to_string(needle)
+    case :binary.match(str, needle_str) do
+      {idx, _} -> %{tag: 1, value: idx}
+      :nomatch -> %{tag: 0}
+    end
+  end
+
+  @spec list_map_to_strings(list()) :: list()
+  def list_map_to_strings(list) do
+    Enum.map(list, fn data -> stdlib_string_new(data) end)
+  end
+
+  @spec optional_from_data(map()) :: map()
+  def optional_from_data(%{tag: 1, value: value}) do
+    apply(:beamlang_program, :optional_some, [value])
+  end
+  def optional_from_data(%{tag: 0}) do
+    apply(:beamlang_program, :optional_none, [])
+  end
+
   @spec parse_number_data(term()) :: map()
   def parse_number_data(value) do
     str = any_to_string_data(value) |> to_string()

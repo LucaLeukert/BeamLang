@@ -8,6 +8,7 @@ defmodule BeamLang.Lexer do
   @keywords %{
     "fn" => :fn,
     "type" => :type_kw,
+    "enum" => :enum_kw,
     "error" => :error_kw,
     "import" => :import_kw,
     "export" => :export_kw,
@@ -170,6 +171,47 @@ defmodule BeamLang.Lexer do
   defp do_tokenize(<<"=>", rest::binary>>, file, offset, line, col, acc) do
     span = BeamLang.Span.new(file, offset, offset + 2)
     token = %Token{type: :fat_arrow, value: "=>", line: line, col: col, span: span}
+    do_tokenize(rest, file, offset + 2, line, col + 2, [token | acc])
+  end
+
+  # Compound assignment operators
+  @spec do_tokenize(binary(), binary(), non_neg_integer(), non_neg_integer(), non_neg_integer(), [Token.t()]) ::
+          {:ok, [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp do_tokenize(<<"+=", rest::binary>>, file, offset, line, col, acc) do
+    span = BeamLang.Span.new(file, offset, offset + 2)
+    token = %Token{type: :plus_eq, value: "+=", line: line, col: col, span: span}
+    do_tokenize(rest, file, offset + 2, line, col + 2, [token | acc])
+  end
+
+  @spec do_tokenize(binary(), binary(), non_neg_integer(), non_neg_integer(), non_neg_integer(), [Token.t()]) ::
+          {:ok, [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp do_tokenize(<<"-=", rest::binary>>, file, offset, line, col, acc) do
+    span = BeamLang.Span.new(file, offset, offset + 2)
+    token = %Token{type: :minus_eq, value: "-=", line: line, col: col, span: span}
+    do_tokenize(rest, file, offset + 2, line, col + 2, [token | acc])
+  end
+
+  @spec do_tokenize(binary(), binary(), non_neg_integer(), non_neg_integer(), non_neg_integer(), [Token.t()]) ::
+          {:ok, [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp do_tokenize(<<"*=", rest::binary>>, file, offset, line, col, acc) do
+    span = BeamLang.Span.new(file, offset, offset + 2)
+    token = %Token{type: :star_eq, value: "*=", line: line, col: col, span: span}
+    do_tokenize(rest, file, offset + 2, line, col + 2, [token | acc])
+  end
+
+  @spec do_tokenize(binary(), binary(), non_neg_integer(), non_neg_integer(), non_neg_integer(), [Token.t()]) ::
+          {:ok, [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp do_tokenize(<<"/=", rest::binary>>, file, offset, line, col, acc) do
+    span = BeamLang.Span.new(file, offset, offset + 2)
+    token = %Token{type: :slash_eq, value: "/=", line: line, col: col, span: span}
+    do_tokenize(rest, file, offset + 2, line, col + 2, [token | acc])
+  end
+
+  @spec do_tokenize(binary(), binary(), non_neg_integer(), non_neg_integer(), non_neg_integer(), [Token.t()]) ::
+          {:ok, [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp do_tokenize(<<"%=", rest::binary>>, file, offset, line, col, acc) do
+    span = BeamLang.Span.new(file, offset, offset + 2)
+    token = %Token{type: :percent_eq, value: "%=", line: line, col: col, span: span}
     do_tokenize(rest, file, offset + 2, line, col + 2, [token | acc])
   end
 

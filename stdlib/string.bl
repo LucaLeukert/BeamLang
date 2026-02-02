@@ -2,7 +2,19 @@ type String {
     data: any,
     length: fn(String) -> number,
     chars: fn(String) -> Iterator<char>,
-    concat: fn(String, String) -> String
+    concat: fn(String, String) -> String,
+    split: fn(String, String) -> [String],
+    contains: fn(String, String) -> bool,
+    starts_with: fn(String, String) -> bool,
+    ends_with: fn(String, String) -> bool,
+    trim: fn(String) -> String,
+    trim_start: fn(String) -> String,
+    trim_end: fn(String) -> String,
+    replace: fn(String, String, String) -> String,
+    to_upper: fn(String) -> String,
+    to_lower: fn(String) -> String,
+    substring: fn(String, number, number) -> String,
+    index_of: fn(String, String) -> number?
 }
 
 @external(elixir, "BeamLang.Runtime", "typeof_data")
@@ -16,6 +28,42 @@ fn string_concat_data(left: any, right: any) -> any;
 
 @external(elixir, "BeamLang.Runtime", "string_chars_data")
 fn string_chars_data(value: any) -> any;
+
+@external(elixir, "BeamLang.Runtime", "string_split_data")
+fn string_split_data(value: any, separator: any) -> any;
+
+@external(elixir, "BeamLang.Runtime", "string_contains_data")
+fn string_contains_data(value: any, needle: any) -> bool;
+
+@external(elixir, "BeamLang.Runtime", "string_starts_with_data")
+fn string_starts_with_data(value: any, prefix: any) -> bool;
+
+@external(elixir, "BeamLang.Runtime", "string_ends_with_data")
+fn string_ends_with_data(value: any, suffix: any) -> bool;
+
+@external(elixir, "BeamLang.Runtime", "string_trim_data")
+fn string_trim_data(value: any) -> any;
+
+@external(elixir, "BeamLang.Runtime", "string_trim_start_data")
+fn string_trim_start_data(value: any) -> any;
+
+@external(elixir, "BeamLang.Runtime", "string_trim_end_data")
+fn string_trim_end_data(value: any) -> any;
+
+@external(elixir, "BeamLang.Runtime", "string_replace_data")
+fn string_replace_data(value: any, pattern: any, replacement: any) -> any;
+
+@external(elixir, "BeamLang.Runtime", "string_to_upper_data")
+fn string_to_upper_data(value: any) -> any;
+
+@external(elixir, "BeamLang.Runtime", "string_to_lower_data")
+fn string_to_lower_data(value: any) -> any;
+
+@external(elixir, "BeamLang.Runtime", "string_substring_data")
+fn string_substring_data(value: any, start_idx: number, end_idx: number) -> any;
+
+@external(elixir, "BeamLang.Runtime", "string_index_of_data")
+fn string_index_of_data(value: any, needle: any) -> any;
 
 @external(elixir, "BeamLang.Runtime", "println")
 fn println<T>(value: T) -> void;
@@ -40,7 +88,24 @@ fn typeof<T>(value: T) -> String {
 }
 
 internal fn string_new(data: any) -> String {
-    return { data = data, length = string_length, chars = string_chars, concat = string_concat };
+    return {
+        data = data,
+        length = string_length,
+        chars = string_chars,
+        concat = string_concat,
+        split = string_split,
+        contains = string_contains,
+        starts_with = string_starts_with,
+        ends_with = string_ends_with,
+        trim = string_trim,
+        trim_start = string_trim_start,
+        trim_end = string_trim_end,
+        replace = string_replace,
+        to_upper = string_to_upper,
+        to_lower = string_to_lower,
+        substring = string_substring,
+        index_of = string_index_of
+    };
 }
 
 internal fn string_length(self: String) -> number {
@@ -56,3 +121,59 @@ internal fn string_chars(self: String) -> Iterator<char> {
     let data = string_chars_data(self->data);
     return iterator_from_list(data);
 }
+
+internal fn string_split(self: String, separator: String) -> [String] {
+    let parts = string_split_data(self->data, separator->data);
+    return list_map_to_strings(parts);
+}
+
+@external(elixir, "BeamLang.Runtime", "list_map_to_strings")
+fn list_map_to_strings(data: any) -> [String];
+
+internal fn string_contains(self: String, needle: String) -> bool {
+    return string_contains_data(self->data, needle->data);
+}
+
+internal fn string_starts_with(self: String, prefix: String) -> bool {
+    return string_starts_with_data(self->data, prefix->data);
+}
+
+internal fn string_ends_with(self: String, suffix: String) -> bool {
+    return string_ends_with_data(self->data, suffix->data);
+}
+
+internal fn string_trim(self: String) -> String {
+    return string_new(string_trim_data(self->data));
+}
+
+internal fn string_trim_start(self: String) -> String {
+    return string_new(string_trim_start_data(self->data));
+}
+
+internal fn string_trim_end(self: String) -> String {
+    return string_new(string_trim_end_data(self->data));
+}
+
+internal fn string_replace(self: String, pattern: String, replacement: String) -> String {
+    return string_new(string_replace_data(self->data, pattern->data, replacement->data));
+}
+
+internal fn string_to_upper(self: String) -> String {
+    return string_new(string_to_upper_data(self->data));
+}
+
+internal fn string_to_lower(self: String) -> String {
+    return string_new(string_to_lower_data(self->data));
+}
+
+internal fn string_substring(self: String, start_idx: number, end_idx: number) -> String {
+    return string_new(string_substring_data(self->data, start_idx, end_idx));
+}
+
+internal fn string_index_of(self: String, needle: String) -> number? {
+    let result = string_index_of_data(self->data, needle->data);
+    return optional_from_data(result);
+}
+
+@external(elixir, "BeamLang.Runtime", "optional_from_data")
+fn optional_from_data(data: any) -> number?;

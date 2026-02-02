@@ -1,0 +1,33 @@
+// Example: Enum Types (Tagged Unions / ADTs)
+
+// Simple enum with unit variants
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+
+// Print color name
+fn color_name(c: Color) -> String {
+    return match (c) {
+        case Color::Red => "red",
+        case Color::Green => "green",
+        case Color::Blue => "blue",
+        case _ => "unknown"
+    };
+}
+
+fn main(args: [String]) -> number {
+    // Create enum values
+    let red = Color::Red;
+    let blue = Color::Blue;
+    
+    // Pattern matching
+    print("Color 1: ");
+    println(color_name(red));
+    
+    print("Color 2: ");
+    println(color_name(blue));
+    
+    return 0;
+}

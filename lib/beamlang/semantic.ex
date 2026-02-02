@@ -600,6 +600,49 @@ defmodule BeamLang.Semantic do
     end
   end
 
+  defp type_of_expr({:enum_variant, %{enum_name: enum_name, variant: _variant, fields: fields, span: _span}}, func_table, type_table, env, _expected) do
+    # For now, infer enum variant type without full validation
+    # Validate field expressions
+    field_errors = Enum.flat_map(fields, fn {_field_name, expr} ->
+      case type_of_expr(expr, func_table, type_table, env, nil) do
+        {:ok, _} -> []
+        {:error, {:match, errs}} -> errs
+        {:error, _} -> []
+      end
+    end)
+
+    if field_errors == [] do
+      {:ok, {:named, enum_name}}
+    else
+      {:error, {:match, field_errors}}
+    end
+  end
+
+  defp type_of_expr({:tuple, %{elements: elements, span: _span}}, func_table, type_table, env, expected) do
+    expected_types = case expected do
+      {:tuple, types} -> types
+      _ -> List.duplicate(nil, length(elements))
+    end
+
+    results = Enum.zip(elements, expected_types)
+              |> Enum.map(fn {elem, exp_type} ->
+                type_of_expr(elem, func_table, type_table, env, exp_type)
+              end)
+
+    errors = Enum.flat_map(results, fn
+      {:ok, _} -> []
+      {:error, {:match, errs}} -> errs
+      {:error, _} -> []
+    end)
+
+    if errors == [] do
+      types = Enum.map(results, fn {:ok, t} -> t end)
+      {:ok, {:tuple, types}}
+    else
+      {:error, {:match, errors}}
+    end
+  end
+
   defp type_of_expr({:opt_some, %{expr: expr}}, func_table, type_table, env, expected) do
     case expected do
       {:optional, inner} ->
@@ -1290,11 +1333,21 @@ defmodule BeamLang.Semantic do
        ) do
     errors = validate_param_names(params)
 
-    param_env =
-      Enum.reduce(params, %{}, fn %{name: param_name, type: param_type, mutable: mutable}, acc ->
-        param_type = param_type |> normalize_type() |> replace_type_params(type_params)
-        Map.put(acc, param_name, %{type: param_type, mutable: mutable})
+    {param_env, param_errors} =
+      Enum.reduce(params, {%{}, []}, fn param, {acc, errs} ->
+        case param do
+          %{name: param_name, type: param_type, mutable: mutable} ->
+            param_type = param_type |> normalize_type() |> replace_type_params(type_params)
+            {Map.put(acc, param_name, %{type: param_type, mutable: mutable}), errs}
+
+          %{pattern: pattern, type: param_type} ->
+            param_type = param_type |> normalize_type() |> replace_type_params(type_params)
+            {bindings, pattern_errors} = pattern_bindings(pattern, param_type, type_table)
+            {Map.merge(acc, bindings), errs ++ pattern_errors}
+        end
       end)
+
+    errors = errors ++ param_errors
 
     # If first param is 'self', track the method type context for internal field access
     param_env = add_method_type_context(param_env, params)
@@ -2099,7 +2152,7 @@ defmodule BeamLang.Semantic do
           |> Enum.map(&normalize_type(&1.type))
           |> Enum.map(&replace_type_params(&1, type_params))
 
-        param_names = Enum.map(params, & &1.name)
+        param_names = Enum.map(params, &param_name/1)
         return_type = return_type |> normalize_type() |> replace_type_params(type_params)
 
         Map.put(acc, name, %{
@@ -2114,6 +2167,10 @@ defmodule BeamLang.Semantic do
 
     {:ok, table}
   end
+
+  # Extract name from param - for pattern params, use nil or generate a name
+  defp param_name(%{name: name}), do: name
+  defp param_name(%{pattern: _}), do: nil
 
   defp internal_call?(true, func_span, expr_span) do
     func_span.file_id != expr_span.file_id
@@ -2521,6 +2578,40 @@ defmodule BeamLang.Semantic do
     end
   end
 
+  # Enum pattern bindings
+  defp pattern_bindings(
+         {:enum_pattern, %{enum_name: _enum_name, variant: _variant, fields: fields, span: _span}},
+         _match_type,
+         type_table
+       ) do
+    # For now, just bind all field patterns without full type checking
+    # A complete implementation would verify the enum type and variant exist
+    Enum.reduce(fields, {%{}, []}, fn %{name: _field_name, pattern: pattern}, {env, errors} ->
+      {bindings, field_errors} = pattern_bindings(pattern, :any, type_table)
+      {Map.merge(env, bindings), errors ++ field_errors}
+    end)
+  end
+
+  # Tuple pattern bindings
+  defp pattern_bindings(
+         {:tuple_pattern, %{elements: elements, span: _span}},
+         match_type,
+         type_table
+       ) do
+    # elements is a list of patterns like [{:pat_identifier, %{...}}, {:var_pattern, %{...}}]
+    element_types = case match_type do
+      {:tuple, types} -> types
+      _ -> List.duplicate(:any, length(elements))
+    end
+
+    elements
+    |> Enum.zip(element_types)
+    |> Enum.reduce({%{}, []}, fn {pattern, elem_type}, {env, errors} ->
+      {bindings, elem_errors} = pattern_bindings(pattern, elem_type, type_table)
+      {Map.merge(env, bindings), errors ++ elem_errors}
+    end)
+  end
+
   @spec literal_pattern_bindings(BeamLang.AST.literal(), BeamLang.AST.type_name()) ::
           {map(), [BeamLang.Error.t()]}
   defp literal_pattern_bindings(pattern, match_type) do
@@ -2690,11 +2781,18 @@ defmodule BeamLang.Semantic do
   defp validate_param_names(params) do
     params
     |> Enum.with_index()
-    |> Enum.flat_map(fn {%{name: name, span: span}, idx} ->
-      if name == "self" and idx != 0 do
-        [BeamLang.Error.new(:type, "self must be the first parameter.", span)]
-      else
-        []
+    |> Enum.flat_map(fn {param, idx} ->
+      case param do
+        %{name: name, span: span} ->
+          if name == "self" and idx != 0 do
+            [BeamLang.Error.new(:type, "self must be the first parameter.", span)]
+          else
+            []
+          end
+
+        %{pattern: _} ->
+          # Pattern parameters don't have a single name to validate for 'self'
+          []
       end
     end)
   end
@@ -2708,6 +2806,7 @@ defmodule BeamLang.Semantic do
     end
   end
 
+  defp add_method_type_context(env, [%{pattern: _} | rest]), do: add_method_type_context(env, rest)
   defp add_method_type_context(env, _params), do: env
 
   # Extract base type name from a type (handles generics like List<T>)
@@ -3222,9 +3321,17 @@ defmodule BeamLang.Semantic do
          type_table
        ) do
     env =
-      Enum.reduce(params, %{}, fn %{name: name, type: type}, acc ->
-        type = type |> normalize_type() |> replace_type_params(type_params)
-        Map.put(acc, name, %{type: type, mutable: false})
+      Enum.reduce(params, %{}, fn param, acc ->
+        case param do
+          %{name: name, type: type} ->
+            type = type |> normalize_type() |> replace_type_params(type_params)
+            Map.put(acc, name, %{type: type, mutable: false})
+
+          %{pattern: pattern, type: type} ->
+            type = type |> normalize_type() |> replace_type_params(type_params)
+            {bindings, _errors} = pattern_bindings(pattern, type, type_table)
+            Map.merge(acc, bindings)
+        end
       end)
 
     return_type = return_type |> normalize_type() |> replace_type_params(type_params)
@@ -4005,6 +4112,10 @@ defmodule BeamLang.Semantic do
 
   defp type_label({:fn, params, return_type}) do
     "fn(#{Enum.map_join(params, ", ", &type_label/1)}) -> #{type_label(return_type)}"
+  end
+
+  defp type_label({:tuple, types}) do
+    "(#{Enum.map_join(types, ", ", &type_label/1)})"
   end
 
   defp type_label(type) when is_atom(type), do: Atom.to_string(type)

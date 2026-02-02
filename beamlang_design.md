@@ -1,501 +1,764 @@
-# BeamLang Language Design Document
+# BeamLang Current Design (January 2026)
+
+This document reflects the current, implemented BeamLang language features and standard library structure.
 
 ## Overview
 
-BeamLang is a statically-typed, functional programming language that compiles to the BEAM VM (Erlang Virtual Machine). It combines C-like syntax with functional programming paradigms, Rust-inspired error handling, and seamless Erlang interoperability.
+BeamLang is a statically-typed language that compiles to BEAM. It emphasizes explicit control flow, typed data, and lightweight interop with the runtime through externals. The standard library is written in BeamLang (.bl) files and is loaded automatically.
 
-## Design Philosophy
-
-- **Type Safety First**: Strong static typing with exhaustive pattern matching
-- **Explicit Over Implicit**: Clear syntax that makes control flow obvious
-- **Functional with Familiarity**: Functional paradigms with C-like aesthetics
-- **BEAM Native**: First-class support for processes, message passing, and fault tolerance
-- **Ergonomic Error Handling**: Result and Optional types with concise syntax as language primitives
+Internally, all values are represented as struct literals (similar to how everything in JavaScript is an object). This applies to primitives, optionals/results, and user-defined types.
 
 ## Tooling
 
 - The CLI can run as a Language Server Protocol (LSP) server using `beamlang --lsp`.
 - The BeamLang VS Code extension launches the CLI LSP server for diagnostics, hover, go-to definition, and completion.
 
-## Syntax Overview
+## Files, Modules, Imports
 
-### Naming Convention
-- **Default**: `snake_case` for all identifiers (functions, variables, types)
-- Functions: `fn calculate_total()`
-- Variables: `let user_name`
-- Types: `type UserAccount`
+- Each `.bl` file is a module. The module name is the file name without `.bl`.
+- `export` exposes functions and types from a module.
+- `internal` marks functions that can only be called from within the same module file.
 
-### Function Definitions
+Import forms:
 
 ```beamlang
-fn function_name(param: Type) -> ReturnType {
-    // function body
-    return value;
+import math.add;
+import math.{Pair, add};
+import math.*;
+import math as m;
+```
+
+Namespace access:
+
+```beamlang
+math::add(1, 2);
+```
+
+## Types
+
+### Primitive Types
+
+- `number`
+- `String`
+- `char`
+- `bool`
+- `void`
+- `any`
+
+### Generic Types
+
+BeamLang supports generic type parameters for type definitions and for function definitions.
+
+Type definitions:
+
+```beamlang
+type Pair<T> {
+    left: T,
+    right: T
 }
 ```
 
-### Variables
+Function definitions:
 
 ```beamlang
-let immutable_var = 10;        // Immutable by default
-let mut mutable_var = 20;      // Explicitly mutable
+fn test<T>(opt: T?) -> T {
+    return opt->unwrap(0);
+}
 ```
 
-### Type System
+### Optional and Result
 
-#### Primitive Types
-- `number`: Numeric type
-- `String`: UTF-8 encoded strings
-- `char`: Single Unicode codepoint
-- `bool`: Boolean values (`true`, `false`)
-- `void`: Unit type for functions with no return
+- Optional syntax: `T?` (preferred) or `Optional<T>`
+- Result syntax: `Ok!Err` (preferred) or `Result<Ok, Err>`
 
-#### Standard Library Types
-- `Iterator<T>`: Iterator over values of type `T` (used by `for` loops)
-- `Optional<T>`: Optional value type (equivalent to `T?`)
-- `Result<Ok, Err>`: Result type (equivalent to `Ok!Err`)
+The shorthand forms are preferred in BeamLang code. They are normalized internally.
 
-#### Collection Types
-- `List<T>`: Linked lists
-- `Map<K, V>`: Key-value maps
-
-#### Native Result and Optional Types
-
-Type syntax:
-- Optional: `T?`
-- Result: `Success!Error`
-- Optional (generic): `Optional<T>`
-- Result (generic): `Result<Ok, Err>`
-
-These types are built into the language and don't require imports:
+Optional literals:
 
 ```beamlang
-// Optional and Result are built-in types.
-// Optional literals: `return?some value` / `return?none`.
-// Result literals: `return!ok value` / `return!err value`.
+?some 10
+?none
 ```
 
-#### Custom Types
+Result literals:
 
 ```beamlang
-// Struct-like types
+!ok 10
+!err "error"
+```
+
+### Struct Types
+
+Struct-like types use `type`:
+
+```beamlang
 type User {
-    id: String,
     name: String,
     age: number
 }
-
-// Generic types
-type Container<T> {
-    value: T,
-    metadata: Map<String, T>
-}
-
-fn get_value(container: Container<T>) -> T {
-    return container->value;
-}
 ```
 
-#### Operator Overloading
+Struct literals require a type annotation unless the expected type is clear from context:
 
-Types can define custom operators using the `operator` keyword:
+```beamlang
+let user: User = { name = "Ada", age = 30 };
+```
+
+### Operator Overloading
+
+Types can define custom behavior for operators using a two-part system:
+1. **Type Definition** declares the operator signature with `operator OP: fn(...)` syntax
+2. **Struct Literal** binds the implementation function with `operator OP = func_name` syntax
 
 ```beamlang
 type Path {
     path: String,
-    operator /: fn(Path, String) -> Path,
-    op_div: fn(Path, String) -> Path
+    operator /: fn(Path, String) -> Path  // Operator signature declaration
+}
+
+fn path_join(self: Path, segment: String) -> Path {
+    return { path = self->path + "/" + segment, operator / = path_join };
+}
+
+fn path_new(p: String) -> Path {
+    return { path = p, operator / = path_join };  // Bind operator implementation
 }
 ```
 
-The operator implementation is provided through a field with the naming convention `op_<name>` (e.g., `op_div` for `/`, `op_add` for `+`).
+The type definition declares the operator's type signature, while the struct literal binds it to an implementation. Supported operators:
 
-### Struct Literals (JavaScript-like Objects)
+| Operator | Internal Name | Description        |
+|----------|---------------|--------------------|
+| `+`      | `__op_add`    | Addition           |
+| `-`      | `__op_sub`    | Subtraction        |
+| `*`      | `__op_mul`    | Multiplication     |
+| `/`      | `__op_div`    | Division           |
+| `%`      | `__op_mod`    | Modulo             |
+| `==`     | `__op_eq`     | Equality           |
+| `!=`     | `__op_neq`    | Inequality         |
+| `<`      | `__op_lt`     | Less than          |
+| `>`      | `__op_gt`     | Greater than       |
+| `<=`     | `__op_lte`    | Less or equal      |
+| `>=`     | `__op_gte`    | Greater or equal   |
 
-BeamLang supports JavaScript-like object literals to construct struct-like types:
+**Alternative: Naming Convention**
+
+Instead of struct-level binding, you can use the naming convention `TypeName_op_opname`:
 
 ```beamlang
-let mut user: User = { name = "Peter", id = 2 };
-let config: Config = { timeout_ms = 5000, verbose = true };
+type Path {
+    path: String
+}
+
+fn Path_op_div(self: Path, segment: String) -> Path {
+    return { path = self->path + "/" + segment };
+}
+```
+
+Example usage:
+
+```beamlang
+type Path {
+    path: String,
+    operator /: fn(Path, String) -> Path
+}
+
+fn path_join(self: Path, segment: String) -> Path {
+    let sep = "/";
+    let with_sep = self->path->concat(sep);
+    let new_path = with_sep->concat(segment);
+    return path_new(new_path);
+}
+
+fn path_new(p: String) -> Path {
+    return { path = p, operator / = path_join };
+}
+
+fn main(args: [String]) -> number {
+    let base = path_new("/home");
+    let full = base / "user" / "documents";
+    println("${full->path}");  // /home/user/documents
+    return 0;
+}
+```
+
+### Internal Fields
+
+Fields can be marked as `internal` to prevent direct access from outside the type's methods. Internal fields can only be accessed within method functions of the same type:
+
+```beamlang
+type List<T> {
+    internal data: any,
+    get: fn(List<T>, number) -> T
+}
+```
+
+When a field is marked `internal`:
+- Direct field access (`list.data`) from outside the type will result in a compile error
+- Methods defined on the type can access internal fields via `self` or any other variable of the same type
+- This allows methods like `concat(self, other)` to access `other->data` within the method
+- This enables encapsulation of implementation details in stdlib types
+
+### Error Types
+
+Error types are special struct types designed to represent error conditions. They are defined using the `error` keyword and are typically used as the error type in `Result<Ok, Err>`:
+
+```beamlang
+error FileError {
+    path: String,
+    message: String
+}
+
+error ParseError {
+    line: number,
+    column: number,
+    message: String
+}
+```
+
+Error types can be exported:
+
+```beamlang
+export error IoError {
+    kind: String,
+    message: String
+}
+```
+
+Error types are internally converted to regular type definitions with no generic parameters. They can be instantiated using struct literal syntax with type annotation or in a Result error context:
+
+```beamlang
+// Using error in a Result (prefer Ok!Err syntax)
+fn parse_number(s: String) -> number!ParseError {
+    if (/* invalid */) {
+        return !err ParseError { line = 1, column = 0, message = "Invalid" };
+    }
+    return !ok 42;
+}
+
+// Pattern matching on error types
+let result = parse_number("abc");
+match (result) {
+    case!ok n => println(n),
+    case!err err => println(err.message)
+}
+```
+
+## Functions
+
+```beamlang
+fn add(a: number, b: number) -> number {
+    return a + b;
+}
+```
+
+- `return` is required for returning values.
+- Functions can be exported or internal:
+
+```beamlang
+export fn add(a: number, b: number) -> number { return a + b; }
+internal fn helper() -> void { return; }
+```
+
+### Mutable Parameters
+
+By default, function parameters are immutable. Use the `mut` keyword to allow reassignment:
+
+```beamlang
+fn increment(mut value: number) -> number {
+    value = value + 1;
+    return value;
+}
+
+fn process(x: number, mut y: number) -> number {
+    // x cannot be reassigned
+    // y can be reassigned
+    y = y + x;
+    return y;
+}
+```
+
+Note: Erlang/BEAM is immutable by design. Mutable parameters are implemented via variable shadowing - each reassignment creates a new binding that shadows the previous one. The original value passed by the caller is never modified.
+
+### Generics in Functions
+
+Generic parameters are declared after the function name:
+
+```beamlang
+fn identity<T>(value: T) -> T {
+    return value;
+}
+```
+
+Type parameters are inferred from arguments when possible.
+
+### Lambdas
+
+```beamlang
+let add_one = fn(x: number) -> number {
+    return x + 1;
+};
+```
+
+## Methods (Struct Field Functions)
+
+Methods are function-valued fields in structs. Method call syntax uses `->`:
+
+```beamlang
+type Box {
+    value: number,
+    get: fn(Box) -> number
+}
+
+fn box_get(self: Box) -> number {
+    return self->value;
+}
+
+fn main(args: [String]) -> number {
+    let b: Box = { value = 7, get = box_get };
+    return b->get();
+}
 ```
 
 Rules:
-- The type annotation is required for struct literals.
-- Field names use `snake_case`.
-- Fields are assigned with `=`.
-- Unknown or missing fields are compile-time errors.
 
-#### Type Inference (Contextual)
+- A method function must have its first parameter named `self`.
+- The name `self` is reserved and cannot be used for other bindings (variables, patterns, loop variables, assignments).
 
-Struct literals may omit the explicit type annotation **only when the expected type is unambiguous from context** (e.g., assignment target or function return type). Otherwise, a type annotation is required.
+## Comments
 
-Examples:
+BeamLang supports two styles of comments:
+
+### Single-line Comments
 
 ```beamlang
-fn make_user() -> User {
-    return { name = "Peter", id = 2 };
-}
-
-let user: User = { name = "Peter", id = 2 };
+// This is a single-line comment
+let x = 42; // Inline comment
 ```
 
-### Pattern Matching
+### Block Comments
 
-Pattern matching uses `match` with `case` keyword:
+```beamlang
+/**
+ * This is a block comment.
+ * It can span multiple lines.
+ **/
+fn main(args: [String]) -> number {
+    return 0;
+}
+```
+
+Note: Block comments use `/**` to open and `**/` to close.
+
+## Control Flow
+
+### If Statements
+
+```beamlang
+if (cond) {
+    ...
+} else if (other) {
+    ...
+} else {
+    ...
+}
+```
+
+### Guard Statements
+
+```beamlang
+guard (cond) else {
+    return 1;
+}
+```
+
+The `else` block must end with `return`.
+
+### Loops
+
+```beamlang
+while (cond) { ... }
+loop { ... break; }
+```
+
+### For Loops
+
+`for` loops iterate over `Iterator<T>` values only.
+
+```beamlang
+for (ch in "hi"->chars()) {
+    println(ch);
+}
+```
+
+## Pattern Matching
 
 ```beamlang
 match (value) {
-    case?some x => {
-        // handle some
-        return x;
-    },
-    case?none => {
-        // handle none
-        return default;
-    }
-}
-
-// Multiple values
-match (result, status) {
-    case _ => default_action()
-}
-
-// Struct pattern matching
-match (user) {
-    case User { id = 1, name = "Peter" } => greet(),
-    case User { id, name } => {
-        println(string.format("User {}: {}", id, name));
-    },
-    case _ => log_error()
-}
-
-// Match guards with comparison operators
-match (user) {
-    case User { age, name } if age > 18 => greet(),
-    case User { age } if age <= 18 => warn(),
-    case _ => log_error()
+    case?some x => x,
+    case?none => 0
 }
 ```
 
-Guards support comparison operators: `==`, `!=`, `<`, `>`, `<=`, `>=`.
+Struct patterns:
+
+```beamlang
+match (user) {
+    case User { age, name } => age,
+    case _ => 0
+}
+```
+
+Match guards use `if` with a comparison expression:
+
+```beamlang
+match (user) {
+    case User { age } if age > 18 => 1,
+    case _ => 0
+}
+```
 
 Match expressions must be exhaustive. Use `case _` or cover all variants (e.g. `case?some` + `case?none`, `case!ok` + `case!err`, `case true` + `case false`).
 
-### Control Flow
+## Expressions
+
+- Binary operators: `+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `>`, `<=`, `>=`
+- `if` expressions:
 
 ```beamlang
-// If statements
-if (condition) {
-    // code
-} else if (other_condition) {
-    // code
-} else {
-    // code
-}
+let value = if (cond) { 1; } else { 2; };
+```
 
-// Guard statements (Swift-style early exit)
-guard (name_len > 0) else {
-    return 1;
-}
+## Standard Library (.bl)
 
-Guard `else` blocks must end with `return`.
+The stdlib is split into multiple `.bl` files under `stdlib/`.
 
-// For loops
-for (item in collection) {
-    // process item
-}
-
-// Iteration (MVP)
-// For now, `for` supports iterating over Iterator<T> and String values.
-// Each `item` is a char when iterating over String.
-
-### Modules, Exports, and Imports
-
-Each `.bl` file is its own module. Module names are the file names without the `.bl` extension.
-
-Use `export` to expose functions or types, and `import` to bring them into scope:
+### Iterator
 
 ```beamlang
-// math.bl
-export type Pair {
-    left: number,
-    right: number
-}
-
-export fn add(left: number, right: number) -> number {
-    return left + right;
+type Iterator<T> {
+    internal data: any,
+    next: fn(Iterator<T>) -> T?,
+    map: fn(Iterator<T>, fn(T) -> any) -> Iterator<any>,
+    filter: fn(Iterator<T>, fn(T) -> bool) -> Iterator<T>,
+    fold: fn(Iterator<T>, any, fn(any, T) -> any) -> any
 }
 ```
 
-```beamlang
-// use_math.bl
-import math.{Pair, add};
-
-fn main(args: [String]) -> number {
-    let pair: Pair = { left = 2, right = 3 };
-    return add(pair->left, pair->right);
-}
-```
-
-Namespace access is supported with `module::name`:
+### String
 
 ```beamlang
-fn main(args: [String]) -> number {
-    return math::add(1, 2);
+type String {
+    data: any,
+    length: fn(String) -> number,
+    chars: fn(String) -> Iterator<char>,
+    concat: fn(String, String) -> String
 }
 ```
 
-You can import everything from a module with `*`:
+### Optional
 
 ```beamlang
-import math.*;
+type Optional<T> {
+    internal kind: number,
+    internal tag: number,
+    internal value: any,
+    unwrap: fn(T?, T) -> T,
+    map: fn(T?, fn(T) -> any) -> any?,
+    and_then: fn(T?, fn(T) -> any?) -> any?,
+    is_present: fn(T?) -> bool
+}
 ```
 
-You can also create aliases for modules:
+### List
 
 ```beamlang
-import math as m;
-
-fn main(args: [String]) -> number {
-    return m::add(1, 2);
+type List<T> {
+    internal data: any,
+    length: fn(List<T>) -> number,
+    get: fn(List<T>, number) -> T?,
+    push: fn(List<T>, T) -> List<T>,
+    pop: fn(List<T>) -> List<T>,
+    first: fn(List<T>) -> T?,
+    last: fn(List<T>) -> T?,
+    iter: fn(List<T>) -> Iterator<T>,
+    map: fn(List<T>, fn(T) -> any) -> List<any>,
+    filter: fn(List<T>, fn(T) -> bool) -> List<T>,
+    fold: fn(List<T>, any, fn(any, T) -> any) -> any,
+    for_each: fn(List<T>, fn(T) -> void) -> void,
+    reverse: fn(List<T>) -> List<T>,
+    concat: fn(List<T>, List<T>) -> List<T>
 }
 ```
 
-// While loops
-while (condition) {
-    // code
-}
+### Args
 
-// Infinite loops
-loop {
-    // code
-    if (should_break) {
-        break;
-    }
-}
+`parse_args<T>(args: [String]) -> T!ArgsError` parses command-line arguments into a struct literal of `T`.
+For now, `T` must be a struct type with `String`, `number`, `bool`, or `char` fields, and the argument count must match exactly.
 
-// If expressions
-let value = if (condition) { 1; } else { 2; };
-```
+Type alias: `[T]` is equivalent to `List<T>`.
 
-### Error Handling
-
-Error handling is explicit using `Success!Error` types:
+List literal syntax:
 
 ```beamlang
-fn divide(a: number, b: number) -> number!String {
-    if (b == 0) {
-        return!err "Division by zero";
-    }
-    return!ok (a / b);
-}
-
-// Using the result
-match (divide(10, 2)) {
-    case!ok result => println(result),
-    case!err msg => println(string.format("Error: {}", msg))
-}
+let nums: [number] = [1, 2, 3, 4, 5];
+let empty: [String] = [];
+let nested: [[number]] = [[1, 2], [3, 4]];
 ```
 
-### Standard Errors
-
-The standard library defines a base error type that can be used in common APIs:
+Example:
 
 ```beamlang
-type StdError {
-    Message(String)
-}
+let nums: [number] = [1, 2, 3, 4, 5];
+let sum = nums->fold(0, add_nums);
+println("Sum: ${sum}");
+
+match (nums->first()) {
+    case ?some val => println("First: ${val}"),
+    case ?none => println("Empty")
+};
 ```
 
-### Concurrency and Processes
-
-BeamLang has first-class support for BEAM processes:
+### Result
 
 ```beamlang
-// Spawn a process
-fn worker() -> void {
-    println("Running in separate process");
-    return;
+type Result<Ok, Err> {
+    internal kind: number,
+    internal tag: number,
+    internal value: any,
+    unwrap: fn(Ok!Err, Ok) -> Ok,
+    map: fn(Ok!Err, fn(Ok) -> any) -> any!Err,
+    and_then: fn(Ok!Err, fn(Ok) -> any!Err) -> any!Err
 }
-let pid = process.spawn(worker);
-
-// Send messages
-process.send(pid, "Hello");
-
-// Receive messages
-match (process.receive()) {
-    case?some message => handle(message),
-    case?none => {}
-}
-
-// Receive with timeout (milliseconds)
-match (process.receive_timeout(5000)) {
-    case?some message => handle(message),
-    case?none => println("Timeout")
-}
-
-// Get current process ID
-let self_pid = process.self();
 ```
 
-### Standard Library
-
-The MVP standard library exposes global functions:
+### IO
 
 ```beamlang
-println(message: String) -> void
-print(message: String) -> void
-parse_args<T>(args: [String]) -> T!ArgsError
+println<T>(value: T) -> void
+print<T>(value: T) -> void
 ```
 
-`parse_args` expects a struct type with `String`, `number`, `bool`, or `char` fields and returns `!err` if the argument count or conversions do not match.
+### System
 
-Generic functions can be called with explicit type arguments, for example:
+The system module provides file and environment operations with proper error types:
+
+```beamlang
+// Error type for IO operations
+export error IoError {
+    kind: String,
+    message: String
+}
+
+fn read_file(path: String) -> String!IoError
+fn file_exists(path: String) -> bool
+fn get_env(name: String) -> String?
+```
+
+Example:
+
+```beamlang
+let result = read_file("config.txt");
+match (result) {
+    case!ok content => println(content),
+    case!err err => println("Error: ${err->message}")
+};
+```
+
+### Type Inspection
+
+```beamlang
+typeof<T>(value: T) -> String
+to_string<T>(value: T) -> String
+```
+
+## Standard Library Generic Functions
+
+The stdlib is fully generic - all internal methods preserve type information:
+
+```beamlang
+// Create typed lists
+fn list_new<T>() -> List<T>
+fn list_of<T>(items: [T]) -> List<T>
+
+// List methods are generic
+fn list_get_method<T>(self: List<T>, index: number) -> T?
+fn list_push_method<T>(self: List<T>, item: T) -> List<T>
+fn list_map_method<T, U>(self: List<T>, mapper: fn(T) -> U) -> List<U>
+fn list_filter_method<T>(self: List<T>, predicate: fn(T) -> bool) -> List<T>
+fn list_fold_method<T, U>(self: List<T>, initial: U, folder: fn(U, T) -> U) -> U
+fn list_for_each_method<T>(self: List<T>, callback: fn(T) -> void) -> void
+
+// Iterator methods are generic
+fn iterator_from_list<T>(data: any) -> Iterator<T>
+fn iterator_next<T>(self: Iterator<T>) -> T?
+fn iterator_map<T, U>(self: Iterator<T>, mapper: fn(T) -> U) -> Iterator<U>
+fn iterator_filter<T>(self: Iterator<T>, predicate: fn(T) -> bool) -> Iterator<T>
+fn iterator_fold<T, U>(self: Iterator<T>, initial: U, folder: fn(U, T) -> U) -> U
+
+// Optional methods are generic
+fn optional_some<T>(value: T) -> T?
+fn optional_none<T>() -> T?
+fn optional_unwrap<T>(self: T?, fallback: T) -> T
+fn optional_map<T, U>(self: T?, mapper: fn(T) -> U) -> U?
+
+// Result methods are generic
+fn result_ok<T, E>(value: T) -> T!E
+fn result_err<T, E>(value: E) -> T!E
+fn result_unwrap<T, E>(self: T!E, fallback: T) -> T
+fn result_map<T, E, U>(self: T!E, mapper: fn(T) -> U) -> U!E
+
+// IO functions are generic
+fn println<T>(value: T) -> void
+fn print<T>(value: T) -> void
+
+// Convert any value to string
+fn to_string<T>(value: T) -> String
+fn typeof<T>(value: T) -> String
+```
+
+### Vec2 (2D Vector with Operators)
+
+```beamlang
+type Vec2 {
+    x: number,
+    y: number,
+    length: fn(Vec2) -> number,
+    normalize: fn(Vec2) -> Vec2,
+    dot: fn(Vec2, Vec2) -> number,
+    operator +: fn(Vec2, Vec2) -> Vec2,
+    operator -: fn(Vec2, Vec2) -> Vec2,
+    operator *: fn(Vec2, number) -> Vec2,
+    operator /: fn(Vec2, number) -> Vec2,
+    operator ==: fn(Vec2, Vec2) -> bool,
+    operator !=: fn(Vec2, Vec2) -> bool
+}
+
+fn vec2(x: number, y: number) -> Vec2
+fn vec2_zero() -> Vec2
+fn vec2_one() -> Vec2
+fn vec2_distance(a: Vec2, b: Vec2) -> number
+fn vec2_lerp(a: Vec2, b: Vec2, t: number) -> Vec2
+```
+
+### Range (Iteration Support)
+
+The `..` operator creates a Range value. Ranges can be iterated directly in for loops or used with methods like `contains()` and `length()`.
+
+```beamlang
+// Range literal syntax
+for (i in 0..10) {
+    println(to_string(i));  // 0, 1, 2, ..., 9
+}
+
+// Assign to variable
+let r = 1..5;
+println(to_string(r->contains(3)));  // true
+println(to_string(r->length()));     // 4.0
+
+// Using range() function (equivalent to 0..5)
+let r2 = range(0, 5);
+
+// Range with custom step
+let r3 = range_step(0, 10, 2);  // 0, 2, 4, 6, 8
+```
+
+```beamlang
+type Range {
+    internal start: number,
+    internal end: number,
+    internal step: number,
+    iter: fn(Range) -> Iterator<number>,
+    contains: fn(Range, number) -> bool,
+    length: fn(Range) -> number
+}
+
+fn range(start: number, end: number) -> Range
+fn range_step(start: number, end: number, step: number) -> Range
+```
+
+### Map (Key-Value Dictionary)
+
+```beamlang
+type Map<K, V> {
+    internal data: any,
+    get: fn(Map<K, V>, K) -> V?,
+    put: fn(Map<K, V>, K, V) -> Map<K, V>,
+    remove: fn(Map<K, V>, K) -> Map<K, V>,
+    contains: fn(Map<K, V>, K) -> bool,
+    size: fn(Map<K, V>) -> number,
+    keys: fn(Map<K, V>) -> List<K>,
+    values: fn(Map<K, V>) -> List<V>
+}
+
+fn map_new<K, V>() -> Map<K, V>
+```
+
+### Set (Unique Elements)
+
+```beamlang
+type Set<T> {
+    internal data: any,
+    add: fn(Set<T>, T) -> Set<T>,
+    remove: fn(Set<T>, T) -> Set<T>,
+    contains: fn(Set<T>, T) -> bool,
+    size: fn(Set<T>) -> number,
+    to_list: fn(Set<T>) -> List<T>,
+    union: fn(Set<T>, Set<T>) -> Set<T>,
+    intersection: fn(Set<T>, Set<T>) -> Set<T>,
+    difference: fn(Set<T>, Set<T>) -> Set<T>
+}
+
+fn set_new<T>() -> Set<T>
+```
+
+### Math Functions
+
+```beamlang
+fn sqrt(n: number) -> number
+fn abs(n: number) -> number
+fn floor(n: number) -> number
+fn ceil(n: number) -> number
+fn round(n: number) -> number
+fn sin(n: number) -> number
+fn cos(n: number) -> number
+fn tan(n: number) -> number
+fn asin(n: number) -> number
+fn acos(n: number) -> number
+fn atan(n: number) -> number
+fn atan2(y: number, x: number) -> number
+fn pow(base: number, exp: number) -> number
+fn log(n: number) -> number
+fn log10(n: number) -> number
+fn exp(n: number) -> number
+fn pi() -> number
+fn e() -> number
+fn min(a: number, b: number) -> number
+fn max(a: number, b: number) -> number
+fn clamp(value: number, min_val: number, max_val: number) -> number
+fn lerp(a: number, b: number, t: number) -> number
+fn deg_to_rad(deg: number) -> number
+fn rad_to_deg(rad: number) -> number
+fn sign(n: number) -> number
+```
+
+Generic functions can be called with explicit type arguments:
 
 ```beamlang
 let parsed = parse_args<Args>(args);
 ```
 
+## External Functions
 
-Common operations use standard library functions:
-
-```beamlang
-// String operations
-import beam.string;
-string.length("hello");
-string.concat("hello", "world");
-string.format("Value: {}", x);
-
-// List operations
-import beam.list;
-list.append(my_list, item);
-fn map_double(x: number) -> number { return x * 2; }
-fn is_positive(x: number) -> bool { return x > 0; }
-list.map(my_list, map_double);
-list.filter(my_list, is_positive);
-
-// Map operations
-import beam.map;
-let m = map.new();
-map.put(m, key, value);
-map.get(m, key);  // Returns V?
-
-// I/O operations
-println("Hello");
-print("No newline");
-
-// Runtime type inspection
-println(typeof("hi"));
-
-// Process operations
-import beam.process;
-fn start_worker() -> void { return; }
-process.spawn(start_worker);
-process.send(pid, message);
-process.receive();
-```
-
-## Key Language Features
-
-### 1. Immutability by Default
-Variables are immutable unless explicitly marked with `mut`.
-
-### 2. Exhaustive Pattern Matching
-The compiler ensures all cases are handled in match expressions.
-
-### 3. No Null Values
-Use `T?` instead of null to prevent null pointer errors.
-
-### 4. Explicit Error Handling
-Functions that can fail return `Success!Error`, making error paths visible.
-
-### 5. Process-Oriented Concurrency
-Built on BEAM's actor model with lightweight processes and message passing.
-
-### 6. Type Inference
-While types are static, the compiler infers types where possible:
+BeamLang uses external function declarations for runtime interop:
 
 ```beamlang
-let x = 10;  // Type inferred as number
-let list = [1, 2, 3];  // Type inferred as List<number>
+@external(elixir, "BeamLang.Runtime", "println")
+fn println(value: any) -> void;
 ```
 
-### 7. Expression-Oriented
-Most constructs are expressions that return values:
+## Notes
 
-```beamlang
-let result = if (x > 0) { "positive" } else { "non-positive" };
-```
-
-## Example Program Structure
-
-```beamlang
-// Imports
-import beam.process;
-import beam.list;
-
-// External declarations
-@external(erlang, "crypto", "hash")
-fn crypto_hash(algorithm: String, data: String) -> String;
-
-// Standard library declarations live in stdlib/beam.bl
-
-// Type definitions
-type User {
-    id: String,
-    name: String
-}
-
-type UserError {
-    NotFound,
-    InvalidData(String)
-}
-
-// Functions
-fn find_user(id: String) -> User!UserError {
-    // Implementation
-    return user;
-}
-
-fn helper() -> number {
-    return 1;
-}
-
-// Main entry point
-fn main(args: [String]) -> number {
-    println("Hello, BeamLang!");
-    return 0;
-}
-```
-
-## Compilation Target
-
-BeamLang compiles to BEAM bytecode, allowing:
-- Hot code reloading
-- Distribution across nodes
-- Fault tolerance through supervision trees
-- Integration with existing Erlang/Elixir ecosystems
-
-## Future Considerations
-
-- Macro system for metaprogramming
-- Async/await syntax sugar over process communication
-- Advanced type features (traits, type classes)
-- Property-based testing integration
-- Distributed computing primitives
-- Pattern guards in match expressions
-
-## Comparison to Similar Languages
-
-| Feature | BeamLang | Gleam | Elixir | Rust |
-|---------|----------|-------|--------|------|
-| Syntax Style | C-like | ML-like | Ruby-like | C-like |
-| Type System | Static | Static | Dynamic | Static |
-| Error Handling | Success!Error / T? | Result/Option | try/catch | Result/Option |
-| Pattern Matching | `match/case` | `case` | `case` | `match` |
-| Mutability | Immutable default | Immutable | Immutable | Explicit mut |
-| Target VM | BEAM | BEAM | BEAM | Native/LLVM |
-
-## Conclusion
-
-BeamLang bridges the gap between systems programming aesthetics and functional VM benefits, providing a familiar syntax for developers coming from languages like Rust, C, or Go, while leveraging the BEAM VM's battle-tested concurrency and fault tolerance capabilities.
+- The language does not have classes. Methods are just function fields in structs.
+- The stdlib is implemented in BeamLang and loaded as source, not hard-coded.
+- Internal stdlib functions are marked with `internal` and are not callable outside their module.

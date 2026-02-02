@@ -149,6 +149,7 @@ defmodule BeamLang do
        module: nil,
        imports: [],
        types: [],
+       enums: [],
        errors: [],
        functions: [],
        span: BeamLang.Span.new("<stdlib>", 0, 0)
@@ -156,20 +157,22 @@ defmodule BeamLang do
   end
 
   defp merge_programs_simple(
-         {:program, %{types: acc_types, errors: acc_errors, functions: acc_funcs} = acc},
-         {:program, %{types: types, errors: errors, functions: funcs}}
+         {:program, %{types: acc_types, enums: acc_enums, errors: acc_errors, functions: acc_funcs} = acc},
+         {:program, %{types: types, enums: enums, errors: errors, functions: funcs}}
        ) do
-    {:program, %{acc | types: acc_types ++ types, errors: acc_errors ++ errors, functions: acc_funcs ++ funcs}}
+    {:program, %{acc | types: acc_types ++ types, enums: acc_enums ++ enums, errors: acc_errors ++ errors, functions: acc_funcs ++ funcs}}
   end
 
-  # Handle programs without errors field for backwards compatibility
+  # Handle programs without errors/enums field for backwards compatibility
   defp merge_programs_simple(
          {:program, %{types: acc_types, functions: acc_funcs} = acc},
          {:program, %{types: types, functions: funcs} = prog2}
        ) when not is_map_key(acc, :errors) or not is_map_key(prog2, :errors) do
     acc_errors = Map.get(acc, :errors, [])
+    acc_enums = Map.get(acc, :enums, [])
     errors = Map.get(prog2, :errors, [])
-    {:program, %{acc | types: acc_types ++ types, errors: acc_errors ++ errors, functions: acc_funcs ++ funcs}}
+    enums = Map.get(prog2, :enums, [])
+    {:program, %{acc | types: acc_types ++ types, enums: acc_enums ++ enums, errors: acc_errors ++ errors, functions: acc_funcs ++ funcs}}
   end
 
   defp merge_programs(
@@ -178,13 +181,16 @@ defmodule BeamLang do
           %{module: module, imports: imports, types: types, functions: functions, span: span} = user_prog}
        ) do
     std_errors = Map.get(std_prog, :errors, [])
+    std_enums = Map.get(std_prog, :enums, [])
     user_errors = Map.get(user_prog, :errors, [])
+    user_enums = Map.get(user_prog, :enums, [])
     {:ok,
      {:program,
       %{
         module: module,
         imports: imports,
         types: std_types ++ types,
+        enums: std_enums ++ user_enums,
         errors: std_errors ++ user_errors,
         functions: std_funcs ++ functions,
         span: span
@@ -1009,7 +1015,13 @@ defmodule BeamLang do
        ) do
     params =
       Enum.map(params, fn param ->
-        %{name: param.name, type: qualify_type(param.type, type_map, local_types, alias_map), mutable: Map.get(param, :mutable, false), span: param.span}
+        case param do
+          %{name: name, type: type} ->
+            %{name: name, type: qualify_type(type, type_map, local_types, alias_map), mutable: Map.get(param, :mutable, false), span: param.span}
+
+          %{pattern: pattern, type: type} ->
+            %{pattern: pattern, type: qualify_type(type, type_map, local_types, alias_map), span: param.span}
+        end
       end)
 
     return_type = qualify_type(return_type, type_map, local_types, alias_map)

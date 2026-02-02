@@ -722,4 +722,184 @@ defmodule BeamLang.ParserTest do
     assert op.op == :add
     assert op.func == "vec2_add"
   end
+
+  test "parses simple enum definition" do
+    source = """
+    enum Color {
+        Red,
+        Green,
+        Blue
+    }
+
+    fn main(args: [String]) -> number {
+        return 0;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{enums: [enum_def]}} = ast
+    assert {:enum_def, %{name: "Color", variants: variants}} = enum_def
+    assert length(variants) == 3
+    [red, green, blue] = variants
+    assert {:enum_variant, %{name: "Red", fields: []}} = red
+    assert {:enum_variant, %{name: "Green", fields: []}} = green
+    assert {:enum_variant, %{name: "Blue", fields: []}} = blue
+  end
+
+  test "parses enum with fields" do
+    source = """
+    enum Shape {
+        Circle { radius: number },
+        Rectangle { width: number, height: number },
+        Point
+    }
+
+    fn main(args: [String]) -> number {
+        return 0;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{enums: [enum_def]}} = ast
+    assert {:enum_def, %{name: "Shape", variants: variants}} = enum_def
+    assert length(variants) == 3
+    [circle, rectangle, point] = variants
+    assert {:enum_variant, %{name: "Circle", fields: [%{name: "radius", type: :number}]}} = circle
+    assert {:enum_variant, %{name: "Rectangle", fields: [%{name: "width"}, %{name: "height"}]}} = rectangle
+    assert {:enum_variant, %{name: "Point", fields: []}} = point
+  end
+
+  test "parses enum variant expressions" do
+    source = """
+    enum Color { Red, Green }
+
+    fn main(args: [String]) -> number {
+        let c = Color::Red;
+        return 0;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{functions: [{:function, func}]}} = ast
+    assert {:block, %{stmts: [{:let, %{expr: expr}}, _]}} = func.body
+    assert {:enum_variant, %{enum_name: "Color", variant: "Red", fields: []}} = expr
+  end
+
+  test "parses enum variant with fields expression" do
+    source = """
+    enum Shape { Circle { radius: number } }
+
+    fn main(args: [String]) -> number {
+        let s = Shape::Circle { radius = 5.0 };
+        return 0;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{functions: [{:function, func}]}} = ast
+    assert {:block, %{stmts: [{:let, %{expr: expr}}, _]}} = func.body
+    assert {:enum_variant, %{enum_name: "Shape", variant: "Circle", fields: fields}} = expr
+    assert [{"radius", {:float, %{value: 5.0}}}] = fields
+  end
+
+  test "parses enum pattern in match" do
+    source = """
+    enum Color { Red, Green }
+
+    fn main(args: [String]) -> number {
+        let c = Color::Red;
+        return match (c) {
+            case Color::Red => 1,
+            case Color::Green => 2,
+            case _ => 0
+        };
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{functions: [{:function, func}]}} = ast
+    assert {:block, %{stmts: [_, {:return, %{expr: {:match, match_expr}}}]}} = func.body
+    assert [case1, case2, _wildcard] = match_expr.cases
+    assert %{pattern: {:enum_pattern, %{enum_name: "Color", variant: "Red"}}} = case1
+    assert %{pattern: {:enum_pattern, %{enum_name: "Color", variant: "Green"}}} = case2
+  end
+
+  # Pattern matching in function parameters tests
+
+  test "parses struct pattern in function parameter" do
+    source = """
+    type Point { x: number, y: number }
+
+    fn get_x(Point { x, y }: Point) -> number {
+        return x;
+    }
+
+    fn main(args: [String]) -> number {
+        return 0;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{functions: functions}} = ast
+    get_x = Enum.find(functions, fn {:function, %{name: n}} -> n == "get_x" end)
+    assert {:function, %{params: [param]}} = get_x
+    assert %{pattern: {:struct_pattern, %{name: "Point", fields: fields}}, type: {:named, "Point"}} = param
+    assert [%{name: "x"}, %{name: "y"}] = fields
+  end
+
+  test "parses tuple pattern in function parameter" do
+    source = """
+    fn first((a, b): (number, String)) -> number {
+        return a;
+    }
+
+    fn main(args: [String]) -> number {
+        return 0;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{functions: functions}} = ast
+    first = Enum.find(functions, fn {:function, %{name: n}} -> n == "first" end)
+    assert {:function, %{params: [param]}} = first
+    assert %{pattern: {:tuple_pattern, %{elements: elements}}, type: {:tuple, [:number, :String]}} = param
+    assert [pat_identifier: %{name: "a"}, pat_identifier: %{name: "b"}] = elements
+  end
+
+  test "parses mixed regular and pattern parameters" do
+    source = """
+    type Point { x: number, y: number }
+
+    fn add_offset(Point { x, y }: Point, offset: number) -> number {
+        return x + offset;
+    }
+
+    fn main(args: [String]) -> number {
+        return 0;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{functions: functions}} = ast
+    add_offset = Enum.find(functions, fn {:function, %{name: n}} -> n == "add_offset" end)
+    assert {:function, %{params: [pattern_param, regular_param]}} = add_offset
+    assert %{pattern: {:struct_pattern, _}} = pattern_param
+    assert %{name: "offset", type: :number} = regular_param
+  end
 end
