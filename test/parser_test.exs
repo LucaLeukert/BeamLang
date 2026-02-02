@@ -902,4 +902,80 @@ defmodule BeamLang.ParserTest do
     assert %{pattern: {:struct_pattern, _}} = pattern_param
     assert %{name: "offset", type: :number} = regular_param
   end
+
+  test "parses type with field annotations" do
+    source = """
+    type Args {
+        @required()
+        @description("Input file")
+        file: String,
+
+        @short("n")
+        @long("count")
+        @default(10)
+        count: number,
+
+        @flag
+        @short("v")
+        verbose: bool
+    }
+
+    fn main(args: [String]) -> number {
+        return 0;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{types: [type_def]}} = ast
+    assert {:type_def, %{name: "Args", fields: fields}} = type_def
+
+    # Check file field annotations
+    file_field = Enum.find(fields, fn f -> f.name == "file" end)
+    assert file_field != nil
+    assert length(file_field.annotations) == 2
+    assert Enum.any?(file_field.annotations, fn a -> a.name == "required" end)
+    assert Enum.any?(file_field.annotations, fn a -> a.name == "description" and a.args == ["Input file"] end)
+
+    # Check count field annotations
+    count_field = Enum.find(fields, fn f -> f.name == "count" end)
+    assert count_field != nil
+    assert length(count_field.annotations) == 3
+    assert Enum.any?(count_field.annotations, fn a -> a.name == "short" and a.args == ["n"] end)
+    assert Enum.any?(count_field.annotations, fn a -> a.name == "long" and a.args == ["count"] end)
+    assert Enum.any?(count_field.annotations, fn a -> a.name == "default" and a.args == [10] end)
+
+    # Check verbose field annotations
+    verbose_field = Enum.find(fields, fn f -> f.name == "verbose" end)
+    assert verbose_field != nil
+    assert length(verbose_field.annotations) == 2
+    assert Enum.any?(verbose_field.annotations, fn a -> a.name == "flag" end)
+    assert Enum.any?(verbose_field.annotations, fn a -> a.name == "short" and a.args == ["v"] end)
+  end
+
+  test "parses type without field annotations (backwards compatible)" do
+    source = """
+    type Simple {
+        name: String,
+        value: number
+    }
+
+    fn main(args: [String]) -> number {
+        return 0;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{types: [type_def]}} = ast
+    assert {:type_def, %{name: "Simple", fields: fields}} = type_def
+
+    name_field = Enum.find(fields, fn f -> f.name == "name" end)
+    assert name_field.annotations == []
+
+    value_field = Enum.find(fields, fn f -> f.name == "value" end)
+    assert value_field.annotations == []
+  end
 end

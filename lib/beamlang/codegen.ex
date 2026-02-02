@@ -364,6 +364,42 @@ defmodule BeamLang.Codegen do
           %{
             name: "parse_args",
             args: [args_expr],
+            type_info: %{fields: fields, field_types: field_types, field_annotations: field_annotations, type: type}
+          }},
+         env
+       ) do
+    # Build the fields list as Erlang list of binaries
+    fields_list = build_list_form(line, Enum.map(fields, fn f -> {:string, line, String.to_charlist(f)} end))
+
+    # Build the field_types list as Erlang atoms/tuples
+    types_list = build_list_form(line, Enum.map(field_types, fn t -> type_to_erlang_term(line, t) end))
+
+    # Build the annotations list - each field's annotations as list of {name, args} tuples
+    annotations_list = build_list_form(line, Enum.map(field_annotations, fn anns ->
+      ann_forms = Enum.map(anns, fn %{name: name, args: args} ->
+        args_form = build_list_form(line, Enum.map(args, &annotation_arg_form(line, &1)))
+        {:tuple, line, [{:string, line, String.to_charlist(name)}, args_form]}
+      end)
+      build_list_form(line, ann_forms)
+    end))
+
+    # Get the type label
+    type_label = {:string, line, String.to_charlist(type_label(type))}
+
+    # Call BeamLang.Runtime.parse_args(fields, field_types, annotations, type_label, args)
+    {:call, line,
+     {:remote, line, {:atom, line, :"Elixir.BeamLang.Runtime"}, {:atom, line, :parse_args}},
+     [fields_list, types_list, annotations_list, type_label, expr_form(line, args_expr, env)]}
+  end
+
+  # Fallback for parse_args without annotations (backwards compatibility)
+  @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
+  defp expr_form(
+         line,
+         {:call,
+          %{
+            name: "parse_args",
+            args: [args_expr],
             type_info: %{fields: fields, field_types: field_types, type: type}
           }},
          env
@@ -374,14 +410,25 @@ defmodule BeamLang.Codegen do
     # Build the field_types list as Erlang atoms/tuples
     types_list = build_list_form(line, Enum.map(field_types, fn t -> type_to_erlang_term(line, t) end))
 
+    # Empty annotations list for backwards compatibility
+    annotations_list = build_list_form(line, Enum.map(fields, fn _ -> {:nil, line} end))
+
     # Get the type label
     type_label = {:string, line, String.to_charlist(type_label(type))}
 
-    # Call BeamLang.Runtime.parse_args(fields, field_types, type_label, args)
+    # Call BeamLang.Runtime.parse_args(fields, field_types, annotations, type_label, args)
     {:call, line,
      {:remote, line, {:atom, line, :"Elixir.BeamLang.Runtime"}, {:atom, line, :parse_args}},
-     [fields_list, types_list, type_label, expr_form(line, args_expr, env)]}
+     [fields_list, types_list, annotations_list, type_label, expr_form(line, args_expr, env)]}
   end
+
+  # Convert annotation argument to Erlang form
+  defp annotation_arg_form(line, arg) when is_binary(arg), do: {:string, line, String.to_charlist(arg)}
+  defp annotation_arg_form(line, arg) when is_integer(arg), do: {:integer, line, arg}
+  defp annotation_arg_form(line, arg) when is_float(arg), do: {:float, line, arg}
+  defp annotation_arg_form(line, arg) when is_boolean(arg), do: {:atom, line, arg}
+  defp annotation_arg_form(line, arg) when is_atom(arg), do: {:atom, line, arg}
+  defp annotation_arg_form(line, _arg), do: {:nil, line}
 
   @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
   defp expr_form(line, {:call, %{name: name, args: args}}, env) do

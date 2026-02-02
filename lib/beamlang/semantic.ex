@@ -1137,8 +1137,15 @@ defmodule BeamLang.Semantic do
                     substitute_type(type, param_map)
                   end)
 
+                # Extract annotations for each field
+                field_annotations =
+                  Enum.map(field_order, fn name ->
+                    field_info = Map.fetch!(fields, name)
+                    Map.get(field_info, :annotations, [])
+                  end)
+
                 if Enum.all?(field_types, &parse_args_field_type?/1) do
-                  {:ok, %{type: type_arg, fields: field_order, field_types: field_types}}
+                  {:ok, %{type: type_arg, fields: field_order, field_types: field_types, field_annotations: field_annotations}}
                 else
                   {:error,
                    [
@@ -2275,7 +2282,8 @@ defmodule BeamLang.Semantic do
         field_map =
           Enum.reduce(fields, %{}, fn %{name: fname, type: ftype} = field, f_acc ->
             internal = Map.get(field, :internal, false)
-            Map.put(f_acc, fname, %{type: normalize_type(ftype), internal: internal})
+            annotations = Map.get(field, :annotations, [])
+            Map.put(f_acc, fname, %{type: normalize_type(ftype), internal: internal, annotations: annotations})
           end)
 
         # Extract operator declarations from type definition

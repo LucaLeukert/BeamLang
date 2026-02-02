@@ -1,17 +1,124 @@
 // grep - search for patterns in files
-// A simple BeamLang implementation of grep
+// A BeamLang implementation of grep with rich argument parsing
 //
-// Usage: beamlang grep.bl <pattern> <file>
+// Usage: beamlang grep.bl [OPTIONS] <pattern> <file>
 //
 // Searches for PATTERN in FILE and prints matching lines.
+//
+// Options:
+//   -i, --ignore-case     Ignore case distinctions
+//   -n, --line-number     Print line numbers with output
+//   -c, --count           Only print count of matching lines
+//   -v, --invert-match    Select non-matching lines
 
-// Check if a line contains the pattern
-fn matches_line(line: String, pattern: String) -> bool {
-    return line->contains(pattern);
+// Argument definition with annotations
+type Args {
+    @required()
+    @description("Pattern to search for")
+    pattern: String,
+
+    @required()
+    @description("File to search in")
+    file: String,
+
+    @flag
+    @short("i")
+    @long("ignore-case")
+    @description("Ignore case distinctions")
+    ignore_case: bool,
+
+    @flag
+    @short("n")
+    @long("line-number")
+    @description("Print line numbers with output")
+    line_numbers: bool,
+
+    @flag
+    @short("c")
+    @long("count")
+    @description("Only print count of matching lines")
+    count_only: bool,
+
+    @flag
+    @short("v")
+    @long("invert-match")
+    @description("Select non-matching lines")
+    invert_match: bool
 }
 
-// Process a single file and search for pattern
-fn grep_file(filename: String, pattern: String) -> number {
+// Check if a line contains the pattern (with optional case-insensitivity)
+fn matches_line(line: String, pattern: String, ignore_case: bool) -> bool {
+    if (ignore_case) {
+        let lower_line = line->to_lower();
+        let lower_pattern = pattern->to_lower();
+        return lower_line->contains(lower_pattern);
+    } else {
+        return line->contains(pattern);
+    }
+}
+
+// Count matching lines recursively
+fn count_matches_rec(lines: List<String>, pattern: String, ignore_case: bool, invert: bool, idx: number, acc: number) -> number {
+    if (idx >= lines->length()) {
+        return acc;
+    }
+    let line_opt = lines->get(idx);
+    let line = line_opt->unwrap("");
+    let is_match = matches_line(line, pattern, ignore_case);
+    let should_count = if (invert) { is_match == false; } else { is_match; };
+    let new_acc = if (should_count) { acc + 1; } else { acc; };
+    return count_matches_rec(lines, pattern, ignore_case, invert, idx + 1, new_acc);
+}
+
+// Print matching lines recursively
+fn print_matches_rec(lines: List<String>, pattern: String, ignore_case: bool, invert: bool, show_nums: bool, idx: number) -> void {
+    if (idx >= lines->length()) {
+        return;
+    }
+    let line_opt = lines->get(idx);
+    let line = line_opt->unwrap("");
+    let is_match = matches_line(line, pattern, ignore_case);
+    let should_print = if (invert) { is_match == false; } else { is_match; };
+    if (should_print) {
+        if (show_nums) {
+            let line_num = idx + 1;
+            let num_str = "${line_num}";
+            let with_colon = num_str->concat(": ");
+            let full_line = with_colon->concat(line);
+            println(full_line);
+        } else {
+            println(line);
+        }
+    }
+    print_matches_rec(lines, pattern, ignore_case, invert, show_nums, idx + 1);
+}
+
+// Process file content and search for pattern - recursive approach
+fn process_content(content: String, pattern: String, opts: Args) -> number {
+    let raw_lines = content->split("\n");
+    let lines = list_of(raw_lines);
+    
+    let match_count = count_matches_rec(lines, pattern, opts->ignore_case, opts->invert_match, 0, 0);
+    
+    // Output results based on mode
+    if (opts->count_only) {
+        println("${match_count}");
+    } else {
+        print_matches_rec(lines, pattern, opts->ignore_case, opts->invert_match, opts->line_numbers, 0);
+    }
+    
+    // Return 0 if matches found, 1 if no matches
+    if (match_count > 0) {
+        return 0;
+    }
+    return 1;
+}
+
+// Process a file and search for pattern
+fn grep_file(opts: Args) -> number {
+    let filename = opts->file;
+    let pattern = opts->pattern;
+
     if (file_exists(filename) == false) {
         println("grep: ${filename}: No such file or directory");
         return 2;
@@ -19,37 +126,25 @@ fn grep_file(filename: String, pattern: String) -> number {
     
     let result = read_file(filename);
     
-    match (result) {
-        case!ok content => {
-            let raw_lines = content->split("\n");
-            let lines = list_of(raw_lines);
-            let mut idx = 0;
-            let len = lines->length();
-            
-            // Iterate through lines and print matches
-            while (idx < len) {
-                let line_opt = lines->get(idx);
-                let line = line_opt->unwrap("");
-                
-                if (matches_line(line, pattern)) {
-                    println(line);
-                }
-                idx = idx + 1;
-            }
-            
-            return 0;
-        },
+    return match (result) {
+        case!ok content => process_content(content, pattern, opts),
         case!err err => {
             println("grep: ${filename}: ${err->message}");
-            return 2;
+            2;
         }
-    }
+    };
 }
 
 fn print_usage() -> void {
-    println("Usage: beamlang grep.bl PATTERN FILE");
+    println("Usage: beamlang grep.bl [OPTIONS] PATTERN FILE");
     println("");
     println("Search for PATTERN in FILE and print matching lines.");
+    println("");
+    println("Options:");
+    println("  -i, --ignore-case     Ignore case distinctions");
+    println("  -n, --line-number     Print line numbers with output");
+    println("  -c, --count           Only print count of matching lines");
+    println("  -v, --invert-match    Select non-matching lines");
     println("");
     println("Exit status:");
     println("  0  Match found");
@@ -58,20 +153,17 @@ fn print_usage() -> void {
 }
 
 fn main(args: [String]) -> number {
-    // args is already a List wrapper provided by runtime
-    let argc = args->length();
+    let parsed = parse_args<Args>(args);
     
-    if (argc < 2) {
-        print_usage();
-        return 2;
-    }
-    
-    // Get pattern and filename
-    let pattern_opt = args->get(0);
-    let filename_opt = args->get(1);
-    
-    let pattern = pattern_opt->unwrap("");
-    let filename = filename_opt->unwrap("");
-    
-    return grep_file(filename, pattern);
+    return match (parsed) {
+        case!ok opts => {
+            grep_file(opts);
+        },
+        case!err err => {
+            print_usage();
+            println("");
+            println("Error: ${err->message}");
+            2;
+        }
+    };
 }

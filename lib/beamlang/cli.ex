@@ -52,32 +52,24 @@ defmodule BeamLang.CLI do
 
   @spec normalize_args([binary()]) :: {[binary()], [binary()]}
   defp normalize_args(args) do
-    {opt_args, rest} = do_normalize(args, [], [])
-    {Enum.reverse(opt_args), Enum.reverse(rest)}
+    # Find the .bl file - everything before it is CLI options, everything after is program args
+    {opt_args, rest} = do_normalize_with_bl_split(args, [], [])
+    {Enum.reverse(opt_args), rest}
   end
 
-  @spec do_normalize([binary()], [binary()], [binary()]) :: {[binary()], [binary()]}
-  defp do_normalize([], opt_acc, rest_acc), do: {opt_acc, rest_acc}
-
-  @spec do_normalize([binary()], [binary()], [binary()]) :: {[binary()], [binary()]}
-  defp do_normalize([arg, next | rest], opt_acc, rest_acc) do
-    if String.starts_with?(arg, "--") do
-      if arg == "--emit-beam" and is_binary(next) and not String.starts_with?(next, "--") do
-        do_normalize(rest, [next, arg | opt_acc], rest_acc)
+  # Split args at the .bl file: opts before, program args after
+  defp do_normalize_with_bl_split([], opt_acc, _rest_acc), do: {opt_acc, []}
+  defp do_normalize_with_bl_split([arg | rest], opt_acc, rest_acc) do
+    if String.ends_with?(arg, ".bl") do
+      # Found the .bl file, everything after is program args
+      {opt_acc, [arg | rest]}
+    else
+      # Before the .bl file, check if it's a CLI option
+      if String.starts_with?(arg, "--") do
+        do_normalize_with_bl_split(rest, [arg | opt_acc], rest_acc)
       else
-        do_normalize([next | rest], [arg | opt_acc], rest_acc)
+        do_normalize_with_bl_split(rest, opt_acc, [arg | rest_acc])
       end
-    else
-      do_normalize([next | rest], opt_acc, [arg | rest_acc])
-    end
-  end
-
-  @spec do_normalize([binary()], [binary()], [binary()]) :: {[binary()], [binary()]}
-  defp do_normalize([arg], opt_acc, rest_acc) do
-    if String.starts_with?(arg, "--") do
-      { [arg | opt_acc], rest_acc }
-    else
-      { opt_acc, [arg | rest_acc] }
     end
   end
 

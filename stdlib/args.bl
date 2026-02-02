@@ -1,4 +1,41 @@
 // Argument parsing helpers
+//
+// parse_args<T>(args) parses command line arguments into a struct T.
+// T must be a struct type with fields of type String, number, bool, or char.
+// Returns T!ArgsError - ok with the parsed struct or error with usage info.
+//
+// Field annotations control parsing behavior:
+//   @required()      - Field must be provided (error if missing)
+//   @default(value)  - Default value when not provided
+//   @description("") - Help text description for the field
+//   @short("c")      - Short flag form, e.g., -c
+//   @long("config")  - Long flag form, e.g., --config
+//   @flag            - Boolean flag (presence = true, absence = false)
+//
+// Fields without @short or @long are parsed as positional arguments.
+// Positional arguments are matched in order of field definition.
+//
+// Example:
+//   type Args {
+//       @required()
+//       @description("Input file to process")
+//       file: String,
+//
+//       @short("n")
+//       @long("count")
+//       @default(10)
+//       @description("Number of items")
+//       count: number,
+//
+//       @flag
+//       @short("v")
+//       @long("verbose")
+//       @description("Enable verbose output")
+//       verbose: bool
+//   }
+//
+// Usage: program input.txt -n 5 --verbose
+//        program input.txt --count=5 -v
 
 export error ArgsError {
     message: String,

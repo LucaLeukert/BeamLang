@@ -243,6 +243,10 @@ defmodule BeamLang.Runtime do
   @spec any_to_string_data(term()) :: charlist()
   def any_to_string_data(value) do
     cond do
+      is_binary(value) ->
+        # Elixir binary string -> charlist
+        String.to_charlist(value)
+
       is_integer(value) ->
         Integer.to_charlist(value)
 
@@ -456,41 +460,269 @@ defmodule BeamLang.Runtime do
     is_map(value) and Map.has_key?(value, :data) and Map.has_key?(value, :length) and Map.has_key?(value, :chars)
   end
 
-  @spec parse_args(list(), list(), charlist(), map()) :: map()
-  def parse_args(fields, field_types, type_label, args) do
+  @spec parse_args(list(), list(), list(), charlist(), map()) :: map()
+  def parse_args(fields, field_types, field_annotations, type_label, args) do
     args_data = args.data
     field_strs = Enum.map(fields, &to_string/1)
+    module = current_module()
 
-    if length(args_data) != length(fields) do
-      missing_fields = Enum.drop(field_strs, length(args_data))
-      error_struct = %{
-        message: stdlib_string_new("Expected #{length(fields)} arguments, got #{length(args_data)}."),
-        missing: wrap_as_beamlang_list(Enum.map(missing_fields, &stdlib_string_new/1)),
-        __beamlang_type__: ~c"ArgsError"
+    # Build field specs from annotations
+    field_specs = build_field_specs(field_strs, field_types, field_annotations)
+
+    # Parse the args with annotation support
+    case parse_args_with_annotations(args_data, field_specs, type_label, module) do
+      {:ok, result} -> %{tag: 1, value: result}
+      {:error, error_struct} -> %{tag: 0, value: error_struct}
+    end
+  end
+
+  # Build field specifications from annotations
+  defp build_field_specs(fields, types, annotations) do
+    Enum.zip([fields, types, annotations])
+    |> Enum.map(fn {field, type, anns} ->
+      ann_map = parse_annotations(anns)
+      %{
+        name: field,
+        type: type,
+        # If no annotations at all, treat as implicitly required (backwards compatibility)
+        # Otherwise, check for explicit @required annotation
+        required: if anns == nil or anns == [] do true else Map.get(ann_map, "required", false) end,
+        default: Map.get(ann_map, "default"),
+        description: Map.get(ann_map, "description"),
+        short: Map.get(ann_map, "short"),
+        long: Map.get(ann_map, "long"),
+        flag: Map.get(ann_map, "flag", false),
+        positional: !Map.has_key?(ann_map, "short") and !Map.has_key?(ann_map, "long") and !Map.get(ann_map, "flag", false),
+        # Track whether this field has any annotations (for backwards compatibility)
+        has_annotations: anns != nil and anns != []
       }
-      apply(current_module(), :optional_none, []) |> Map.put(:value, error_struct)
-    else
-      parse_args_fields(fields, field_types, args_data, type_label, %{})
+    end)
+  end
+
+  # Parse annotation list into a map
+  defp parse_annotations(nil), do: %{}
+  defp parse_annotations(anns) when is_list(anns) do
+    Enum.reduce(anns, %{}, fn
+      {name, args}, acc when is_list(name) ->
+        name_str = to_string(name)
+        case args do
+          [] -> Map.put(acc, name_str, true)
+          [value] -> Map.put(acc, name_str, annotation_value(value))
+          values -> Map.put(acc, name_str, Enum.map(values, &annotation_value/1))
+        end
+      _, acc -> acc
+    end)
+  end
+
+  defp annotation_value(v) when is_list(v), do: to_string(v)
+  defp annotation_value(v), do: v
+
+  # Parse args with annotation support
+  defp parse_args_with_annotations(args_data, field_specs, type_label, module) do
+    # Separate named/flag args from positional args
+    {named_specs, positional_specs} = Enum.split_with(field_specs, fn spec -> !spec.positional end)
+
+    # Parse named/flag arguments first
+    {remaining_args, named_values} = parse_named_args(args_data, named_specs, %{})
+
+    # Parse positional arguments
+    case parse_positional_args(remaining_args, positional_specs, named_values) do
+      {:ok, values} ->
+        # Check required fields and apply defaults
+        case apply_defaults_and_check_required(values, field_specs, type_label, module) do
+          {:ok, result} -> {:ok, result}
+          {:error, _} = err -> err
+        end
+      {:error, _} = err -> err
     end
   end
 
-  defp parse_args_fields([], [], _args, type_label, acc) do
-    result = Map.put(acc, :__beamlang_type__, type_label)
-    %{tag: 1, value: result}
+  # Parse named arguments (--name=value, --name value, -n value, -n=value)
+  # This function now scans through all args and picks out the named ones,
+  # leaving positional args for later processing
+  defp parse_named_args(args, specs, acc) do
+    do_parse_named_args(args, specs, acc, [])
   end
 
-  defp parse_args_fields([field | rest_fields], [type | rest_types], [arg | rest_args], type_label, acc) do
-    # field comes as charlist from Erlang, convert to string then atom
-    field_str = to_string(field)
-    case parse_arg_value(arg, type, field_str) do
-      {:ok, value} ->
-        acc = Map.put(acc, String.to_atom(field_str), value)
-        parse_args_fields(rest_fields, rest_types, rest_args, type_label, acc)
+  defp do_parse_named_args([], _specs, acc, positional_acc) do
+    {Enum.reverse(positional_acc), acc}
+  end
+  defp do_parse_named_args([arg | rest] = _args, specs, acc, positional_acc) do
+    arg_str = string_value(arg)
 
-      {:error, error_struct} ->
-        %{tag: 0, value: error_struct}
+    cond do
+      # Long form: --name=value or --name value
+      String.starts_with?(arg_str, "--") ->
+        case parse_long_arg(arg_str, rest, specs) do
+          {:ok, field_name, value, remaining} ->
+            do_parse_named_args(remaining, specs, Map.put(acc, field_name, value), positional_acc)
+          :not_matched ->
+            # Unrecognized flag, treat as positional
+            do_parse_named_args(rest, specs, acc, [arg | positional_acc])
+        end
+
+      # Short form: -n=value or -n value
+      String.starts_with?(arg_str, "-") and String.length(arg_str) >= 2 ->
+        case parse_short_arg(arg_str, rest, specs) do
+          {:ok, field_name, value, remaining} ->
+            do_parse_named_args(remaining, specs, Map.put(acc, field_name, value), positional_acc)
+          :not_matched ->
+            # Unrecognized flag, treat as positional
+            do_parse_named_args(rest, specs, acc, [arg | positional_acc])
+        end
+
+      true ->
+        # Positional argument, continue collecting
+        do_parse_named_args(rest, specs, acc, [arg | positional_acc])
     end
   end
+
+  defp parse_long_arg(arg_str, rest, specs) do
+    # Remove "--" prefix
+    without_prefix = String.slice(arg_str, 2, String.length(arg_str) - 2)
+
+    # Check for --name=value form
+    case String.split(without_prefix, "=", parts: 2) do
+      [name, value] ->
+        case find_spec_by_long(name, specs) do
+          nil -> :not_matched
+          spec ->
+            parsed_value = if spec.flag, do: true, else: value
+            {:ok, spec.name, parsed_value, rest}
+        end
+      [name] ->
+        case find_spec_by_long(name, specs) do
+          nil -> :not_matched
+          spec ->
+            if spec.flag do
+              {:ok, spec.name, true, rest}
+            else
+              case rest do
+                [next_arg | remaining] ->
+                  {:ok, spec.name, string_value(next_arg), remaining}
+                [] ->
+                  :not_matched
+              end
+            end
+        end
+    end
+  end
+
+  defp parse_short_arg(arg_str, rest, specs) do
+    # Remove "-" prefix
+    without_prefix = String.slice(arg_str, 1, String.length(arg_str) - 1)
+
+    # Check for -n=value form
+    case String.split(without_prefix, "=", parts: 2) do
+      [name, value] when byte_size(name) == 1 ->
+        case find_spec_by_short(name, specs) do
+          nil -> :not_matched
+          spec ->
+            parsed_value = if spec.flag, do: true, else: value
+            {:ok, spec.name, parsed_value, rest}
+        end
+      [name] when byte_size(name) == 1 ->
+        case find_spec_by_short(name, specs) do
+          nil -> :not_matched
+          spec ->
+            if spec.flag do
+              {:ok, spec.name, true, rest}
+            else
+              case rest do
+                [next_arg | remaining] ->
+                  {:ok, spec.name, string_value(next_arg), remaining}
+                [] ->
+                  :not_matched
+              end
+            end
+        end
+      _ ->
+        :not_matched
+    end
+  end
+
+  defp find_spec_by_long(name, specs) do
+    Enum.find(specs, fn spec ->
+      spec.long == name or (spec.long == nil and spec.name == name)
+    end)
+  end
+
+  defp find_spec_by_short(name, specs) do
+    Enum.find(specs, fn spec -> spec.short == name end)
+  end
+
+  # Parse positional arguments
+  defp parse_positional_args(args, specs, acc) do
+    case {args, specs} do
+      {[], []} ->
+        {:ok, acc}
+      {[], _remaining_specs} ->
+        # Some specs not filled, will be handled by defaults
+        {:ok, acc}
+      {[arg | rest_args], [spec | rest_specs]} ->
+        value = string_value(arg)
+        parse_positional_args(rest_args, rest_specs, Map.put(acc, spec.name, value))
+      {_extra_args, []} ->
+        # Extra args, ignore them
+        {:ok, acc}
+    end
+  end
+
+  # Apply defaults and check required fields
+  defp apply_defaults_and_check_required(values, field_specs, type_label, module) do
+    result = Enum.reduce_while(field_specs, %{}, fn spec, acc ->
+      case Map.fetch(values, spec.name) do
+        {:ok, raw_value} ->
+          # Parse the value according to type
+          case parse_arg_value(raw_value, spec.type, spec.name) do
+            {:ok, parsed} -> {:cont, Map.put(acc, String.to_atom(spec.name), parsed)}
+            {:error, _} = err -> {:halt, err}
+          end
+        :error ->
+          # Value not provided, check for default
+          cond do
+            spec.default != nil ->
+              # Use default value
+              case parse_arg_value(spec.default, spec.type, spec.name) do
+                {:ok, parsed} -> {:cont, Map.put(acc, String.to_atom(spec.name), parsed)}
+                {:error, _} = err -> {:halt, err}
+              end
+            spec.flag ->
+              # Flags default to false
+              {:cont, Map.put(acc, String.to_atom(spec.name), false)}
+            spec.required ->
+              # Required field missing
+              error_struct = %{
+                message: stdlib_string_new("Missing required argument: #{spec.name}"),
+                missing: wrap_as_beamlang_list([stdlib_string_new(spec.name)], module),
+                __beamlang_type__: ~c"ArgsError"
+              }
+              {:halt, {:error, error_struct}}
+            true ->
+              # Not required and no default - return error for missing
+              error_struct = %{
+                message: stdlib_string_new("Missing argument: #{spec.name}"),
+                missing: wrap_as_beamlang_list([stdlib_string_new(spec.name)], module),
+                __beamlang_type__: ~c"ArgsError"
+              }
+              {:halt, {:error, error_struct}}
+          end
+      end
+    end)
+
+    case result do
+      {:error, _} = err -> err
+      values_map ->
+        {:ok, Map.put(values_map, :__beamlang_type__, type_label)}
+    end
+  end
+
+  defp string_value(value) when is_map(value) do
+    if string_map?(value), do: to_string(value.data), else: inspect(value)
+  end
+  defp string_value(value) when is_list(value), do: to_string(value)
+  defp string_value(value) when is_binary(value), do: value
+  defp string_value(value), do: inspect(value)
 
   defp parse_arg_value(arg, :String, _field) do
     {:ok, to_string_struct(arg)}
@@ -512,9 +744,14 @@ defmodule BeamLang.Runtime do
   end
 
   defp parse_arg_value(arg, :bool, field) do
-    case parse_bool_data(arg) do
-      %{tag: 1, value: b} -> {:ok, b}
-      %{tag: 0} -> {:error, args_error_struct(field, "bool")}
+    # Handle already-boolean values (from flags)
+    if is_boolean(arg) do
+      {:ok, arg}
+    else
+      case parse_bool_data(arg) do
+        %{tag: 1, value: b} -> {:ok, b}
+        %{tag: 0} -> {:error, args_error_struct(field, "bool")}
+      end
     end
   end
 
@@ -538,9 +775,10 @@ defmodule BeamLang.Runtime do
   end
 
   defp args_error_struct(field, expected) do
+    module = current_module()
     %{
       message: stdlib_string_new("Invalid value for #{field} (expected #{expected})."),
-      missing: wrap_as_beamlang_list([]),
+      missing: wrap_as_beamlang_list([], module),
       __beamlang_type__: ~c"ArgsError"
     }
   end

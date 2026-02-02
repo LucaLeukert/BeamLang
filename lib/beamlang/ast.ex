@@ -176,8 +176,11 @@ defmodule BeamLang.AST do
             span: BeamLang.Span.t()
           }
 
+  @type field_annotation ::
+          %{name: binary(), args: [term()], span: BeamLang.Span.t()}
+
   @type field_def ::
-          %{name: binary(), type: type_name(), internal: boolean(), span: BeamLang.Span.t()}
+          %{name: binary(), type: type_name(), internal: boolean(), annotations: [field_annotation()], span: BeamLang.Span.t()}
 
   @type import_item :: %{name: binary(), span: BeamLang.Span.t()}
 

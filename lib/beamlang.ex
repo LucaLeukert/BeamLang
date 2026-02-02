@@ -998,7 +998,8 @@ defmodule BeamLang do
           name: field_name,
           type: qualify_type(field_type, type_map, local_types, alias_map),
           span: span,
-          internal: Map.get(field, :internal, false)
+          internal: Map.get(field, :internal, false),
+          annotations: Map.get(field, :annotations, [])
         }
       end)
 

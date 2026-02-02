@@ -2165,12 +2165,23 @@ defmodule BeamLang.Parser do
     end
   end
 
+  # Field with annotations: @required() @default(...) field: Type
+  defp parse_type_fields_and_operators([%Token{type: :at} | _] = tokens, fields_acc, ops_acc) do
+    with {:ok, annotations, rest1} <- parse_field_annotations(tokens, []),
+         {:ok, field, rest2} <- parse_type_field_with_annotations(rest1, annotations) do
+      case rest2 do
+        [%Token{type: :comma} | rest3] -> parse_type_fields_and_operators(rest3, [field | fields_acc], ops_acc)
+        _ -> parse_type_fields_and_operators(rest2, [field | fields_acc], ops_acc)
+      end
+    end
+  end
+
   defp parse_type_fields_and_operators([%Token{type: :internal_kw} | rest], fields_acc, ops_acc) do
     with {:ok, name_tok, rest1} <- expect(rest, :identifier),
          {:ok, _colon, rest2} <- expect(rest1, :colon),
          {:ok, {type_name, type_span}, rest3} <- parse_type_name(rest2) do
       span = BeamLang.Span.merge(name_tok.span, type_span)
-      field = %{name: name_tok.value, type: type_name, internal: true, span: span}
+      field = %{name: name_tok.value, type: type_name, internal: true, annotations: [], span: span}
 
       case rest3 do
         [%Token{type: :comma} | rest4] -> parse_type_fields_and_operators(rest4, [field | fields_acc], ops_acc)
@@ -2184,12 +2195,108 @@ defmodule BeamLang.Parser do
          {:ok, _colon, rest2} <- expect(rest1, :colon),
          {:ok, {type_name, type_span}, rest3} <- parse_type_name(rest2) do
       span = BeamLang.Span.merge(name_tok.span, type_span)
-      field = %{name: name_tok.value, type: type_name, internal: false, span: span}
+      field = %{name: name_tok.value, type: type_name, internal: false, annotations: [], span: span}
 
       case rest3 do
         [%Token{type: :comma} | rest4] -> parse_type_fields_and_operators(rest4, [field | fields_acc], ops_acc)
         _ -> parse_type_fields_and_operators(rest3, [field | fields_acc], ops_acc)
       end
+    end
+  end
+
+  # Parse field annotations like @required(), @default("value"), @description("text")
+  @spec parse_field_annotations([Token.t()], [map()]) ::
+          {:ok, [map()], [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_field_annotations([%Token{type: :at} = at_tok | rest], acc) do
+    with {:ok, name_tok, rest1} <- expect(rest, :identifier),
+         {:ok, args, rest2} <- parse_annotation_args(rest1, at_tok) do
+      annotation = %{name: name_tok.value, args: args, span: BeamLang.Span.merge(at_tok.span, name_tok.span)}
+      parse_field_annotations(rest2, [annotation | acc])
+    end
+  end
+
+  defp parse_field_annotations(tokens, acc) do
+    {:ok, Enum.reverse(acc), tokens}
+  end
+
+  # Parse annotation arguments: (), (value), or no parens
+  @spec parse_annotation_args([Token.t()], Token.t()) ::
+          {:ok, [term()], [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_annotation_args([%Token{type: :lparen} | rest], _at_tok) do
+    parse_annotation_arg_list(rest, [])
+  end
+
+  defp parse_annotation_args(tokens, _at_tok) do
+    {:ok, [], tokens}
+  end
+
+  @spec parse_annotation_arg_list([Token.t()], [term()]) ::
+          {:ok, [term()], [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_annotation_arg_list([%Token{type: :rparen} | rest], acc) do
+    {:ok, Enum.reverse(acc), rest}
+  end
+
+  defp parse_annotation_arg_list([%Token{type: :string} = tok | rest], acc) do
+    case rest do
+      [%Token{type: :comma} | rest2] -> parse_annotation_arg_list(rest2, [tok.value | acc])
+      _ -> parse_annotation_arg_list(rest, [tok.value | acc])
+    end
+  end
+
+  defp parse_annotation_arg_list([%Token{type: :integer} = tok | rest], acc) do
+    case rest do
+      [%Token{type: :comma} | rest2] -> parse_annotation_arg_list(rest2, [tok.value | acc])
+      _ -> parse_annotation_arg_list(rest, [tok.value | acc])
+    end
+  end
+
+  defp parse_annotation_arg_list([%Token{type: :float} = tok | rest], acc) do
+    case rest do
+      [%Token{type: :comma} | rest2] -> parse_annotation_arg_list(rest2, [tok.value | acc])
+      _ -> parse_annotation_arg_list(rest, [tok.value | acc])
+    end
+  end
+
+  defp parse_annotation_arg_list([%Token{type: :bool, value: value} | rest], acc) do
+    bool_val = value == "true"
+    case rest do
+      [%Token{type: :comma} | rest2] -> parse_annotation_arg_list(rest2, [bool_val | acc])
+      _ -> parse_annotation_arg_list(rest, [bool_val | acc])
+    end
+  end
+
+  defp parse_annotation_arg_list([%Token{type: :identifier} = tok | rest], acc) do
+    # Identifier as argument (for named constants, etc)
+    case rest do
+      [%Token{type: :comma} | rest2] -> parse_annotation_arg_list(rest2, [tok.value | acc])
+      _ -> parse_annotation_arg_list(rest, [tok.value | acc])
+    end
+  end
+
+  defp parse_annotation_arg_list([%Token{} = tok | _], _acc) do
+    {:error, error("Expected annotation argument or ')'.", tok)}
+  end
+
+  # Parse a field that follows annotations
+  @spec parse_type_field_with_annotations([Token.t()], [map()]) ::
+          {:ok, map(), [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_type_field_with_annotations([%Token{type: :internal_kw} | rest], annotations) do
+    with {:ok, name_tok, rest1} <- expect(rest, :identifier),
+         {:ok, _colon, rest2} <- expect(rest1, :colon),
+         {:ok, {type_name, type_span}, rest3} <- parse_type_name(rest2) do
+      span = BeamLang.Span.merge(name_tok.span, type_span)
+      field = %{name: name_tok.value, type: type_name, internal: true, annotations: annotations, span: span}
+      {:ok, field, rest3}
+    end
+  end
+
+  defp parse_type_field_with_annotations(tokens, annotations) do
+    with {:ok, name_tok, rest1} <- expect(tokens, :identifier),
+         {:ok, _colon, rest2} <- expect(rest1, :colon),
+         {:ok, {type_name, type_span}, rest3} <- parse_type_name(rest2) do
+      span = BeamLang.Span.merge(name_tok.span, type_span)
+      field = %{name: name_tok.value, type: type_name, internal: false, annotations: annotations, span: span}
+      {:ok, field, rest3}
     end
   end
 
