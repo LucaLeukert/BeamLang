@@ -62,6 +62,7 @@ fn count_matches_rec(lines: List<String>, pattern: String, ignore_case: bool, in
     if (idx >= lines->length()) {
         return acc;
     }
+
     let line_opt = lines->get(idx);
     let line = line_opt->unwrap("");
     let is_match = matches_line(line, pattern, ignore_case);

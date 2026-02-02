@@ -426,7 +426,7 @@ defmodule BeamLang.Runtime do
 
   @spec read_stdin() :: map()
   def read_stdin() do
-    case IO.read(:stdio, :all) do
+    case IO.read(:stdio, :eof) do
       data when is_binary(data) ->
         stdlib_string_new(data)
       _ ->
