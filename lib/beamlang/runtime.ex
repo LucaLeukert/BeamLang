@@ -445,7 +445,7 @@ defmodule BeamLang.Runtime do
         end)
         
         # Convert to BeamLang list and wrap in Result.ok
-        beamlang_list = stdlib_list_new(entries_list)
+        beamlang_list = apply(current_module(), :list_from_data, [entries_list])
         apply(current_module(), :result_ok, [beamlang_list])
       {:error, reason} ->
         # Return Result.err using stdlib functions
