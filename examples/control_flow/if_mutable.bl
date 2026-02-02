@@ -1,0 +1,13 @@
+fn main(args: [String]) -> number {
+    let mut x = 1;
+    let mut y = 10;
+
+    if (true) {
+        x = 2;
+        y = 20;
+    } else {
+        x = 3;
+    }
+
+    return x + y;
+}

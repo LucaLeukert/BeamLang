@@ -91,68 +91,144 @@ defmodule BeamLang.Codegen do
 
   @spec stmt_expr_tree([BeamLang.AST.stmt()], map(), non_neg_integer()) ::
           {tuple(), map(), non_neg_integer()}
-  defp stmt_expr_tree([], env, counter) do
-    {{:atom, 1, :ok}, env, counter}
+  defp stmt_expr_tree(stmts, env, counter) do
+    stmt_expr_tree_with_final(stmts, env, counter, {:atom, 1, :ok})
   end
 
-  defp stmt_expr_tree([stmt], env, counter) do
-    case stmt do
-      {:if_stmt, %{cond: cond, then_block: then_block, else_branch: else_branch}} ->
-        {expr, env, counter} =
-          if_stmt_expr(cond, then_block, else_branch, env, counter, {:atom, 1, :ok})
+  @spec stmt_expr_tree_with_final([BeamLang.AST.stmt()], map(), non_neg_integer(), tuple()) ::
+          {tuple(), map(), non_neg_integer()}
+  defp stmt_expr_tree_with_final([], env, counter, final_expr) do
+    {final_expr, env, counter}
+  end
 
-        {expr, env, counter}
+  defp stmt_expr_tree_with_final([stmt], env, counter, final_expr) do
+    if final_expr == {:atom, 1, :ok} do
+      case stmt do
+        {:if_stmt, %{cond: cond, then_block: then_block, else_branch: else_branch}} ->
+          {expr, env, counter} =
+            if_stmt_expr(cond, then_block, else_branch, env, counter, final_expr)
 
-      {:while, %{cond: cond, body: {:block, %{stmts: body_stmts}}}} ->
-        {expr, env, counter} = while_expr(cond, body_stmts, env, counter)
-        {expr, env, counter}
+          {expr, env, counter}
 
-      {:loop, %{body: {:block, %{stmts: body_stmts}}}} ->
-        {expr, env, counter} = loop_expr(body_stmts, env, counter)
-        {expr, env, counter}
+        {:while, %{cond: cond, body: {:block, %{stmts: body_stmts}}}} ->
+          {expr, env, counter} = while_expr(cond, body_stmts, env, counter)
+          {expr, env, counter}
 
-      {:for, %{name: name, collection: collection, body: {:block, %{stmts: body_stmts}}} = info} ->
-        collection_type = Map.get(info, :collection_type, :any)
+        {:loop, %{body: {:block, %{stmts: body_stmts}}}} ->
+          {expr, env, counter} = loop_expr(body_stmts, env, counter)
+          {expr, env, counter}
 
-        {expr, env, counter} =
-          for_expr(name, collection, body_stmts, env, counter, collection_type)
+        {:for, %{name: name, collection: collection, body: {:block, %{stmts: body_stmts}}} = info} ->
+          collection_type = Map.get(info, :collection_type, :any)
 
-        {expr, env, counter}
+          {expr, env, counter} =
+            for_expr(name, collection, body_stmts, env, counter, collection_type)
 
-      {:guard, %{cond: cond, else_block: {:block, %{stmts: else_stmts}}}} ->
-        cond_form = expr_form(1, cond, env)
-        {else_expr, _else_env, counter} = stmt_expr_tree(else_stmts, env, counter)
-        rest_expr = {:atom, 1, :ok}
+          {expr, env, counter}
 
-        clause_true = {:clause, 1, [{:atom, 1, true}], [], [rest_expr]}
-        clause_false = {:clause, 1, [{:atom, 1, false}], [], [else_expr]}
+        {:guard, %{cond: cond, else_block: {:block, %{stmts: else_stmts}}}} ->
+          cond_form = expr_form(1, cond, env)
+          {else_expr, _else_env, counter} = stmt_expr_tree(else_stmts, env, counter)
+          rest_expr = {:atom, 1, :ok}
 
-        {{:case, 1, cond_form, [clause_true, clause_false]}, env, counter}
+          clause_true = {:clause, 1, [{:atom, 1, true}], [], [rest_expr]}
+          clause_false = {:clause, 1, [{:atom, 1, false}], [], [else_expr]}
 
-      _ ->
-        stmt_form(stmt, env, counter)
+          {{:case, 1, cond_form, [clause_true, clause_false]}, env, counter}
+
+        _ ->
+          stmt_form(stmt, env, counter)
+      end
+    else
+      case stmt do
+        {:if_stmt, %{cond: cond, then_block: then_block, else_branch: else_branch}} ->
+          {expr, env, counter} =
+            if_stmt_expr(cond, then_block, else_branch, env, counter, final_expr)
+
+          {expr, env, counter}
+
+        {:while, %{cond: cond, body: {:block, %{stmts: body_stmts}}}} ->
+          {expr, env, counter} = while_expr(cond, body_stmts, env, counter)
+          {expr, counter} = sequence_expr(expr, final_expr, counter)
+          {expr, env, counter}
+
+        {:loop, %{body: {:block, %{stmts: body_stmts}}}} ->
+          {expr, env, counter} = loop_expr(body_stmts, env, counter)
+          {expr, counter} = sequence_expr(expr, final_expr, counter)
+          {expr, env, counter}
+
+        {:for, %{name: name, collection: collection, body: {:block, %{stmts: body_stmts}}} = info} ->
+          collection_type = Map.get(info, :collection_type, :any)
+
+          {expr, env, counter} =
+            for_expr(name, collection, body_stmts, env, counter, collection_type)
+
+          {expr, counter} = sequence_expr(expr, final_expr, counter)
+          {expr, env, counter}
+
+        {:guard, %{cond: cond, else_block: {:block, %{stmts: else_stmts}}}} ->
+          cond_form = expr_form(1, cond, env)
+          {else_expr, _else_env, counter} = stmt_expr_tree(else_stmts, env, counter)
+
+          clause_true = {:clause, 1, [{:atom, 1, true}], [], [final_expr]}
+          clause_false = {:clause, 1, [{:atom, 1, false}], [], [else_expr]}
+
+          {{:case, 1, cond_form, [clause_true, clause_false]}, env, counter}
+
+        _ ->
+          {form, env, counter} = stmt_form(stmt, env, counter)
+          {expr, counter} = sequence_expr(form, final_expr, counter)
+          {expr, env, counter}
+      end
     end
   end
 
-  defp stmt_expr_tree([stmt | rest], env, counter) do
+  defp stmt_expr_tree_with_final([stmt | rest], env, counter, final_expr) do
     case stmt do
       {:if_stmt, %{cond: cond, then_block: then_block, else_branch: else_branch}} ->
-        {rest_expr, env, counter} = stmt_expr_tree(rest, env, counter)
+        # Find all variables assigned in then/else blocks
+        then_stmts = case then_block do
+          {:block, %{stmts: stmts}} -> stmts
+          _ -> []
+        end
+        {else_stmts, else_if_vars} =
+          case else_branch do
+            {:else_block, %{block: {:block, %{stmts: stmts}}}} -> {stmts, []}
+            {:else_if, %{if: if_stmt}} -> {[], find_assigned_in_stmt(if_stmt)}
+            nil -> {[], []}
+          end
 
-        {expr, env, counter} =
-          if_stmt_expr(cond, then_block, else_branch, env, counter, rest_expr)
+        assigned_vars =
+          (find_assigned_vars(then_stmts) ++ find_assigned_vars(else_stmts) ++ else_if_vars)
+          |> Enum.uniq()
+          |> Enum.filter(&Map.has_key?(env, &1))
 
-        {expr, env, counter}
+        if Enum.empty?(assigned_vars) do
+          # No variable changes - use simple approach
+          {rest_expr, rest_env, counter} = stmt_expr_tree_with_final(rest, env, counter, final_expr)
+          {expr, _env, counter} =
+            if_stmt_expr(cond, then_block, else_branch, env, counter, rest_expr)
+          {expr, rest_env, counter}
+        else
+          # Variables are modified - need to propagate them
+          {if_expr, new_env, counter} = if_stmt_expr_with_propagation(
+            cond, then_block, else_branch, env, counter, assigned_vars
+          )
+          # Compile rest with the new env containing updated variable names
+          {rest_expr, rest_env, counter} = stmt_expr_tree_with_final(rest, new_env, counter, final_expr)
+          {expr, counter} = sequence_expr(if_expr, rest_expr, counter)
+          {expr, rest_env, counter}
+        end
 
       {:while, %{cond: cond, body: {:block, %{stmts: body_stmts}}}} ->
         {loop_expr, env, counter} = while_expr(cond, body_stmts, env, counter)
-        {rest_expr, env, counter} = stmt_expr_tree(rest, env, counter)
+        {rest_expr, env, counter} = stmt_expr_tree_with_final(rest, env, counter, final_expr)
         {expr, counter} = sequence_expr(loop_expr, rest_expr, counter)
         {expr, env, counter}
 
       {:loop, %{body: {:block, %{stmts: body_stmts}}}} ->
         {loop_expr, env, counter} = loop_expr(body_stmts, env, counter)
-        {rest_expr, env, counter} = stmt_expr_tree(rest, env, counter)
+        {rest_expr, env, counter} = stmt_expr_tree_with_final(rest, env, counter, final_expr)
         {expr, counter} = sequence_expr(loop_expr, rest_expr, counter)
         {expr, env, counter}
 
@@ -162,14 +238,14 @@ defmodule BeamLang.Codegen do
         {for_expr, env, counter} =
           for_expr(name, collection, body_stmts, env, counter, collection_type)
 
-        {rest_expr, env, counter} = stmt_expr_tree(rest, env, counter)
+        {rest_expr, env, counter} = stmt_expr_tree_with_final(rest, env, counter, final_expr)
         {expr, counter} = sequence_expr(for_expr, rest_expr, counter)
         {expr, env, counter}
 
       {:guard, %{cond: cond, else_block: {:block, %{stmts: else_stmts}}}} ->
         cond_form = expr_form(1, cond, env)
         {else_expr, _else_env, counter} = stmt_expr_tree(else_stmts, env, counter)
-        {rest_expr, env, counter} = stmt_expr_tree(rest, env, counter)
+        {rest_expr, env, counter} = stmt_expr_tree_with_final(rest, env, counter, final_expr)
 
         clause_true = {:clause, 1, [{:atom, 1, true}], [], [rest_expr]}
         clause_false = {:clause, 1, [{:atom, 1, false}], [], [else_expr]}
@@ -178,7 +254,7 @@ defmodule BeamLang.Codegen do
 
       _ ->
         {form, env, counter} = stmt_form(stmt, env, counter)
-        {rest_expr, env, counter} = stmt_expr_tree(rest, env, counter)
+        {rest_expr, env, counter} = stmt_expr_tree_with_final(rest, env, counter, final_expr)
         {expr, counter} = sequence_expr(form, rest_expr, counter)
         {expr, env, counter}
     end
@@ -706,6 +782,110 @@ defmodule BeamLang.Codegen do
     clause_true = {:clause, 1, [{:atom, 1, true}], [], [then_seq]}
     clause_false = {:clause, 1, [{:atom, 1, false}], [], [else_seq]}
     {{:case, 1, cond_form, [clause_true, clause_false]}, env, counter}
+  end
+
+  # If statement with variable propagation - returns updated variables as tuple
+  @spec if_stmt_expr_with_propagation(
+          BeamLang.AST.expr(),
+          BeamLang.AST.block(),
+          BeamLang.AST.if_else_branch() | nil,
+          map(),
+          non_neg_integer(),
+          [binary()]
+        ) ::
+          {tuple(), map(), non_neg_integer()}
+  defp if_stmt_expr_with_propagation(cond, then_block, else_branch, env, counter, assigned_vars) do
+    line = 1
+    cond_form = expr_form(line, cond, env)
+
+    # Generate fresh variable names for the results
+    {result_vars, counter} = Enum.reduce(assigned_vars, {[], counter}, fn name, {acc, cnt} ->
+      {var, cnt} = fresh_var(name, cnt)
+      {[{name, var} | acc], cnt}
+    end)
+    result_vars = Enum.reverse(result_vars)
+
+    # Compile then block with body, returning tuple of assigned variables
+    then_stmts = case then_block do
+      {:block, %{stmts: stmts}} -> stmts
+      _ -> []
+    end
+    {_then_body_expr, then_env, _counter_tmp} = stmt_expr_tree(then_stmts, env, counter)
+    then_return_tuple = build_return_tuple(line, assigned_vars, then_env, env)
+    {then_expr, _then_env, counter} =
+      stmt_expr_tree_with_final(then_stmts, env, counter, then_return_tuple)
+
+    # Compile else block (or default to returning original values)
+    else_expr = case else_branch do
+      {:else_block, %{block: {:block, %{stmts: else_stmts}}}} ->
+        {_else_body_expr, else_env, _counter_tmp} = stmt_expr_tree(else_stmts, env, counter)
+        else_return_tuple = build_return_tuple(line, assigned_vars, else_env, env)
+        {else_expr, _else_env, _counter} =
+          stmt_expr_tree_with_final(else_stmts, env, counter, else_return_tuple)
+        else_expr
+      nil ->
+        # No else - return original variable values
+        build_return_tuple(line, assigned_vars, env, env)
+      {:else_if, %{if: inner_if}} ->
+        # Handle else if recursively
+        {:if_stmt, %{cond: inner_cond, then_block: inner_then, else_branch: inner_else}} = inner_if
+        {inner_expr, _inner_env, _counter} = if_stmt_expr_with_propagation(
+          inner_cond, inner_then, inner_else, env, counter, assigned_vars
+        )
+        inner_expr
+    end
+
+    clause_true = {:clause, line, [{:atom, line, true}], [], [then_expr]}
+    clause_false = {:clause, line, [{:atom, line, false}], [], [else_expr]}
+    case_expr = {:case, line, cond_form, [clause_true, clause_false]}
+
+    # Build the match pattern for the result tuple
+    pattern = build_pattern_tuple(line, result_vars)
+
+    # Create match expression: Pattern = case ...
+    match_expr = {:match, line, pattern, case_expr}
+
+    # Update env with new variable names
+    new_env = Enum.reduce(result_vars, env, fn {name, var}, acc ->
+      Map.put(acc, name, var)
+    end)
+
+    {match_expr, new_env, counter}
+  end
+
+  # Build a tuple expression with current values of variables
+  # For each assigned_var, use the value from current_env if it was modified,
+  # otherwise use the value from original_env
+  defp build_return_tuple(line, var_names, current_env, original_env) do
+    elements = Enum.map(var_names, fn name ->
+      # Get the current var name from current_env
+      current_var = Map.get(current_env, name)
+      # Get the original var name from original_env
+      original_var = Map.get(original_env, name)
+      
+      # Use the current value if it exists, otherwise use original
+      case current_var || original_var do
+        nil -> {:atom, line, :undefined}
+        var -> {:var, line, var}
+      end
+    end)
+    case elements do
+      [] -> {:atom, line, :ok}
+      [single] -> single
+      _ -> {:tuple, line, elements}
+    end
+  end
+
+  # Build a tuple pattern for matching
+  defp build_pattern_tuple(line, var_pairs) do
+    elements = Enum.map(var_pairs, fn {_name, var} ->
+      {:var, line, var}
+    end)
+    case elements do
+      [] -> {:atom, line, :ok}
+      [single] -> single
+      _ -> {:tuple, line, elements}
+    end
   end
 
   @spec while_expr(BeamLang.AST.expr(), [BeamLang.AST.stmt()], map(), non_neg_integer()) ::

@@ -447,6 +447,30 @@ defmodule BeamLang.ParserTest do
     assert {:if_stmt, %{cond: {:bool, _}}} = stmt
   end
 
+  test "parses if statement with assignments" do
+    source = """
+    fn main() -> number {
+        let mut value = 1;
+        if (true) {
+            value = 2;
+        } else {
+            value = 3;
+        }
+        return value;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{functions: [func]}} = ast
+    assert {:function, %{body: {:block, %{stmts: [s1, s2, _s3]}}}} = func
+    assert {:let, %{name: "value", mutable: true}} = s1
+    assert {:if_stmt, %{then_block: {:block, %{stmts: [t1]}}, else_branch: {:else_block, %{block: {:block, %{stmts: [e1]}}}}}} = s2
+    assert {:assign, %{target: {:identifier, %{name: "value"}}}} = t1
+    assert {:assign, %{target: {:identifier, %{name: "value"}}}} = e1
+  end
+
   test "parses if expression" do
     source = """
     fn main() -> number {

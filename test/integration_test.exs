@@ -75,6 +75,26 @@ defmodule BeamLang.IntegrationTest do
     assert {:ok, 3} == BeamLang.run_source(source)
   end
 
+  test "propagates mutable assignments across if blocks" do
+    source = """
+    fn main(args: [String]) -> number {
+        let mut x = 1;
+        let mut y = 10;
+
+        if (true) {
+            x = 2;
+            y = 20;
+        } else {
+            x = 3;
+        }
+
+        return x + y;
+    }
+    """
+
+    assert {:ok, 22} == BeamLang.run_source(source)
+  end
+
   test "supports void return" do
     source = """
     fn main(args: [String]) -> void {

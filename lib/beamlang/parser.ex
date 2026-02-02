@@ -1588,26 +1588,32 @@ defmodule BeamLang.Parser do
 
   @spec extract_interpolation_parts(binary(), [binary()], [binary()]) ::
           {:ok, [binary()], [binary()]} | {:error, BeamLang.Error.t()}
-  defp extract_interpolation_parts("", parts, exprs) do
-    {:ok, Enum.reverse(parts), Enum.reverse(exprs)}
+  # Helper to extract text parts and expression strings from an interpolated string.
+  # For "${a}:${b}:${c}" we want parts=["", ":", ":", ""] and exprs=["a", "b", "c"]
+  # The `current_part` accumulates the current text segment.
+  defp extract_interpolation_parts(string, parts, exprs) do
+    do_extract_interpolation_parts(string, "", parts, exprs)
   end
 
-  defp extract_interpolation_parts(<<"${", rest::binary>>, parts, exprs) do
+  defp do_extract_interpolation_parts("", current_part, parts, exprs) do
+    # End of string - add current part to the list
+    {:ok, Enum.reverse([current_part | parts]), Enum.reverse(exprs)}
+  end
+
+  defp do_extract_interpolation_parts(<<"${", rest::binary>>, current_part, parts, exprs) do
     case find_closing_brace(rest, 0, "") do
       {:ok, expr, remaining} ->
-        extract_interpolation_parts(remaining, ["" | parts], [expr | exprs])
+        # Save current_part (text before this ${}) and start fresh for text after
+        do_extract_interpolation_parts(remaining, "", [current_part | parts], [expr | exprs])
 
       {:error, _} = err ->
         err
     end
   end
 
-  defp extract_interpolation_parts(<<char::utf8, rest::binary>>, [], exprs) do
-    extract_interpolation_parts(rest, [<<char::utf8>> | []], exprs)
-  end
-
-  defp extract_interpolation_parts(<<char::utf8, rest::binary>>, [last | parts], exprs) do
-    extract_interpolation_parts(rest, [last <> <<char::utf8>> | parts], exprs)
+  defp do_extract_interpolation_parts(<<char::utf8, rest::binary>>, current_part, parts, exprs) do
+    # Append character to current part
+    do_extract_interpolation_parts(rest, current_part <> <<char::utf8>>, parts, exprs)
   end
 
   @spec find_closing_brace(binary(), non_neg_integer(), binary()) ::
