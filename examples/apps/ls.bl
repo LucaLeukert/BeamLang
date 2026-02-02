@@ -1,0 +1,144 @@
+// ls - list directory contents
+// Usage: beamlang ls.bl [directory]
+//
+// Lists the contents of the specified directory, or the current directory if none is provided.
+// Displays file names with indicators for directories (/).
+
+type Args {
+    @default(".")
+    @description("Directory to list")
+    path: String,
+
+    @flag
+    @short("l")
+    @long("long")
+    @description("Use long listing format with size")
+    long_format: bool,
+
+    @flag
+    @short("a")
+    @long("all")
+    @description("Include hidden files (starting with .)")
+    show_hidden: bool
+}
+
+// Format file size in human-readable format
+// Uses integer division for simplicity (e.g., 1.5GB shows as 1GB)
+fn format_size(size: number) -> String {
+    if (size >= 1073741824) {  // 1GB in bytes
+        let gb = size / 1073741824;
+        return "${gb}G";
+    }
+    if (size >= 1048576) {  // 1MB in bytes
+        let mb = size / 1048576;
+        return "${mb}M";
+    }
+    if (size >= 1024) {  // 1KB in bytes
+        let kb = size / 1024;
+        return "${kb}K";
+    }
+    return "${size}";
+}
+
+// Pad a string to a given width by prepending spaces
+fn pad_string(s: String, width: number) -> String {
+    let len = s->length();
+    if (len >= width) {
+        return s;
+    }
+    let padding_count = width - len;
+    return pad_string_rec(s, padding_count);
+}
+
+// Recursively prepend spaces
+fn pad_string_rec(s: String, count: number) -> String {
+    if (count <= 0) {
+        return s;
+    }
+    let padded = " "->concat(s);
+    return pad_string_rec(padded, count - 1);
+}
+
+// Check if a filename should be shown based on hidden flag
+fn should_show(name: String, show_hidden: bool) -> bool {
+    if (show_hidden) {
+        return true;
+    }
+    // Check if name starts with "."
+    return name->starts_with(".") == false;
+}
+
+// Print a single entry
+fn print_entry(entry: FileEntry, long_format: bool) -> void {
+    let name = entry->name;
+    if (long_format) {
+        let size_str = format_size(entry->size);
+        // Pad size to 6 characters for alignment
+        let padded_size = pad_string(size_str, 6);
+        if (entry->is_dir) {
+            println("${padded_size}  ${name}/");
+        } else {
+            println("${padded_size}  ${name}");
+        }
+    } else {
+        if (entry->is_dir) {
+            println("${name}/");
+        } else {
+            println(name);
+        }
+    }
+}
+
+// Process and print directory entries recursively
+fn print_entries_rec(entries: List<FileEntry>, opts: Args, idx: number) -> void {
+    if (idx >= entries->length()) {
+        return;
+    }
+    let entry_opt = entries->get(idx);
+    match (entry_opt) {
+        case?some entry => {
+            if (should_show(entry->name, opts->show_hidden)) {
+                print_entry(entry, opts->long_format);
+            }
+        },
+        case?none => {}
+    }
+    print_entries_rec(entries, opts, idx + 1);
+}
+
+// List directory contents
+fn ls_directory(opts: Args) -> number {
+    let path = opts->path;
+    
+    // Check if the path exists
+    if (file_exists(path) == false) {
+        println("ls: cannot access '${path}': No such file or directory");
+        return 1;
+    }
+    
+    // Try to list the directory
+    let result = list_directory(path);
+    
+    return match (result) {
+        case!ok entries => {
+            print_entries_rec(entries, opts, 0);
+            0;
+        },
+        case!err err => {
+            println("ls: cannot open directory '${path}': ${err->message}");
+            1;
+        }
+    };
+}
+
+fn main(args: [String]) -> number {
+    let parsed = parse_args<Args>(args);
+    
+    return match (parsed) {
+        case!ok opts => ls_directory(opts),
+        case!err err => {
+            println("ls: error parsing arguments: ${err->message}");
+            1;
+        }
+    };
+}

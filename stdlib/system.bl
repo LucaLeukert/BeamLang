@@ -6,6 +6,13 @@ export error IoError {
     message: String
 }
 
+// Type for file system entries
+export type FileEntry {
+    name: String,
+    is_dir: bool,
+    size: number
+}
+
 export type Clock {
     internal start_time: number,
     internal stop_time: number,
@@ -30,9 +37,20 @@ fn get_env_data(name: String) -> any;
 @external(elixir, "BeamLang.Runtime", "clock_now")
 fn clock_now_data() -> number;
 
-internal fn make_io_error(msg: String) -> String!IoError {
+@external(elixir, "BeamLang.Runtime", "list_directory")
+fn list_directory_data(path: String) -> List<FileEntry>!String;
+
+internal fn file_entry_new(name: String, is_dir: bool, size: number) -> FileEntry {
+    return {
+        name = name,
+        is_dir = is_dir,
+        size = size
+    };
+}
+
+internal fn make_io_error(msg: String) -> IoError {
     let err: IoError = { kind = "read", message = msg };
-    return !err err;
+    return err;
 }
 
 internal fn clock_now_method(self: Clock) -> number {
@@ -75,7 +93,7 @@ fn read_file(path: String) -> String!IoError {
     let result = file_read_data(path);
     return match (result) {
         case!ok content => !ok content,
-        case!err msg => make_io_error(msg)
+        case!err msg => !err make_io_error(msg)
     };
 }
 
@@ -92,4 +110,13 @@ fn read_stdin() -> String {
 /** Get an environment variable, returns None if not set **/
 fn get_env(name: String) -> String? {
     return get_env_data(name);
+}
+
+/** List the contents of a directory **/
+fn list_directory(path: String) -> List<FileEntry>!IoError {
+    let result = list_directory_data(path);
+    return match (result) {
+        case!ok entries => !ok entries,
+        case!err msg => !err make_io_error(msg)
+    };
 }
