@@ -39,17 +39,32 @@ fn format_size(size: number) -> String {
     return "${size}";
 }
 
+// Pad a string to a given width by prepending spaces
+fn pad_string(s: String, width: number) -> String {
+    let len = s->length();
+    if (len >= width) {
+        return s;
+    }
+    let padding_count = width - len;
+    return pad_string_rec(s, padding_count);
+}
+
+// Recursively prepend spaces
+fn pad_string_rec(s: String, count: number) -> String {
+    if (count <= 0) {
+        return s;
+    }
+    let padded = " "->concat(s);
+    return pad_string_rec(padded, count - 1);
+}
+
 // Check if a filename should be shown based on hidden flag
 fn should_show(name: String, show_hidden: bool) -> bool {
     if (show_hidden) {
         return true;
     }
     // Check if name starts with "."
-    let first_char = name->char_at(0);
-    return match (first_char) {
-        case?some c => c != '.',
-        case?none => true
-    };
+    return name->starts_with(".") == false;
 }
 
 // Print a single entry
@@ -58,7 +73,7 @@ fn print_entry(entry: FileEntry, long_format: bool) -> void {
     if (long_format) {
         let size_str = format_size(entry->size);
         // Pad size to 6 characters for alignment
-        let padded_size = size_str->pad_left(6, ' ');
+        let padded_size = pad_string(size_str, 6);
         if (entry->is_dir) {
             println("${padded_size}  ${name}/");
         } else {
