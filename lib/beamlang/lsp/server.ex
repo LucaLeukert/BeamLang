@@ -595,26 +595,28 @@ defmodule BeamLang.LSP.Server do
 
   defp build_index({:program, %{functions: functions, types: types, errors: errors}}) do
     func_index = index_functions(functions)
+    type_index = index_types(types)
 
     %{
       functions: func_index,
-      types: index_types(types),
+      types: type_index,
       errors: index_errors(errors),
       methods: index_methods(types),
-      locals: index_locals(functions, func_index)
+      locals: index_locals(functions, func_index, type_index)
     }
   end
 
   defp build_index({:program, %{functions: functions, types: types} = program}) do
     errors = Map.get(program, :errors, [])
     func_index = index_functions(functions)
+    type_index = index_types(types)
 
     %{
       functions: func_index,
-      types: index_types(types),
+      types: type_index,
       errors: index_errors(errors),
       methods: index_methods(types),
-      locals: index_locals(functions, func_index)
+      locals: index_locals(functions, func_index, type_index)
     }
   end
 
@@ -661,7 +663,7 @@ defmodule BeamLang.LSP.Server do
     end)
   end
 
-  defp index_locals(functions, func_table) do
+  defp index_locals(functions, func_table, type_table) do
     Enum.flat_map(functions, fn {:function, %{params: params, body: body, span: func_span}} ->
       scope_span =
         case body do
@@ -671,7 +673,7 @@ defmodule BeamLang.LSP.Server do
 
       {env, param_entries} =
         Enum.reduce(params, {%{}, []}, fn param, {env, acc} ->
-          bindings = extract_param_bindings(param, func_span, scope_span)
+          bindings = extract_param_bindings(param, func_span, scope_span, type_table)
           new_env = Enum.reduce(bindings, env, fn entry, e -> Map.put(e, entry.name, entry.type) end)
           {new_env, bindings ++ acc}
         end)
@@ -682,18 +684,18 @@ defmodule BeamLang.LSP.Server do
   end
 
   # Extract bindings from a function parameter (handles both regular and pattern params)
-  defp extract_param_bindings(%{name: name, type: type, span: span}, func_span, scope_span) do
+  defp extract_param_bindings(%{name: name, type: type, span: span}, func_span, scope_span, _type_table) do
     [%{name: name, type: type, span: span, func_span: func_span, scope_span: scope_span, kind: :param}]
   end
 
-  defp extract_param_bindings(%{pattern: pattern, type: type, span: _span}, func_span, scope_span) do
-    pattern_bindings_with_type(pattern, type)
+  defp extract_param_bindings(%{pattern: pattern, type: type, span: _span}, func_span, scope_span, type_table) do
+    pattern_bindings_with_type(pattern, type, type_table)
     |> Enum.map(fn {name, span, var_type} ->
       %{name: name, type: var_type, span: span, func_span: func_span, scope_span: scope_span, kind: :param}
     end)
   end
 
-  defp extract_param_bindings(_param, _func_span, _scope_span), do: []
+  defp extract_param_bindings(_param, _func_span, _scope_span, _type_table), do: []
 
   # Format a single parameter for display (handles both regular and pattern params)
   defp format_param(%{name: param_name, type: type}) do
@@ -1238,7 +1240,7 @@ defmodule BeamLang.LSP.Server do
     locals
     |> Enum.filter(fn local ->
       local.name == name and
-        local.func_span.file_id == doc.path and
+        (local.span.file_id == doc.path or local.func_span.file_id == doc.path) and
         span_contains?(local.scope_span, offset) and
         offset >= local.func_span.start and offset <= local.func_span.end and
         local.span.start <= offset
@@ -1368,6 +1370,41 @@ defmodule BeamLang.LSP.Server do
 
   defp collect_expr_locals(_expr, _func_span, _scope_span, _func_table, _env), do: []
 
+  # Version with type table for function parameter patterns (can look up field types)
+  defp pattern_bindings_with_type({:pat_identifier, %{name: name, span: span}}, type, _type_table),
+    do: [{name, span, type}]
+
+  defp pattern_bindings_with_type({:struct_pattern, %{name: type_name, fields: fields}}, _type, type_table) do
+    Enum.flat_map(fields, fn %{name: field_name, pattern: pat} ->
+      field_type = lookup_field_type_in_table(type_table, type_name, field_name)
+      pattern_bindings_with_type(pat, field_type, type_table)
+    end)
+  end
+
+  defp pattern_bindings_with_type({:tuple_pattern, %{elements: elements}}, {:tuple, element_types}, type_table) do
+    Enum.zip(elements, element_types)
+    |> Enum.flat_map(fn {pat, elem_type} -> pattern_bindings_with_type(pat, elem_type, type_table) end)
+  end
+
+  defp pattern_bindings_with_type({:tuple_pattern, %{elements: elements}}, _type, type_table) do
+    Enum.flat_map(elements, fn pat -> pattern_bindings_with_type(pat, nil, type_table) end)
+  end
+
+  defp pattern_bindings_with_type(pattern, type, _type_table), do: pattern_bindings_with_type(pattern, type)
+
+  # Look up field type from type table
+  defp lookup_field_type_in_table(type_table, type_name, field_name) do
+    case Map.get(type_table, type_name) do
+      %{fields: fields} ->
+        case Enum.find(fields, fn f -> f.name == field_name end) do
+          %{type: type} -> type
+          _ -> nil
+        end
+      _ -> nil
+    end
+  end
+
+  # Version without type table (for match expressions etc.)
   defp pattern_bindings_with_type({:pat_identifier, %{name: name, span: span}}, type),
     do: [{name, span, type}]
 
