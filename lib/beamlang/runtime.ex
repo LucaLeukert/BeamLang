@@ -424,6 +424,36 @@ defmodule BeamLang.Runtime do
     File.exists?(path_str)
   end
 
+  @spec list_directory(term()) :: map()
+  def list_directory(path) do
+    path_str = string_data(path) |> to_string()
+    case File.ls(path_str) do
+      {:ok, entries} ->
+        # Create a list of maps with name, is_dir, and size
+        entries_list = Enum.map(entries, fn entry ->
+          full_path = Path.join(path_str, entry)
+          stat = File.stat!(full_path, time: :posix)
+          is_dir = stat.type == :directory
+          size = stat.size
+          
+          %{
+            __beamlang_type__: "FileEntry",
+            name: stdlib_string_new(entry),
+            is_dir: is_dir,
+            size: size
+          }
+        end)
+        
+        # Convert to BeamLang list and wrap in Result.ok
+        beamlang_list = stdlib_list_new(entries_list)
+        apply(current_module(), :result_ok, [beamlang_list])
+      {:error, reason} ->
+        # Return Result.err using stdlib functions
+        error_msg = stdlib_string_new(to_string(reason))
+        apply(current_module(), :result_err, [error_msg])
+    end
+  end
+
   @spec read_stdin() :: map()
   def read_stdin() do
     case IO.read(:stdio, :all) do

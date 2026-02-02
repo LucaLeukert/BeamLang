@@ -6,6 +6,13 @@ export error IoError {
     message: String
 }
 
+// Type for file system entries
+export type FileEntry {
+    name: String,
+    is_dir: bool,
+    size: number
+}
+
 export type Clock {
     internal start_time: number,
     internal stop_time: number,
@@ -29,6 +36,9 @@ fn get_env_data(name: String) -> any;
 
 @external(elixir, "BeamLang.Runtime", "clock_now")
 fn clock_now_data() -> number;
+
+@external(elixir, "BeamLang.Runtime", "list_directory")
+fn list_directory_data(path: String) -> List<FileEntry>!String;
 
 internal fn make_io_error(msg: String) -> String!IoError {
     let err: IoError = { kind = "read", message = msg };
@@ -92,4 +102,13 @@ fn read_stdin() -> String {
 /** Get an environment variable, returns None if not set **/
 fn get_env(name: String) -> String? {
     return get_env_data(name);
+}
+
+/** List the contents of a directory **/
+fn list_directory(path: String) -> List<FileEntry>!IoError {
+    let result = list_directory_data(path);
+    return match (result) {
+        case!ok entries => !ok entries,
+        case!err msg => make_io_error(msg)
+    };
 }
