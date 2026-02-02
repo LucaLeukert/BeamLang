@@ -31,6 +31,7 @@ defmodule BeamLang.Codegen do
   @runtime_required_internals ~w(
     string_new list_from_data iterator_from_list
     result_ok result_err optional_some optional_none
+    file_entry_new
   )
 
   @spec exports([BeamLang.AST.func()]) :: list()
