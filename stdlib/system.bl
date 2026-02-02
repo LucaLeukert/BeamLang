@@ -40,7 +40,6 @@ fn clock_now_data() -> number;
 @external(elixir, "BeamLang.Runtime", "list_directory")
 fn list_directory_data(path: String) -> List<FileEntry>!String;
 
-/** Create a new FileEntry instance **/
 internal fn file_entry_new(name: String, is_dir: bool, size: number) -> FileEntry {
     return {
         name = name,
@@ -49,9 +48,9 @@ internal fn file_entry_new(name: String, is_dir: bool, size: number) -> FileEntr
     };
 }
 
-internal fn make_io_error(msg: String) -> String!IoError {
+internal fn make_io_error(msg: String) -> IoError {
     let err: IoError = { kind = "read", message = msg };
-    return !err err;
+    return err;
 }
 
 internal fn clock_now_method(self: Clock) -> number {
@@ -94,7 +93,7 @@ fn read_file(path: String) -> String!IoError {
     let result = file_read_data(path);
     return match (result) {
         case!ok content => !ok content,
-        case!err msg => make_io_error(msg)
+        case!err msg => !err make_io_error(msg)
     };
 }
 
@@ -118,6 +117,6 @@ fn list_directory(path: String) -> List<FileEntry>!IoError {
     let result = list_directory_data(path);
     return match (result) {
         case!ok entries => !ok entries,
-        case!err msg => make_io_error(msg)
+        case!err msg => !err make_io_error(msg)
     };
 }
