@@ -82,7 +82,8 @@ internal fn list_length_method<T>(self: List<T>) -> number {
 }
 
 internal fn list_get_method<T>(self: List<T>, index: number) -> T? {
-    return list_get_data(self->data, index);
+    let raw = list_get_data(self->data, index);
+    return wrap_optional(raw);
 }
 
 internal fn list_push_method<T>(self: List<T>, item: T) -> List<T> {
@@ -96,11 +97,13 @@ internal fn list_pop_method<T>(self: List<T>) -> List<T> {
 }
 
 internal fn list_first_method<T>(self: List<T>) -> T? {
-    return list_first_data(self->data);
+    let raw = list_first_data(self->data);
+    return wrap_optional(raw);
 }
 
 internal fn list_last_method<T>(self: List<T>) -> T? {
-    return list_last_data(self->data);
+    let raw = list_last_data(self->data);
+    return wrap_optional(raw);
 }
 
 internal fn list_iter_method<T>(self: List<T>) -> Iterator<T> {

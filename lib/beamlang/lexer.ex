@@ -332,6 +332,20 @@ defmodule BeamLang.Lexer do
     {:error, "Unterminated string literal."}
   end
 
+  # Handle escape sequences
+  defp read_string(<<"\\", esc, rest::binary>>, acc) do
+    char = case esc do
+      ?n -> "\n"
+      ?r -> "\r"
+      ?t -> "\t"
+      ?\\ -> "\\"
+      ?" -> "\""
+      ?$ -> "$"
+      other -> <<other>>
+    end
+    read_string(rest, acc <> char)
+  end
+
   defp read_string(<<c, rest::binary>>, acc) do
     read_string(rest, acc <> <<c>>)
   end

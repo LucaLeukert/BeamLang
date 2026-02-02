@@ -1,0 +1,77 @@
+// grep - search for patterns in files
+// A simple BeamLang implementation of grep
+//
+// Usage: beamlang grep.bl <pattern> <file>
+//
+// Searches for PATTERN in FILE and prints matching lines.
+
+// Check if a line contains the pattern
+fn matches_line(line: String, pattern: String) -> bool {
+    return line->contains(pattern);
+}
+
+// Process a single file and search for pattern
+fn grep_file(filename: String, pattern: String) -> number {
+    if (file_exists(filename) == false) {
+        println("grep: ${filename}: No such file or directory");
+        return 2;
+    }
+    
+    let result = read_file(filename);
+    
+    match (result) {
+        case!ok content => {
+            let raw_lines = content->split("\n");
+            let lines = list_of(raw_lines);
+            let mut idx = 0;
+            let len = lines->length();
+            
+            // Iterate through lines and print matches
+            while (idx < len) {
+                let line_opt = lines->get(idx);
+                let line = line_opt->unwrap("");
+                
+                if (matches_line(line, pattern)) {
+                    println(line);
+                }
+                idx = idx + 1;
+            }
+            
+            return 0;
+        },
+        case!err err => {
+            println("grep: ${filename}: ${err->message}");
+            return 2;
+        }
+    }
+}
+
+fn print_usage() -> void {
+    println("Usage: beamlang grep.bl PATTERN FILE");
+    println("");
+    println("Search for PATTERN in FILE and print matching lines.");
+    println("");
+    println("Exit status:");
+    println("  0  Match found");
+    println("  1  No match found");
+    println("  2  Error occurred");
+}
+
+fn main(args: [String]) -> number {
+    // args is already a List wrapper provided by runtime
+    let argc = args->length();
+    
+    if (argc < 2) {
+        print_usage();
+        return 2;
+    }
+    
+    // Get pattern and filename
+    let pattern_opt = args->get(0);
+    let filename_opt = args->get(1);
+    
+    let pattern = pattern_opt->unwrap("");
+    let filename = filename_opt->unwrap("");
+    
+    return grep_file(filename, pattern);
+}

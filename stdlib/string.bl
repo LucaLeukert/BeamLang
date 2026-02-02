@@ -87,7 +87,7 @@ fn typeof<T>(value: T) -> String {
     return string_new(data);
 }
 
-internal fn string_new(data: any) -> String {
+fn string_new(data: any) -> String {
     return {
         data = data,
         length = string_length,

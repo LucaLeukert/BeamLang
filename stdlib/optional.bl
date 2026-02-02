@@ -56,3 +56,19 @@ internal fn optional_and_then<T, U>(self: T?, mapper: fn(T) -> U?) -> U? {
         case?none => optional_none()
     };
 }
+
+// Wrap a raw {tag, value} map into a full Optional with methods
+@external(elixir, "BeamLang.Runtime", "optional_raw_tag")
+fn optional_raw_tag(raw: any) -> number;
+
+@external(elixir, "BeamLang.Runtime", "optional_raw_value")
+fn optional_raw_value(raw: any) -> any;
+
+fn wrap_optional<T>(raw: any) -> T? {
+    let tag = optional_raw_tag(raw);
+    if (tag == 1) {
+        let value = optional_raw_value(raw);
+        return optional_some(value);
+    }
+    return optional_none();
+}
