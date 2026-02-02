@@ -314,7 +314,14 @@ defmodule BeamLang.Codegen do
   end
 
   defp stmt_form({:break, %{}}, env, counter) do
-    {{:atom, 1, :__break__}, env, counter}
+    case Map.get(env, :__loop_vars__) do
+      nil ->
+        {{:atom, 1, :__break__}, env, counter}
+
+      vars ->
+        break_values = build_vars_tuple(1, vars, env)
+        {{:tuple, 1, [{:atom, 1, :__break__}, break_values]}, env, counter}
+    end
   end
 
   @spec return_clause(non_neg_integer(), [tuple()], [tuple()]) :: tuple()
@@ -497,14 +504,6 @@ defmodule BeamLang.Codegen do
      {:remote, line, {:atom, line, :"Elixir.BeamLang.Runtime"}, {:atom, line, :parse_args}},
      [fields_list, types_list, annotations_list, type_label, expr_form(line, args_expr, env)]}
   end
-
-  # Convert annotation argument to Erlang form
-  defp annotation_arg_form(line, arg) when is_binary(arg), do: {:string, line, String.to_charlist(arg)}
-  defp annotation_arg_form(line, arg) when is_integer(arg), do: {:integer, line, arg}
-  defp annotation_arg_form(line, arg) when is_float(arg), do: {:float, line, arg}
-  defp annotation_arg_form(line, arg) when is_boolean(arg), do: {:atom, line, arg}
-  defp annotation_arg_form(line, arg) when is_atom(arg), do: {:atom, line, arg}
-  defp annotation_arg_form(line, _arg), do: {:nil, line}
 
   @spec expr_form(non_neg_integer(), BeamLang.AST.expr(), map()) :: tuple()
   defp expr_form(line, {:call, %{name: name, args: args}}, env) do
@@ -702,6 +701,14 @@ defmodule BeamLang.Codegen do
     {:cons, line, head, build_list_form(line, tail)}
   end
 
+  # Convert annotation argument to Erlang form
+  defp annotation_arg_form(line, arg) when is_binary(arg), do: {:string, line, String.to_charlist(arg)}
+  defp annotation_arg_form(line, arg) when is_integer(arg), do: {:integer, line, arg}
+  defp annotation_arg_form(line, arg) when is_float(arg), do: {:float, line, arg}
+  defp annotation_arg_form(line, arg) when is_boolean(arg), do: {:atom, line, arg}
+  defp annotation_arg_form(line, arg) when is_atom(arg), do: {:atom, line, arg}
+  defp annotation_arg_form(line, _arg), do: {:nil, line}
+
   # Convert BeamLang type to Erlang term for runtime
   defp type_to_erlang_term(line, :String), do: {:atom, line, :String}
   defp type_to_erlang_term(line, :number), do: {:atom, line, :number}
@@ -796,7 +803,6 @@ defmodule BeamLang.Codegen do
           {tuple(), map(), non_neg_integer()}
   defp if_stmt_expr_with_propagation(cond, then_block, else_branch, env, counter, assigned_vars) do
     line = 1
-    cond_form = expr_form(line, cond, env)
 
     # Generate fresh variable names for the results
     {result_vars, counter} = Enum.reduce(assigned_vars, {[], counter}, fn name, {acc, cnt} ->
@@ -805,52 +811,126 @@ defmodule BeamLang.Codegen do
     end)
     result_vars = Enum.reverse(result_vars)
 
-    # Compile then block with body, returning tuple of assigned variables
-    then_stmts = case then_block do
-      {:block, %{stmts: stmts}} -> stmts
-      _ -> []
-    end
-    {_then_body_expr, then_env, _counter_tmp} = stmt_expr_tree(then_stmts, env, counter)
-    then_return_tuple = build_return_tuple(line, assigned_vars, then_env, env)
-    {then_expr, _then_env, counter} =
-      stmt_expr_tree_with_final(then_stmts, env, counter, then_return_tuple)
+    {flow_expr, counter} = if_flow_expr(cond, then_block, else_branch, env, counter, assigned_vars)
 
-    # Compile else block (or default to returning original values)
-    else_expr = case else_branch do
-      {:else_block, %{block: {:block, %{stmts: else_stmts}}}} ->
-        {_else_body_expr, else_env, _counter_tmp} = stmt_expr_tree(else_stmts, env, counter)
-        else_return_tuple = build_return_tuple(line, assigned_vars, else_env, env)
-        {else_expr, _else_env, _counter} =
-          stmt_expr_tree_with_final(else_stmts, env, counter, else_return_tuple)
-        else_expr
-      nil ->
-        # No else - return original variable values
-        build_return_tuple(line, assigned_vars, env, env)
-      {:else_if, %{if: inner_if}} ->
-        # Handle else if recursively
-        {:if_stmt, %{cond: inner_cond, then_block: inner_then, else_branch: inner_else}} = inner_if
-        {inner_expr, _inner_env, _counter} = if_stmt_expr_with_propagation(
-          inner_cond, inner_then, inner_else, env, counter, assigned_vars
-        )
-        inner_expr
-    end
-
-    clause_true = {:clause, line, [{:atom, line, true}], [], [then_expr]}
-    clause_false = {:clause, line, [{:atom, line, false}], [], [else_expr]}
-    case_expr = {:case, line, cond_form, [clause_true, clause_false]}
-
-    # Build the match pattern for the result tuple
+    # Build the pattern for the result tuple
     pattern = build_pattern_tuple(line, result_vars)
 
-    # Create match expression: Pattern = case ...
-    match_expr = {:match, line, pattern, case_expr}
+    {flow_tag, counter} = fresh_var("flow_tag", counter)
+    {flow_payload, counter} = fresh_var("flow_payload", counter)
+
+    flow_pattern =
+      {:tuple, line,
+       [
+         {:atom, line, :__flow__},
+         {:var, line, flow_tag},
+         {:var, line, flow_payload},
+         pattern
+       ]}
+
+    match_expr = {:match, line, flow_pattern, flow_expr}
+
+    clause_flow_return =
+      {:clause, line, [{:atom, line, :return}], [],
+       [{:tuple, line, [{:atom, line, :__return__}, {:var, line, flow_payload}]}]}
+
+    clause_flow_break =
+      {:clause, line, [{:atom, line, :break}], [], [{:atom, line, :__break__}]}
+
+    clause_flow_ok = {:clause, line, [{:atom, line, :ok}], [], [{:atom, line, :ok}]}
+    flow_result_case = {:case, line, {:var, line, flow_tag}, [clause_flow_return, clause_flow_break, clause_flow_ok]}
+
+    {result_expr, counter} = sequence_expr(match_expr, flow_result_case, counter)
 
     # Update env with new variable names
     new_env = Enum.reduce(result_vars, env, fn {name, var}, acc ->
       Map.put(acc, name, var)
     end)
 
-    {match_expr, new_env, counter}
+    {result_expr, new_env, counter}
+  end
+
+  defp if_flow_expr(cond, then_block, else_branch, env, counter, assigned_vars) do
+    line = 1
+    cond_form = expr_form(line, cond, env)
+    fallback = build_return_tuple(line, assigned_vars, env, env)
+
+    then_stmts =
+      case then_block do
+        {:block, %{stmts: stmts}} -> stmts
+        _ -> []
+      end
+
+    {_then_body_expr, then_env, _counter_tmp} = stmt_expr_tree(then_stmts, env, counter)
+    then_return_tuple = build_return_tuple(line, assigned_vars, then_env, env)
+    {then_expr, _then_env, counter} =
+      stmt_expr_tree_with_final(then_stmts, env, counter, then_return_tuple)
+    {then_flow_expr, counter} = wrap_flow_expr(then_expr, fallback, line, counter)
+
+    {else_flow_expr, counter} =
+      case else_branch do
+        {:else_block, %{block: {:block, %{stmts: else_stmts}}}} ->
+          {_else_body_expr, else_env, _counter_tmp} = stmt_expr_tree(else_stmts, env, counter)
+          else_return_tuple = build_return_tuple(line, assigned_vars, else_env, env)
+          {else_expr, _else_env, counter} =
+            stmt_expr_tree_with_final(else_stmts, env, counter, else_return_tuple)
+          wrap_flow_expr(else_expr, fallback, line, counter)
+
+        nil ->
+          flow_expr =
+            {:tuple, line, [{:atom, line, :__flow__}, {:atom, line, :ok}, {:atom, line, :ok}, fallback]}
+          {flow_expr, counter}
+
+        {:else_if, %{if: inner_if}} ->
+          {:if_stmt, %{cond: inner_cond, then_block: inner_then, else_branch: inner_else}} = inner_if
+          if_flow_expr(inner_cond, inner_then, inner_else, env, counter, assigned_vars)
+      end
+
+    clause_true = {:clause, line, [{:atom, line, true}], [], [then_flow_expr]}
+    clause_false = {:clause, line, [{:atom, line, false}], [], [else_flow_expr]}
+    {{:case, line, cond_form, [clause_true, clause_false]}, counter}
+  end
+
+  defp wrap_flow_expr(expr, fallback, line, counter) do
+    {ok_var, counter} = fresh_var("if_value", counter)
+    ret_var = internal_var("return_value")
+    return_tuple = {:tuple, line, [{:atom, line, :__return__}, {:var, line, ret_var}]}
+    break_var = internal_var("break_values")
+
+    flow_tuple_ok =
+      {:tuple, line,
+       [
+         {:atom, line, :__flow__},
+         {:atom, line, :ok},
+         {:atom, line, :ok},
+         {:var, line, ok_var}
+       ]}
+
+    flow_tuple_return =
+      {:tuple, line,
+       [
+         {:atom, line, :__flow__},
+         {:atom, line, :return},
+         {:var, line, ret_var},
+         fallback
+       ]}
+
+    flow_tuple_break =
+      {:tuple, line,
+       [
+         {:atom, line, :__flow__},
+         {:atom, line, :break},
+         {:atom, line, :ok},
+         fallback
+       ]}
+
+    clause_return = {:clause, line, [return_tuple], [], [flow_tuple_return]}
+    clause_break_tuple =
+      {:clause, line, [{:tuple, line, [{:atom, line, :__break__}, {:var, line, break_var}]}], [],
+       [{:tuple, line, [{:atom, line, :__flow__}, {:atom, line, :break}, {:atom, line, :ok}, {:var, line, break_var}]}]}
+    clause_break = {:clause, line, [{:atom, line, :__break__}], [], [flow_tuple_break]}
+    clause_ok = {:clause, line, [{:var, line, ok_var}], [], [flow_tuple_ok]}
+    {{:case, line, expr, [clause_return, clause_break_tuple, clause_break, clause_ok]}, counter}
   end
 
   # Build a tuple expression with current values of variables
@@ -997,6 +1077,7 @@ defmodule BeamLang.Codegen do
       Enum.reduce(param_vars, env, fn {name, pvar}, acc ->
         Map.put(acc, name, pvar)
       end)
+      |> Map.put(:__loop_vars__, param_vars)
 
     # Generate body statements as a list of forms (no return-case wrapping)
     {body_forms, env_after_body, counter} = loop_body_forms(body_stmts, body_env, counter)
@@ -1094,31 +1175,60 @@ defmodule BeamLang.Codegen do
   end
 
   defp loop_stmt_form({:break, %{}}, env, counter) do
-    {{:atom, 1, :__break__}, env, counter}
+    case Map.get(env, :__loop_vars__) do
+      nil ->
+        {{:atom, 1, :__break__}, env, counter}
+
+      vars ->
+        break_values = build_vars_tuple(1, vars, env)
+        {{:tuple, 1, [{:atom, 1, :__break__}, break_values]}, env, counter}
+    end
   end
 
   defp loop_stmt_form({:if_stmt, %{cond: cond, then_block: then_block, else_branch: else_branch}}, env, counter) do
-    # For if in loop body, we need to handle it specially
-    {then_forms, _then_env, counter} =
+    then_stmts =
       case then_block do
-        {:block, %{stmts: stmts}} -> loop_body_forms(stmts, env, counter)
-        _ -> {[], env, counter}
+        {:block, %{stmts: stmts}} -> stmts
+        _ -> []
       end
 
-    {else_forms, _else_env, counter} =
+    {else_stmts, else_if_vars} =
       case else_branch do
-        {:else_block, %{block: {:block, %{stmts: stmts}}}} -> loop_body_forms(stmts, env, counter)
-        nil -> {[{:atom, 1, :ok}], env, counter}
-        _ -> {[{:atom, 1, :ok}], env, counter}
+        {:else_block, %{block: {:block, %{stmts: stmts}}}} -> {stmts, []}
+        {:else_if, %{if: if_stmt}} -> {[], find_assigned_in_stmt(if_stmt)}
+        nil -> {[], []}
       end
 
-    cond_form = expr_form(1, cond, env)
-    then_expr = if length(then_forms) == 1, do: hd(then_forms), else: {:block, 1, then_forms}
-    else_expr = if length(else_forms) == 1, do: hd(else_forms), else: {:block, 1, else_forms}
+    assigned_vars =
+      (find_assigned_vars(then_stmts) ++ find_assigned_vars(else_stmts) ++ else_if_vars)
+      |> Enum.uniq()
+      |> Enum.filter(&Map.has_key?(env, &1))
 
-    clause_true = {:clause, 1, [{:atom, 1, true}], [], [then_expr]}
-    clause_false = {:clause, 1, [{:atom, 1, false}], [], [else_expr]}
-    {{:case, 1, cond_form, [clause_true, clause_false]}, env, counter}
+    if Enum.empty?(assigned_vars) do
+      # For if in loop body, we need to handle it specially
+      {then_forms, _then_env, counter} =
+        case then_block do
+          {:block, %{stmts: stmts}} -> loop_body_forms(stmts, env, counter)
+          _ -> {[], env, counter}
+        end
+
+      {else_forms, _else_env, counter} =
+        case else_branch do
+          {:else_block, %{block: {:block, %{stmts: stmts}}}} -> loop_body_forms(stmts, env, counter)
+          nil -> {[{:atom, 1, :ok}], env, counter}
+          _ -> {[{:atom, 1, :ok}], env, counter}
+        end
+
+      cond_form = expr_form(1, cond, env)
+      then_expr = if length(then_forms) == 1, do: hd(then_forms), else: {:block, 1, then_forms}
+      else_expr = if length(else_forms) == 1, do: hd(else_forms), else: {:block, 1, else_forms}
+
+      clause_true = {:clause, 1, [{:atom, 1, true}], [], [then_expr]}
+      clause_false = {:clause, 1, [{:atom, 1, false}], [], [else_expr]}
+      {{:case, 1, cond_form, [clause_true, clause_false]}, env, counter}
+    else
+      if_stmt_expr_with_propagation(cond, then_block, else_branch, env, counter, assigned_vars)
+    end
   end
 
   defp loop_stmt_form(stmt, env, counter) do
@@ -1145,9 +1255,13 @@ defmodule BeamLang.Codegen do
         clause_return = {:clause, line, [return_tuple], [], [return_tuple]}
 
         break_values = build_vars_tuple(line, param_vars, env_after_body)
-        clause_break = {:clause, line, [{:atom, line, :__break__}], [], [break_values]}
+        break_var = internal_var("break_values")
+        clause_break =
+          {:clause, line, [{:atom, line, :__break__}], [], [break_values]}
+        clause_break_tuple =
+          {:clause, line, [{:tuple, line, [{:atom, line, :__break__}, {:var, line, break_var}]}], [], [{:var, line, break_var}]}
         clause_continue = {:clause, line, [{:var, line, :_}], [], [continue_call]}
-        {:case, line, body_expr, [clause_return, clause_break, clause_continue]}
+        {:case, line, body_expr, [clause_return, clause_break_tuple, clause_break, clause_continue]}
       else
         # Simple case: just sequence forms and add continue call
         {:block, line, body_forms ++ [continue_call]}
@@ -1157,6 +1271,7 @@ defmodule BeamLang.Codegen do
 
   defp has_return_or_break?({:tuple, _, [{:atom, _, :__return__}, _]}), do: true
   defp has_return_or_break?({:atom, _, :__break__}), do: true
+  defp has_return_or_break?({:tuple, _, [{:atom, _, :__break__}, _]}), do: true
   defp has_return_or_break?({:case, _, _, clauses}) do
     Enum.any?(clauses, fn {:clause, _, _, _, body} ->
       Enum.any?(body, &has_return_or_break?/1)
@@ -1211,9 +1326,12 @@ defmodule BeamLang.Codegen do
     ret_var = internal_var("return_value")
     return_tuple = {:tuple, line, [{:atom, line, :__return__}, {:var, line, ret_var}]}
     clause_return = {:clause, line, [return_tuple], [], [return_tuple]}
+    break_var = internal_var("break_values")
     clause_break = {:clause, line, [{:atom, line, :__break__}], [], [{:atom, line, :ok}]}
+    clause_break_tuple =
+      {:clause, line, [{:tuple, line, [{:atom, line, :__break__}, {:var, line, break_var}]}], [], [{:var, line, break_var}]}
     clause_continue = {:clause, line, [{:var, line, :_}], [], [continue_expr]}
-    {{:case, line, body_expr, [clause_return, clause_break, clause_continue]}, counter}
+    {{:case, line, body_expr, [clause_return, clause_break_tuple, clause_break, clause_continue]}, counter}
   end
 
   @spec block_expr_form(BeamLang.AST.block(), map()) :: tuple()
@@ -1262,8 +1380,12 @@ defmodule BeamLang.Codegen do
     ret_var = internal_var("return_value")
     return_tuple = {:tuple, line, [{:atom, line, :__return__}, {:var, line, ret_var}]}
     clause_return = {:clause, line, [return_tuple], [], [return_tuple]}
+    break_var = internal_var("break_values")
+    clause_break = {:clause, line, [{:atom, line, :__break__}], [], [{:atom, line, :__break__}]}
+    clause_break_tuple =
+      {:clause, line, [{:tuple, line, [{:atom, line, :__break__}, {:var, line, break_var}]}], [], [{:tuple, line, [{:atom, line, :__break__}, {:var, line, break_var}]}]}
     clause_continue = {:clause, line, [{:var, line, :_}], [], [continue_expr]}
-    {{:case, line, expr, [clause_return, clause_continue]}, counter}
+    {{:case, line, expr, [clause_return, clause_break_tuple, clause_break, clause_continue]}, counter}
   end
 
   defp unwrap_return(expr, counter) do

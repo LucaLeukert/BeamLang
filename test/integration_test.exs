@@ -95,6 +95,42 @@ defmodule BeamLang.IntegrationTest do
     assert {:ok, 22} == BeamLang.run_source(source)
   end
 
+  test "propagates mutable assignments with return in if branch" do
+    source = """
+    fn main(args: [String]) -> number {
+        let mut x = 1;
+        if (true) {
+            x = 2;
+            return x;
+        } else {
+            x = 3;
+        }
+        return x;
+    }
+    """
+
+    assert {:ok, 2} == BeamLang.run_source(source)
+  end
+
+  test "propagates mutable assignments with break in if branch" do
+    source = """
+    fn main(args: [String]) -> number {
+        let mut x = 0;
+        loop {
+            if (x == 0) {
+                x = 1;
+                break;
+            } else {
+                x = 2;
+            }
+        }
+        return x;
+    }
+    """
+
+    assert {:ok, 1} == BeamLang.run_source(source)
+  end
+
   test "supports void return" do
     source = """
     fn main(args: [String]) -> void {

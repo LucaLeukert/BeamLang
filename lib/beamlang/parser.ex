@@ -1024,21 +1024,6 @@ defmodule BeamLang.Parser do
     parse_list_literal(lbracket_tok, rest)
   end
 
-  @spec parse_tuple_elements([Token.t()], [BeamLang.AST.expr()]) ::
-          {:ok, [BeamLang.AST.expr()], [Token.t()]} | {:error, BeamLang.Error.t()}
-  defp parse_tuple_elements([%Token{type: :rparen} | _] = rest, acc) do
-    {:ok, Enum.reverse(acc), rest}
-  end
-
-  defp parse_tuple_elements(tokens, acc) do
-    with {:ok, expr, rest} <- parse_expression(tokens) do
-      case rest do
-        [%Token{type: :comma} | rest2] -> parse_tuple_elements(rest2, [expr | acc])
-        _ -> {:ok, Enum.reverse([expr | acc]), rest}
-      end
-    end
-  end
-
   defp parse_primary([%Token{type: :string} | _] = tokens) do
     parse_literal(tokens)
   end
@@ -1055,6 +1040,21 @@ defmodule BeamLang.Parser do
               {:error, _} -> parse_identifier(tokens)
             end
         end
+    end
+  end
+
+  @spec parse_tuple_elements([Token.t()], [BeamLang.AST.expr()]) ::
+          {:ok, [BeamLang.AST.expr()], [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_tuple_elements([%Token{type: :rparen} | _] = rest, acc) do
+    {:ok, Enum.reverse(acc), rest}
+  end
+
+  defp parse_tuple_elements(tokens, acc) do
+    with {:ok, expr, rest} <- parse_expression(tokens) do
+      case rest do
+        [%Token{type: :comma} | rest2] -> parse_tuple_elements(rest2, [expr | acc])
+        _ -> {:ok, Enum.reverse([expr | acc]), rest}
+      end
     end
   end
 
