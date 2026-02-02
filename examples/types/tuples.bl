@@ -1,0 +1,91 @@
+// Tuple Types Example
+// Demonstrates tuple creation, access, and usage
+
+fn main(args: [String]) -> number {
+    // === Basic Tuple Creation ===
+    print("=== Basic Tuples ===");
+    
+    let pair: (number, String) = (42, "answer");
+    print("Pair created: (42, answer)");
+    
+    let triple: (number, number, number) = (1, 2, 3);
+    print("Triple created: (1, 2, 3)");
+    
+    // === Tuple Destructuring ===
+    print("=== Tuple Destructuring ===");
+    
+    let (num, text) = pair;
+    print("Destructured pair:");
+    print("  num = ");
+    print(num);
+    print("  text = ");
+    print(text);
+    
+    let (x, y, z) = triple;
+    print("Destructured triple:");
+    print("  x = ");
+    print(x);
+    print("  y = ");
+    print(y);
+    print("  z = ");
+    print(z);
+    
+    // === Tuples in Functions ===
+    print("=== Tuples in Functions ===");
+    
+    let point = make_point(10, 20);
+    let (px, py) = point;
+    print("Point from function:");
+    print("  px = ");
+    print(px);
+    print("  py = ");
+    print(py);
+    
+    // Swap values using tuples
+    let (a, b) = swap(1, 2);
+    print("Swapped (1, 2):");
+    print("  a = ");
+    print(a);
+    print("  b = ");
+    print(b);
+    
+    // === Multiple Return Values ===
+    print("=== Multiple Return Values ===");
+    
+    let (quotient, remainder) = divmod(17, 5);
+    print("17 divmod 5:");
+    print("  quotient = ");
+    print(quotient);
+    print("  remainder = ");
+    print(remainder);
+    
+    // === Nested Tuples ===
+    print("=== Nested Tuples ===");
+    
+    let nested: ((number, number), String) = ((1, 2), "coords");
+    let (coords, label) = nested;
+    let (cx, cy) = coords;
+    print("Nested tuple:");
+    print("  label = ");
+    print(label);
+    print("  cx = ");
+    print(cx);
+    print("  cy = ");
+    print(cy);
+    
+    return 0;
+}
+
+fn make_point(x: number, y: number) -> (number, number) {
+    return (x, y);
+}
+
+fn swap(a: number, b: number) -> (number, number) {
+    return (b, a);
+}
+
+fn divmod(dividend: number, divisor: number) -> (number, number) {
+    let q = dividend / divisor;
+    let r = dividend - (q * divisor);
+    return (q, r);
+}

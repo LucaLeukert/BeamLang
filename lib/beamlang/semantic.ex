@@ -2129,10 +2129,97 @@ defmodule BeamLang.Semantic do
             {:ok, _} ->
               {:cont, {:ok, acc_env, errors}}
           end
+
+        # Compound assignment: x += expr, x -= expr, etc.
+        {:compound_assign, %{target: target, op: _op, expr: expr}} ->
+          case assignment_target(target, acc_env) do
+            {:error, err} ->
+              {:cont, {:ok, acc_env, [err | errors]}}
+
+            {:ok, %{name: name, mutable: false}} ->
+              {:cont,
+               {:ok, acc_env,
+                [
+                  BeamLang.Error.new(
+                    :type,
+                    "Cannot assign to immutable variable '#{name}'.",
+                    stmt_span(stmt)
+                  )
+                  | errors
+                ]}}
+
+            {:ok, %{type: declared, mutable: true}} ->
+              case type_of_expr(expr, func_table, type_table, acc_env, declared) do
+                {:error, reason} when is_atom(reason) ->
+                  {:cont,
+                   {:ok, acc_env,
+                    [
+                      BeamLang.Error.new(
+                        :type,
+                        "Error in compound assignment: #{reason}.",
+                        expr_span(expr)
+                      )
+                      | errors
+                    ]}}
+
+                {:error, {_, errs}} when is_list(errs) ->
+                  {:cont, {:ok, acc_env, errs ++ errors}}
+
+                {:ok, _inferred} ->
+                  {:cont, {:ok, acc_env, errors}}
+              end
+          end
+
+        # Let destructuring: let { x, y } = expr or let (a, b) = expr
+        {:let_destruct, %{pattern: pattern, expr: expr}} ->
+          # Extract bindings from the pattern
+          bindings = destruct_pattern_bindings(pattern)
+          
+          # Type check the expression
+          case type_of_expr(expr, func_table, type_table, acc_env, nil) do
+            {:error, reason} when is_atom(reason) ->
+              {:cont,
+               {:ok, acc_env,
+                [
+                  BeamLang.Error.new(
+                    :type,
+                    "Error in destructuring expression: #{reason}.",
+                    expr_span(expr)
+                  )
+                  | errors
+                ]}}
+
+            {:error, {_, errs}} when is_list(errs) ->
+              {:cont, {:ok, acc_env, errs ++ errors}}
+
+            {:ok, _inferred} ->
+              # Add all bindings to env (immutable by default)
+              new_env = Enum.reduce(bindings, acc_env, fn name, env ->
+                Map.put(env, name, %{type: :any, mutable: false})
+              end)
+              {:cont, {:ok, new_env, errors}}
+          end
       end
     end)
     |> finalize_errors()
   end
+
+  # Extract variable names from destructuring patterns
+  defp destruct_pattern_bindings({:struct_destruct, %{fields: fields}}) do
+    Enum.map(fields, fn
+      %{binding: nil, name: name} -> name
+      %{binding: binding} -> binding
+    end)
+  end
+
+  defp destruct_pattern_bindings({:tuple_destruct, %{elements: elements}}) do
+    Enum.map(elements, fn
+      %{name: name} -> name
+      name when is_binary(name) -> name
+    end)
+  end
+
+  defp destruct_pattern_bindings(_), do: []
 
   @spec build_function_table([BeamLang.AST.func()]) :: {:ok, map()}
   defp build_function_table(functions) do
@@ -3109,6 +3196,8 @@ defmodule BeamLang.Semantic do
   defp stmt_span({:expr, %{span: span}}), do: span
   defp stmt_span({:let, %{span: span}}), do: span
   defp stmt_span({:assign, %{span: span}}), do: span
+  defp stmt_span({:compound_assign, %{span: span}}), do: span
+  defp stmt_span({:let_destruct, %{span: span}}), do: span
   defp stmt_span({:guard, %{span: span}}), do: span
   defp stmt_span({:if_stmt, %{span: span}}), do: span
   defp stmt_span({:while, %{span: span}}), do: span
@@ -3487,6 +3576,33 @@ defmodule BeamLang.Semantic do
     {cond, _} = annotate_expr(cond, :bool, env, func_table, type_table)
     {else_block, _} = annotate_block(else_block, env, func_table, type_table, return_type)
     {{:guard, %{info | cond: cond, else_block: else_block}}, env}
+  end
+
+  defp annotate_stmt(
+         {:compound_assign, %{target: target, expr: expr} = info},
+         env,
+         func_table,
+         type_table,
+         _return_type
+       ) do
+    {target, target_type} = annotate_expr(target, nil, env, func_table, type_table)
+    {expr, _} = annotate_expr(expr, target_type, env, func_table, type_table)
+    {{:compound_assign, %{info | target: target, expr: expr}}, env}
+  end
+
+  defp annotate_stmt(
+         {:let_destruct, %{pattern: pattern, expr: expr} = info},
+         env,
+         func_table,
+         type_table,
+         _return_type
+       ) do
+    {expr, _} = annotate_expr(expr, nil, env, func_table, type_table)
+    bindings = destruct_pattern_bindings(pattern)
+    new_env = Enum.reduce(bindings, env, fn name, acc ->
+      Map.put(acc, name, %{type: :any, mutable: false})
+    end)
+    {{:let_destruct, %{info | expr: expr}}, new_env}
   end
 
   defp annotate_stmt(stmt, env, _func_table, _type_table, _return_type), do: {stmt, env}
