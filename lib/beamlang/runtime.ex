@@ -436,13 +436,11 @@ defmodule BeamLang.Runtime do
             {:ok, stat} ->
               is_dir = stat.type == :directory
               size = stat.size
+              name_string = stdlib_string_new(entry)
               
-              [%{
-                __beamlang_type__: "FileEntry",
-                name: stdlib_string_new(entry),
-                is_dir: is_dir,
-                size: size
-              }]
+              # Use BeamLang stdlib function to construct FileEntry
+              file_entry = apply(current_module(), :file_entry_new, [name_string, is_dir, size])
+              [file_entry]
             {:error, _reason} ->
               # Skip files that cannot be stat'd (deleted, permission denied, etc.)
               []
