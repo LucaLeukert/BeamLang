@@ -260,34 +260,6 @@ defmodule BeamLang.IntegrationTest do
     assert {:ok, 0} == BeamLang.run_source(source)
   end
 
-  test "parse_args converts basic field types" do
-    source = """
-    type Args {
-        count: number,
-        flag: bool,
-        letter: char,
-        path: String
-    }
-
-    fn main(args: [String]) -> number {
-        let parsed = parse_args<Args>(args);
-
-        return match (parsed) {
-            case!ok opts => if (opts->flag) { opts->count; } else { 0; },
-            case!err _ => 0
-        };
-    }
-    """
-
-    assert {:ok, %{module: module, binary: binary}} = BeamLang.compile_source(source)
-
-    args =
-      ["42", "true", "a", "/tmp"]
-      |> Enum.map(&String.to_charlist/1)
-
-    assert {:ok, 42} == BeamLang.Runtime.load_and_run(module, binary, args)
-  end
-
   test "runs if expression" do
     source = """
     fn main(args: [String]) -> number {

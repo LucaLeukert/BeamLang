@@ -1353,16 +1353,52 @@ defmodule BeamLang.Parser do
     with {:ok, case_tok, rest1} <- expect(tokens, :case),
          {:ok, pattern, rest2} <- parse_case_pattern(rest1),
          {:ok, guard, rest3} <- parse_optional_guard(rest2),
-         {:ok, _arrow, rest4} <- expect(rest3, :fat_arrow),
-         {:ok, body, rest5} <- parse_case_body(rest4) do
-      span = BeamLang.Span.merge(case_tok.span, expr_span(body))
-      match_case = %{pattern: pattern, guard: guard, body: body, span: span}
+         {:ok, arrow_type, _arrow_tok, rest4} <- parse_match_arrow(rest3, []) do
+      body_result =
+        case {arrow_type, rest4} do
+          {:arrow, [%Token{type: :lbrace} | _]} ->
+            parse_case_body(rest4)
 
-      case rest5 do
-        [%Token{type: :comma} | rest6] -> parse_match_cases(rest6, [match_case | acc])
-        _ -> parse_match_cases(rest5, [match_case | acc])
+          {:arrow, [%Token{} = tok | _]} ->
+            {:error, error("Expected '{' after '->' for block body. Use '=>' for single expressions.", tok)}
+
+          {:fat_arrow, [%Token{type: :lbrace} = tok | _]} ->
+            {:error, error("Use '->' instead of '=>' when the body is a block.", tok)}
+
+          {:fat_arrow, _} ->
+            with {:ok, expr, rest5} <- parse_expression(rest4) do
+              {:ok, expr, rest5}
+            end
+        end
+
+      with {:ok, body, rest5} <- body_result do
+        span = BeamLang.Span.merge(case_tok.span, expr_span(body))
+        match_case = %{pattern: pattern, guard: guard, body: body, span: span}
+
+        case rest5 do
+          [%Token{type: :comma} | rest6] -> parse_match_cases(rest6, [match_case | acc])
+          _ -> parse_match_cases(rest5, [match_case | acc])
+        end
       end
     end
+  end
+
+  @spec parse_match_arrow([Token.t()], [BeamLang.AST.expr()]) ::
+          {:ok, :fat_arrow | :arrow, Token.t(), [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_match_arrow([%Token{type: :fat_arrow} = tok | rest], _acc) do
+    {:ok, :fat_arrow, tok, rest}
+  end
+
+  defp parse_match_arrow([%Token{type: :arrow} = tok | rest], _acc) do
+    {:ok, :arrow, tok, rest}
+  end
+
+  defp parse_match_arrow([%Token{} = tok | _], _acc) do
+    {:error, error("Expected '=>' or '->' in match case.", tok)}
+  end
+
+  defp parse_match_arrow([], _acc) do
+    {:error, BeamLang.Error.new(:parser, "Unexpected end of input in match cases.", BeamLang.Span.new("<source>", 0, 0))}
   end
 
   @spec parse_case_pattern([Token.t()]) ::

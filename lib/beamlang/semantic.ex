@@ -2475,6 +2475,7 @@ defmodule BeamLang.Semantic do
 
     # Find return statement anywhere in the block (not just last)
     type = find_block_return_type(stmts, func_table, type_table, env)
+    type = if type == nil, do: last_stmt_expr_type(stmts, func_table, type_table, env), else: type
 
     {type, stmt_errors}
   end
@@ -2487,6 +2488,17 @@ defmodule BeamLang.Semantic do
       {:return, %{expr: expr}} -> type_or_unknown(expr, func_table, type_table, env)
       _ -> nil
     end)
+  end
+
+  defp last_stmt_expr_type([], _func_table, _type_table, _env), do: nil
+
+  defp last_stmt_expr_type(stmts, func_table, type_table, env) do
+    case List.last(stmts) do
+      {:expr, %{expr: expr}} -> type_or_unknown(expr, func_table, type_table, env)
+      {:return, %{expr: nil}} -> :void
+      {:return, %{expr: expr}} -> type_or_unknown(expr, func_table, type_table, env)
+      _ -> nil
+    end
   end
 
   @spec case_body_type(BeamLang.AST.expr(), map(), map(), map()) ::

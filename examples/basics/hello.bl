@@ -1,11 +1,9 @@
 fn main(args: [String]) -> number {
     let a = match(true) {
-        case true => {
+        case true -> {
             return 0;
         },
-        case false => {
-            1;
-        },
+        case false => 1
     };
 
     return 0;

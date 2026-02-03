@@ -411,6 +411,27 @@ defmodule BeamLang.ParserTest do
     assert %{guard: {:binary, %{op: :lt}}} = hd(cases)
   end
 
+  test "parses match arrows for blocks and expressions" do
+    source = """
+    fn main() -> number {
+        let value = match (true) {
+            case true -> { 1; },
+            case false => 2
+        };
+        return value;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{functions: [func]}} = ast
+    assert {:function, %{body: {:block, %{stmts: [stmt, _]}}}} = func
+    assert {:let, %{expr: {:match, %{cases: [case1, case2]}}}} = stmt
+    assert {:block_expr, _} = case1.body
+    assert {:integer, _} = case2.body
+  end
+
   test "parses call with type arguments" do
     source = """
     fn main(args: [String]) -> number {

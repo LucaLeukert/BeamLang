@@ -418,6 +418,15 @@ match (user) {
 }
 ```
 
+Use `=>` for single-expression case bodies and `->` for block bodies:
+
+```beamlang
+match (value) {
+    case true -> { 1; },
+    case false => 0
+}
+```
+
 Match expressions must be exhaustive. Use `case _` or cover all variants (e.g. `case?some` + `case?none`, `case!ok` + `case!err`, `case true` + `case false`).
 
 ## Expressions
