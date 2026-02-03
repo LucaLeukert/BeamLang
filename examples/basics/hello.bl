@@ -1,7 +1,12 @@
 fn main(args: [String]) -> number {
-    let list = ["Hello", "World", "!"];    
-    println("Testing list join:");
-    println(list->join(", "));
+    let a = match(true) {
+        case true => {
+            return 0;
+        },
+        case false => {
+            1;
+        },
+    };
 
     return 0;
 }
