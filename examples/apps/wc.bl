@@ -139,9 +139,7 @@ fn main(args: [String]) -> number {
                 return wc_content(content, opts);
             }
 
-            let content_result = read_file(opts->file);
-
-            match (content_result) {
+            match (read_file(opts->file)) {
                 case!ok content => wc_content(content, opts),
                 case!err err -> {
                     println("wc: ${opts->file}: ${err->message}");
