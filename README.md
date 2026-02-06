@@ -1,73 +1,96 @@
-# BeamLang Compiler (Elixir)
+# BeamLang
 
-This repo contains the BeamLang compiler and standard library. BeamLang is a statically typed language that compiles to BEAM.
+**A statically typed language that compiles to the BEAM.**  
+Functions, generics, optionals, results, modules, and a standard library written in BeamLang.
 
-## Highlights
+```beamlang
+import math.{Pair, add};
 
-- Functions, lambdas, and expression-based blocks
-- Struct types with function-valued fields (method syntax via `->`)
-- Generics for types and functions
-- Optional (`T?`, `?some`, `?none`) and Result (`Ok!Err`, `!ok`, `!err`)
-- Modules with `export`/`import` and namespace access (`math::add`)
-- Iterators for `for` loops (`Iterator<T>`)
-- Standard library implemented in `.bl` files under `stdlib/`
-
-## Run
-
-```sh
-mix beamlang examples/hello.bl
+fn main(args: [String]) -> number {
+    let pair: Pair = { left = 2, right = 3 };
+    return add(pair->left, pair->right);
+}
 ```
 
-With debug output:
+---
 
-```sh
+## Features
+
+| Area | What you get |
+|------|----------------|
+| **Types** | Primitives, structs, generics, `T?` / `Optional<T>`, `Ok!Err` / `Result<Ok,Err>` |
+| **Functions** | Named functions, lambdas, `internal` (module-private), method-style `->` on structs |
+| **Modules** | One module per `.bl` file, `export` / `import`, namespace `math::add` |
+| **Control flow** | `if`, `match` (exhaustive), `for` over `Iterator<T>` |
+| **Stdlib** | Implemented in BeamLang under `stdlib/` — `math`, `string`, `list`, `optional`, `result`, `iterator`, `range`, `map`, `set`, `args`, `system`, `network`, `vec2` |
+
+---
+
+## Quick start
+
+**Requirements:** Elixir 1.14+
+
+```bash
+# Run a program
+mix beamlang examples/basics/hello.bl
+
+# With debug (print AST, don't run)
 mix beamlang examples/hello.bl --print-ast --no-run
+
+# Or use the helper script (after mix escript.build)
+bin/beamlang examples/basics/hello.bl
 ```
 
-Or use the helper script:
+**Tests:**
 
-```sh
-bin/beamlang examples/hello.bl --print-ast --no-run
+```bash
+mix test
 ```
 
-Start the language server:
+---
 
-```sh
+## Editor support
+
+- **VS Code:** [beamlang-vscode](beamlang-vscode/) — syntax, LSP (diagnostics, hover, go-to definition, completion).
+
+**LSP (any editor):**
+
+```bash
 mix beamlang --lsp
 ```
 
-For editor integration, build the escript once and point the editor to it:
+Or build the escript and run it:
 
-```sh
+```bash
 mix escript.build
 ./beamlang --lsp
 ```
 
-Enable LSP debug logs:
+Debug LSP logs: `./beamlang --lsp --lsp-debug`
 
-```sh
-./beamlang --lsp --lsp-debug
-```
-
-## Tests
-
-```sh
-mix test
-```
+---
 
 ## Examples
 
-See `examples/` for runnable programs, including:
+| Category | Examples |
+|----------|----------|
+| **Basics** | `examples/basics/hello.bl`, `args.bl`, `math.bl` |
+| **Types** | `optional.bl`, `result.bl`, `generic.bl`, `enum.bl`, `tuples.bl` |
+| **Functions** | `generic_fn.bl`, `lambda.bl`, `pattern_params.bl`, `self_method.bl` |
+| **Control flow** | `control_flow.bl`, `loops.bl`, `if_expr.bl`, `guard.bl` |
+| **Collections** | `iterator_methods.bl`, `list.bl`, `list_methods.bl`, `range_demo.bl` |
+| **Modules** | `use_math.bl`, `stdlib_methods.bl` |
+| **Apps** | `examples/apps/` — `cat`, `curl`, `grep`, `ls`, `wc` |
+| **LSP** | `examples/lsp/lsp_features.bl`, `hover_types.bl` |
 
-- `examples/hello.bl`
-- `examples/generic_fn.bl`
-- `examples/optional.bl`
-- `examples/result.bl`
-- `examples/iterator_methods.bl`
-- `examples/lsp/lsp_features.bl`
-- `examples/lsp/hover_types.bl`
+---
 
-## Design Docs
+## Design & docs
 
-- `beamlang_design.md` (original design)
-- `beamlang_design.md` (current, implemented language)
+- **[beamlang_design.md](beamlang_design.md)** — language spec, types, operators, stdlib, and implementation notes.
+
+---
+
+## License
+
+See repository for license details.
