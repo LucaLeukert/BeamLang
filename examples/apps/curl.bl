@@ -77,7 +77,8 @@ type Args {
 }
 
 fn is_non_empty(value: String) -> bool {
-    return value->trim()->length() > 0;
+    let trimmed = value->trim();
+    return trimmed->length() > 0;
 }
 
 fn trim_header(value: String) -> String {
@@ -113,7 +114,8 @@ fn resolve_method(opts: Args) -> String {
     if (req->length() > 0) {
         return req->to_upper();
     }
-    if (opts->data->trim()->length() > 0) {
+    let data_trimmed = opts->data->trim();
+    if (data_trimmed->length() > 0) {
         return "POST";
     }
     return "GET";
@@ -154,7 +156,8 @@ fn write_output(path: String, content: String, silent: bool) -> number {
 }
 
 fn output_body(opts: Args, body: String) -> number {
-    if (opts->output->trim()->length() > 0) {
+    let out_trimmed = opts->output->trim();
+    if (out_trimmed->length() > 0) {
         return write_output(opts->output, body, opts->silent);
     }
     print(body);
