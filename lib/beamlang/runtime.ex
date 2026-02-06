@@ -418,6 +418,19 @@ defmodule BeamLang.Runtime do
     end
   end
 
+  @spec file_write(term(), term()) :: map()
+  def file_write(path, contents) do
+    path_str = string_data(path) |> to_string()
+    data = string_data(contents)
+    case File.write(path_str, data) do
+      :ok ->
+        apply(current_module(), :result_ok, [true])
+      {:error, reason} ->
+        error_msg = stdlib_string_new(to_string(reason))
+        apply(current_module(), :result_err, [error_msg])
+    end
+  end
+
   @spec file_exists(term()) :: boolean()
   def file_exists(path) do
     path_str = string_data(path) |> to_string()
@@ -457,6 +470,47 @@ defmodule BeamLang.Runtime do
     end
   end
 
+  @spec http_request(term(), term(), term(), term(), number(), boolean()) :: map()
+  def http_request(method, url, headers, body, timeout_ms, follow_redirects) do
+    ensure_http_client()
+
+    case http_method_atom(method) do
+      :unknown ->
+        error_msg = stdlib_string_new("Unsupported HTTP method.")
+        apply(current_module(), :result_err, [error_msg])
+      method_atom ->
+        url_data = string_data(url)
+        url_charlist = if is_list(url_data), do: url_data, else: to_string(url_data) |> String.to_charlist()
+        {header_tuples, content_type} = http_headers(headers)
+        body_data = string_data(body)
+        has_body = body_data != []
+
+        request =
+          if method_atom in [:post, :put, :patch] or has_body do
+            {url_charlist, header_tuples, content_type, body_data}
+          else
+            {url_charlist, header_tuples}
+          end
+
+        timeout = normalize_timeout(timeout_ms)
+        http_options = [timeout: timeout, connect_timeout: timeout]
+        options = if follow_redirects, do: [autoredirect: true], else: []
+
+        case :httpc.request(method_atom, request, http_options, options) do
+          {:ok, {{_version, status, _reason}, resp_headers, resp_body}} ->
+            response = http_response_struct(status, resp_headers, resp_body)
+            apply(current_module(), :result_ok, [response])
+          {:ok, {status_line, resp_headers, resp_body}} ->
+            status = parse_status_line(status_line)
+            response = http_response_struct(status, resp_headers, resp_body)
+            apply(current_module(), :result_ok, [response])
+          {:error, reason} ->
+            error_msg = stdlib_string_new(to_string(reason))
+            apply(current_module(), :result_err, [error_msg])
+        end
+    end
+  end
+
   @spec read_stdin() :: map()
   def read_stdin() do
     case IO.read(:stdio, :eof) do
@@ -483,6 +537,74 @@ defmodule BeamLang.Runtime do
     :erlang.monotonic_time(:millisecond)
   end
 
+  defp ensure_http_client do
+    _ = Application.ensure_all_started(:inets)
+    _ = Application.ensure_all_started(:ssl)
+    :ok
+  end
+
+  defp http_method_atom(method) do
+    method_str = string_data(method) |> to_string() |> String.upcase()
+    case method_str do
+      "GET" -> :get
+      "POST" -> :post
+      "PUT" -> :put
+      "PATCH" -> :patch
+      "DELETE" -> :delete
+      "HEAD" -> :head
+      "OPTIONS" -> :options
+      "TRACE" -> :trace
+      "CONNECT" -> :connect
+      _ -> :unknown
+    end
+  end
+
+  defp normalize_timeout(timeout_ms) do
+    cond do
+      is_number(timeout_ms) and timeout_ms > 0 ->
+        round(timeout_ms)
+      true ->
+        30_000
+    end
+  end
+
+  defp http_headers(headers) do
+    header_items = list_data(headers)
+    {tuples, content_type} =
+      Enum.reduce(header_items, {[], "application/octet-stream"}, fn header, {acc, content_type} ->
+        header_str = string_data(header) |> to_string()
+        case String.split(header_str, ":", parts: 2) do
+          [name, value] ->
+            key = String.trim(name)
+            val = String.trim(value)
+            key_downcase = String.downcase(key)
+            content_type = if key_downcase == "content-type", do: val, else: content_type
+            {[{String.to_charlist(key), String.to_charlist(val)} | acc], content_type}
+          _ ->
+            {acc, content_type}
+        end
+      end)
+
+    {Enum.reverse(tuples), content_type}
+  end
+
+  defp http_response_struct(status, resp_headers, resp_body) do
+    body_binary = IO.iodata_to_binary(resp_body)
+    body_struct = stdlib_string_new(body_binary)
+    headers =
+      resp_headers
+      |> Enum.map(fn {key, value} ->
+        line = "#{to_string(key)}: #{to_string(value)}"
+        stdlib_string_new(line)
+      end)
+    header_list = wrap_as_beamlang_list(headers, current_module())
+    apply(current_module(), :http_response_new, [status, body_struct, header_list])
+  end
+
+  defp parse_status_line({_http, status, _reason}) when is_integer(status), do: status
+  defp parse_status_line({_http, status, _reason, _}) when is_integer(status), do: status
+  defp parse_status_line(_), do: 0
+
   defp string_data(%{__beamlang_type__: "String", data: data}), do: data
   defp string_data(%{__beamlang_type__: ~c"String", data: data}), do: data
   defp string_data(value) when is_map(value) do
@@ -492,6 +614,17 @@ defmodule BeamLang.Runtime do
   defp string_data(value) when is_binary(value), do: value
   defp string_data({:char, code}) when is_integer(code), do: [code]
   defp string_data(value), do: inspect(value)
+
+  defp list_data(value) when is_map(value) do
+    if list_map?(value), do: Map.get(value, :data), else: []
+  end
+  defp list_data(value) when is_list(value), do: value
+  defp list_data(_value), do: []
+
+  defp list_map?(value) do
+    is_map(value) and Map.has_key?(value, :data) and Map.has_key?(value, :length) and
+      Map.has_key?(value, :get) and not string_map?(value)
+  end
 
   defp ensure_charlist(value) when is_binary(value), do: String.to_charlist(value)
   defp ensure_charlist(value) when is_map(value) do

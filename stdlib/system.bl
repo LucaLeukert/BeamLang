@@ -25,6 +25,9 @@ export type Clock {
 @external(elixir, "BeamLang.Runtime", "file_read")
 fn file_read_data(path: String) -> String!String;
 
+@external(elixir, "BeamLang.Runtime", "file_write")
+fn file_write_data(path: String, contents: String) -> bool!String;
+
 @external(elixir, "BeamLang.Runtime", "file_exists")
 fn file_exists_data(path: String) -> bool;
 
@@ -93,6 +96,15 @@ fn read_file(path: String) -> String!IoError {
     let result = file_read_data(path);
     return match (result) {
         case!ok content => !ok content,
+        case!err msg => !err make_io_error(msg)
+    };
+}
+
+/** Write a file and return a Result **/
+fn write_file(path: String, contents: String) -> bool!IoError {
+    let result = file_write_data(path, contents);
+    return match (result) {
+        case!ok ok => !ok ok,
         case!err msg => !err make_io_error(msg)
     };
 }
