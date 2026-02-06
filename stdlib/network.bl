@@ -1,0 +1,47 @@
+// Networking utilities for HTTP requests
+
+export error NetError {
+    kind: String,
+    message: String
+}
+
+export type HttpResponse {
+    status: number,
+    body: String,
+    headers: [String]
+}
+
+@external(elixir, "BeamLang.Runtime", "http_request")
+fn http_request_data(method: String, url: String, headers: [String], body: String, timeout_ms: number, follow_redirects: bool) -> HttpResponse!String;
+
+internal fn net_error_new(kind: String, message: String) -> NetError {
+    return { kind = kind, message = message };
+}
+
+internal fn http_response_new(status: number, body: String, headers: [String]) -> HttpResponse {
+    return { status = status, body = body, headers = headers };
+}
+
+export fn http_request(method: String, url: String, headers: [String], body: String, timeout_ms: number, follow_redirects: bool) -> HttpResponse!NetError {
+    let result = http_request_data(method, url, headers, body, timeout_ms, follow_redirects);
+    return match (result) {
+        case!ok response => !ok response,
+        case!err msg => !err net_error_new("request", msg)
+    };
+}
+
+export fn http_get(url: String) -> HttpResponse!NetError {
+    return http_request("GET", url, [], "", 30000, true);
+}
+
+export fn http_head(url: String) -> HttpResponse!NetError {
+    return http_request("HEAD", url, [], "", 30000, true);
+}
+
+export fn http_get_with(url: String, headers: [String], timeout_ms: number, follow_redirects: bool) -> HttpResponse!NetError {
+    return http_request("GET", url, headers, "", timeout_ms, follow_redirects);
+}
+
+export fn http_post(url: String, body: String, headers: [String]) -> HttpResponse!NetError {
+    return http_request("POST", url, headers, body, 30000, true);
+}

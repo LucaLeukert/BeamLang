@@ -567,6 +567,7 @@ export error IoError {
 }
 
 fn read_file(path: String) -> String!IoError
+fn write_file(path: String, contents: String) -> bool!IoError
 fn file_exists(path: String) -> bool
 fn get_env(name: String) -> String?
 ```
@@ -578,6 +579,35 @@ let result = read_file("config.txt");
 match (result) {
     case!ok content => println(content),
     case!err err => println("Error: ${err->message}")
+};
+```
+
+### Networking (HTTP)
+
+```beamlang
+export error NetError {
+    kind: String,
+    message: String
+}
+
+type HttpResponse {
+    status: number,
+    body: String,
+    headers: [String]
+}
+
+fn http_request(method: String, url: String, headers: [String], body: String, timeout_ms: number, follow_redirects: bool) -> HttpResponse!NetError
+fn http_get(url: String) -> HttpResponse!NetError
+fn http_head(url: String) -> HttpResponse!NetError
+```
+
+Example:
+
+```beamlang
+let result = http_get("https://example.com");
+match (result) {
+    case!ok resp => println(resp->body),
+    case!err err => println("Network error: ${err->message}")
 };
 ```
 
@@ -778,3 +808,14 @@ fn println(value: any) -> void;
 - The language does not have classes. Methods are just function fields in structs.
 - The stdlib is implemented in BeamLang and loaded as source, not hard-coded.
 - Internal stdlib functions are marked with `internal` and are not callable outside their module.
+
+## Async (Proposed)
+
+Not implemented yet. Proposed approach:
+- `Task<T>` type backed by a BEAM process
+- `spawn(fn() -> T)` returns `Task<T>`
+- `await(task: Task<T>) -> T` blocks until completion
+- `poll(task: Task<T>) -> T?` returns `?none` if not finished
+
+The runtime would spawn a process, send the result back to the parent,
+and store a mailbox reference inside `Task<T>`.
