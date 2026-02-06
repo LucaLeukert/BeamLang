@@ -242,43 +242,10 @@ defmodule BeamLang.Runtime do
 
   @spec any_to_string_data(term()) :: charlist()
   def any_to_string_data(value) do
-    cond do
-      is_binary(value) ->
-        # Elixir binary string -> charlist
-        String.to_charlist(value)
-
-      is_integer(value) ->
-        Integer.to_charlist(value)
-
-      is_float(value) ->
-        Float.to_charlist(value)
-
-      is_boolean(value) ->
-        if value, do: ~c"true", else: ~c"false"
-
-      value == :ok ->
-        ~c"void"
-
-      string_map?(value) ->
-        value.data
-
-      is_tuple(value) and tuple_size(value) == 2 and elem(value, 0) == :char ->
-        [elem(value, 1)]
-
-      is_list(value) ->
-        # Could be a charlist or list of values
-        if Enum.all?(value, &is_integer/1) do
-          value
-        else
-          inspect(value) |> String.to_charlist()
-        end
-
-      is_map(value) ->
-        inspect(value) |> String.to_charlist()
-
-      true ->
-        inspect(value) |> String.to_charlist()
-    end
+    value
+    |> format_value_iodata()
+    |> IO.iodata_to_binary()
+    |> String.to_charlist()
   end
 
   @spec iterator_next_data(list()) :: map()
@@ -384,14 +351,14 @@ defmodule BeamLang.Runtime do
 
   @spec println(term()) :: :ok
   def println(value) do
-    printable = string_data(value)
+    printable = any_to_string_data(value)
     :io.format("~s~n", [printable])
     :ok
   end
 
   @spec print(term()) :: :ok
   def print(value) do
-    printable = string_data(value)
+    printable = any_to_string_data(value)
     :io.format("~s", [printable])
     :ok
   end
@@ -614,6 +581,140 @@ defmodule BeamLang.Runtime do
   defp string_data(value) when is_binary(value), do: value
   defp string_data({:char, code}) when is_integer(code), do: [code]
   defp string_data(value), do: inspect(value)
+
+  defp format_value_iodata(value) do
+    cond do
+      is_binary(value) ->
+        value
+
+      is_integer(value) ->
+        Integer.to_string(value)
+
+      is_float(value) ->
+        Float.to_string(value)
+
+      is_boolean(value) ->
+        if value, do: "true", else: "false"
+
+      value == :ok ->
+        "void"
+
+      string_map?(value) ->
+        Map.get(value, :data)
+
+      is_tuple(value) and tuple_size(value) == 2 and elem(value, 0) == :char ->
+        [elem(value, 1)]
+
+      is_function(value) ->
+        "<fn>"
+
+      is_list(value) ->
+        format_list_iodata(value)
+
+      is_map(value) ->
+        format_map_iodata(value)
+
+      true ->
+        inspect(value)
+    end
+  end
+
+  defp format_list_iodata(list) do
+    if charlist?(list) do
+      list
+    else
+      items = Enum.map(list, &format_value_iodata/1)
+      ["[", Enum.intersperse(items, ", "), "]"]
+    end
+  end
+
+  defp format_map_iodata(map) do
+    cond do
+      Map.has_key?(map, :__beamlang_type__) ->
+        format_struct_iodata(map)
+
+      optional_map?(map) ->
+        format_optional_iodata(map)
+
+      result_map?(map) ->
+        format_result_iodata(map)
+
+      true ->
+        format_plain_map_iodata(map)
+    end
+  end
+
+  defp format_struct_iodata(map) do
+    type_label = ensure_charlist(Map.get(map, :__beamlang_type__))
+    type_name = to_string(type_label)
+    fields =
+      map
+      |> Map.delete(:__beamlang_type__)
+      |> Enum.reject(fn {key, _value} -> operator_field?(key) end)
+      |> Enum.sort_by(fn {key, _value} -> map_key_sort_key(key) end)
+
+    field_items =
+      Enum.map(fields, fn {key, value} ->
+        [format_field_name(key), " = ", format_value_iodata(value)]
+      end)
+
+    [type_name, "{", Enum.intersperse(field_items, ", "), "}"]
+  end
+
+  defp format_optional_iodata(map) do
+    case Map.get(map, :tag) do
+      1 -> ["?some ", format_value_iodata(Map.get(map, :value))]
+      _ -> "?none"
+    end
+  end
+
+  defp format_result_iodata(map) do
+    case Map.get(map, :tag) do
+      1 -> ["!ok ", format_value_iodata(Map.get(map, :value))]
+      _ -> ["!err ", format_value_iodata(Map.get(map, :value))]
+    end
+  end
+
+  defp format_plain_map_iodata(map) do
+    entries =
+      map
+      |> Enum.sort_by(fn {key, _value} -> map_key_sort_key(key) end)
+      |> Enum.map(fn {key, value} ->
+        [format_map_key(key), ": ", format_value_iodata(value)]
+      end)
+
+    ["%{", Enum.intersperse(entries, ", "), "}"]
+  end
+
+  defp format_map_key(key) when is_atom(key), do: Atom.to_string(key)
+  defp format_map_key(key) when is_binary(key), do: inspect(key)
+  defp format_map_key(key) when is_list(key) do
+    if charlist?(key), do: inspect(to_string(key)), else: inspect(key)
+  end
+  defp format_map_key(key), do: inspect(key)
+
+  defp format_field_name(key) when is_atom(key), do: Atom.to_string(key)
+  defp format_field_name(key), do: format_map_key(key)
+
+  defp map_key_sort_key(key) when is_atom(key), do: Atom.to_string(key)
+  defp map_key_sort_key(key), do: inspect(key)
+
+  defp operator_field?(key) when is_atom(key) do
+    Atom.to_string(key) |> String.starts_with?("__op_")
+  end
+  defp operator_field?(_key), do: false
+
+  defp charlist?(list) do
+    list != [] and Enum.all?(list, &is_integer/1)
+  end
+
+  defp optional_map?(map) do
+    Map.get(map, :kind) == 1 and Map.has_key?(map, :tag)
+  end
+
+  defp result_map?(map) do
+    Map.get(map, :kind) == 2 and Map.has_key?(map, :tag)
+  end
 
   defp list_data(value) when is_map(value) do
     if list_map?(value), do: Map.get(value, :data), else: []
