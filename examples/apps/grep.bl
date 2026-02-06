@@ -134,7 +134,7 @@ fn grep_file(opts: Args) -> number {
     
     return match (result) {
         case!ok content => process_content(content, pattern, opts),
-        case!err err => {
+        case!err err -> {
             println("grep: ${filename}: ${err->message}");
             2;
         }
@@ -142,35 +142,29 @@ fn grep_file(opts: Args) -> number {
 }
 
 fn print_usage() -> void {
-    let usage = """Usage: beamlang grep.bl [OPTIONS] PATTERN [FILE]
-
-Search for PATTERN in FILE and print matching lines.
-
-Options:
-  -i, --ignore-case     Ignore case distinctions
-  -n, --line-number     Print line numbers with output
-  -c, --count           Only print count of matching lines
-  -v, --invert-match    Select non-matching lines
-
-Exit status:
-  0  Match found
-  1  No match found
-  2  Error occurred""";
-    println(usage);
+    let help = usage<Args>("grep");
+    println(help);
+    println("");
+    println("Exit status:");
+    println("  0  Match found");
+    println("  1  No match found");
+    println("  2  Error occurred");
 }
 
 fn main(args: [String]) -> number {
     let parsed = parse_args<Args>(args);
     
     return match (parsed) {
-        case!ok opts => {
-            grep_file(opts);
-        },
-        case!err err => {
+        case!ok opts => grep_file(opts),
+        case!err err -> {
+            if (err->message == "--help") {
+                print_usage();
+                return 0;
+            }
             print_usage();
             println("");
             println("Error: ${err->message}");
             2;
         }
     };
-}
+} 

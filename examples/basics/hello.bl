@@ -1,10 +1,6 @@
 fn main(args: [String]) -> number {
-    let a = match(true) {
-        case true -> {
-            return 0;
-        },
-        case false => 1
-    };
-
+    let test = "Hallo"->split(" ");
+    let first = test->first();
+    println(first->unwrap(""));
     return 0;
 }

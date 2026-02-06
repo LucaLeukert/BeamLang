@@ -510,7 +510,122 @@ type List<T> {
 ### Args
 
 `parse_args<T>(args: [String]) -> T!ArgsError` parses command-line arguments into a struct literal of `T`.
-For now, `T` must be a struct type with `String`, `number`, `bool`, or `char` fields, and the argument count must match exactly.
+`T` must be a struct type with `String`, `number`, `bool`, or `char` fields.
+
+Field annotations control parsing behavior:
+- `@required()` - Field must be provided (error if missing)
+- `@default(value)` - Default value when not provided
+- `@description("...")` - Help text description
+- `@short("c")` - Short flag form, e.g., `-c`
+- `@long("config")` - Long flag form, e.g., `--config`
+- `@flag` - Boolean flag (presence = true, absence = false)
+
+Fields without `@short` or `@long` are parsed as positional arguments (matched in field definition order).
+
+Parsing features:
+- Named flags: `--verbose`, `-v`, `--count=5`, `-n 5`
+- Combined short flags: `-inv` is equivalent to `-i -n -v` (flag-type options only)
+- `--` separator: everything after `--` is treated as positional
+- Built-in help: `--help` or `-h` returns `ArgsError` with auto-generated usage text
+
+`usage<T>(program: String) -> String` generates a formatted help/usage string from the type's annotations.
+
+```beamlang
+error ArgsError {
+    message: String,
+    missing: [String]
+}
+
+fn parse_args<T>(args: [String]) -> T!ArgsError
+fn usage<T>(program: String) -> String
+```
+
+#### Low-Level Argument Helpers (Pure BeamLang)
+
+The args module also provides pure-BeamLang helper functions for manual/custom argument parsing. These implement the same parsing algorithms as the runtime but without requiring compile-time type metadata.
+
+```beamlang
+// Types
+type ParsedFlag { name: String, has_value: bool, value: String }
+type SplitArgs { before: [String], after: [String] }
+
+// Classification
+fn is_help(arg: String) -> bool
+fn has_help_flag(args: [String]) -> bool
+fn is_long_opt(arg: String) -> bool
+fn is_short_opt(arg: String) -> bool
+fn is_separator(arg: String) -> bool
+
+// Parsing
+fn parse_long_opt(arg: String) -> ParsedFlag?
+fn parse_short_opt(arg: String) -> ParsedFlag?
+fn parse_combined_flags(arg: String) -> [String]
+
+// Collection
+fn split_at_separator(args: [String]) -> SplitArgs
+fn find_flag(args: [String], long_name: String, short_name: String) -> bool
+fn find_option(args: [String], long_name: String, short_name: String) -> String?
+fn positional_args(args: [String]) -> [String]
+
+// Help text formatting
+fn format_opt_line(short: String, long: String, hint: String, desc: String) -> String
+fn format_pos_line(name: String, hint: String, required: bool, desc: String) -> String
+fn format_usage_header(program: String, has_options: bool, names: [String]) -> String
+```
+
+Low-level example (no struct type needed):
+
+```beamlang
+fn main(args: [String]) -> number {
+    if (has_help_flag(args)) {
+        let names: [String] = ["file"];
+        println(format_usage_header("myapp", true, names));
+        println(format_opt_line("v", "verbose", "", "Verbose output"));
+        println(format_opt_line("n", "count", "NUMBER", "Item count"));
+        return 0;
+    }
+    let verbose = find_flag(args, "verbose", "v");
+    let count = find_option(args, "count", "n");
+    let count_val = count->unwrap("10");
+    let pos = positional_args(args);
+    return 0;
+}
+```
+
+Example:
+
+```beamlang
+type Args {
+    @required()
+    @description("Input file to process")
+    file: String,
+
+    @short("n")
+    @long("count")
+    @default(10)
+    @description("Number of items")
+    count: number,
+
+    @flag
+    @short("v")
+    @long("verbose")
+    @description("Enable verbose output")
+    verbose: bool
+}
+
+fn main(args: [String]) -> number {
+    let parsed = parse_args<Args>(args);
+    match (parsed) {
+        case!ok opts => println(opts->file),
+        case!err err -> {
+            println("Error: ${err->message}");
+            let help = usage<Args>("my_program");
+            println(help);
+            1;
+        }
+    }
+}
+```
 
 Type alias: `[T]` is equivalent to `List<T>`.
 

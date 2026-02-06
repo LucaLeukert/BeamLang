@@ -1,8 +1,553 @@
 // Argument parsing helpers
 //
+// This module provides:
+// 1. High-level: parse_args<T>(args) and usage<T>(program) — runtime-backed, type-aware
+// 2. Low-level: pure-BeamLang helpers for manual/custom argument parsing
+//
+// The low-level helpers implement the same algorithms as the Elixir runtime
+// (BeamLang.Runtime) in pure BeamLang. They serve as building blocks and a
+// starting point for eventually moving all argument parsing into the language.
+//
+// High-level API (requires compile-time type information):
+//   parse_args<T>(args)                          -> T!ArgsError
+//   usage<T>(program)                            -> String
+//
+// Low-level API (pure BeamLang, no type metadata needed):
+//   is_help(arg)                                 -> bool
+//   has_help_flag(args)                          -> bool
+//   is_long_opt(arg)                             -> bool
+//   is_short_opt(arg)                            -> bool
+//   is_separator(arg)                            -> bool
+//   parse_long_opt(arg)                          -> ParsedFlag?
+//   parse_short_opt(arg)                         -> ParsedFlag?
+//   parse_combined_flags(arg)                    -> [String]
+//   split_at_separator(args)                     -> SplitArgs
+//   find_flag(args, long, short)                 -> bool
+//   find_option(args, long, short)               -> String?
+//   positional_args(args)                        -> [String]
+//   format_opt_line(short, long, hint, desc)     -> String
+//   format_pos_line(name, hint, required, desc)  -> String
+//
+// Example using low-level API for custom parsing:
+//
+//   fn main(args: [String]) -> number {
+//       if (has_help_flag(args)) {
+//           println("Usage: program [OPTIONS] <file>");
+//           println(format_opt_line("v", "verbose", "", "Enable verbose output"));
+//           println(format_opt_line("n", "count", "NUMBER", "Number of items"));
+//           return 0;
+//       }
+//       let verbose = find_flag(args, "verbose", "v");
+//       let count_opt = find_option(args, "count", "n");
+//       let count = count_opt->unwrap("10");
+//       let positional = positional_args(args);
+//       // ... use verbose, count, positional ...
+//       return 0;
+//   }
+
+export error ArgsError {
+    message: String,
+    missing: [String],
+}
+
+// ============================================================
+// Types for pure-BeamLang argument parsing
+// ============================================================
+
+// Represents a parsed --long or -short flag with optional inline value.
+// has_value is true when an inline value was provided (--name=value, -n=value).
+// When has_value is false, the value field is "".
+export type ParsedFlag {
+    name: String,
+    has_value: bool,
+    value: String,
+}
+
+// Represents args split at the "--" separator.
+// Everything before "--" goes in before, everything after in after.
+export type SplitArgs {
+    before: [String],
+    after: [String],
+}
+
+// ============================================================
+// Constructors
+// ============================================================
+
+export fn parsed_flag_with(name: String, value: String) -> ParsedFlag {
+    return { name = name, has_value = true, value = value };
+}
+
+export fn parsed_flag_bare(name: String) -> ParsedFlag {
+    return { name = name, has_value = false, value = "" };
+}
+
+internal fn split_args_new(before: [String], after: [String]) -> SplitArgs {
+    return { before = before, after = after };
+}
+
+// ============================================================
+// Argument classification
+// ============================================================
+
+// Check if an argument is a help flag (--help or -h)
+export fn is_help(arg: String) -> bool {
+    if (arg == "--help") {
+        return true;
+    }
+    if (arg == "-h") {
+        return true;
+    }
+    return false;
+}
+
+// Check if any argument in the list is a help flag
+export fn has_help_flag(args: [String]) -> bool {
+    return has_help_rec(args, 0);
+}
+
+internal fn has_help_rec(args: [String], idx: number) -> bool {
+    if (idx >= args->length()) {
+        return false;
+    }
+    let arg_opt = args->get(idx);
+    let arg = arg_opt->unwrap("");
+    if (is_help(arg)) {
+        return true;
+    }
+    return has_help_rec(args, idx + 1);
+}
+
+// Check if an argument is a long option (starts with --, at least 3 chars)
+export fn is_long_opt(arg: String) -> bool {
+    if (arg->length() < 3) {
+        return false;
+    }
+    return arg->starts_with("--");
+}
+
+// Check if an argument is a short option (starts with - but not --)
+export fn is_short_opt(arg: String) -> bool {
+    if (arg->length() < 2) {
+        return false;
+    }
+    if (arg->starts_with("--")) {
+        return false;
+    }
+    return arg->starts_with("-");
+}
+
+// Check if an argument is the "--" separator
+export fn is_separator(arg: String) -> bool {
+    return arg == "--";
+}
+
+// ============================================================
+// Flag parsing
+// Mirrors: parse_long_arg, parse_short_arg, parse_combined_short_flags
+// from BeamLang.Runtime
+// ============================================================
+
+// Parse a long-form argument: --name or --name=value
+// Returns ?some ParsedFlag on success, ?none if not a long option.
+export fn parse_long_opt(arg: String) -> ParsedFlag? {
+    if (is_long_opt(arg) == false) {
+        return ?none;
+    }
+    // Strip the "--" prefix
+    let without_prefix = arg->substring(2, arg->length());
+
+    // Check for --name=value form
+    let eq_pos = without_prefix->index_of("=");
+    if (eq_pos->is_present()) {
+        let pos = eq_pos->unwrap(0);
+        let name = without_prefix->substring(0, pos);
+        let value = without_prefix->substring(pos + 1, without_prefix->length());
+        let flag = parsed_flag_with(name, value);
+        return ?some flag;
+    }
+    let flag = parsed_flag_bare(without_prefix);
+    return ?some flag;
+}
+
+// Parse a short-form argument: -n, -n=value, or -nvalue
+// Returns ?some ParsedFlag on success, ?none if not a short option.
+export fn parse_short_opt(arg: String) -> ParsedFlag? {
+    if (is_short_opt(arg) == false) {
+        return ?none;
+    }
+    // Strip the "-" prefix
+    let without_prefix = arg->substring(1, arg->length());
+
+    // Single character: bare short flag (-v)
+    if (without_prefix->length() == 1) {
+        let flag = parsed_flag_bare(without_prefix);
+        return ?some flag;
+    }
+
+    // Check for -n=value form
+    let eq_pos = without_prefix->index_of("=");
+    if (eq_pos->is_present()) {
+        let pos = eq_pos->unwrap(0);
+        let name = without_prefix->substring(0, pos);
+        let value = without_prefix->substring(pos + 1, without_prefix->length());
+        let flag = parsed_flag_with(name, value);
+        return ?some flag;
+    }
+    // -nvalue form: first char is flag name, rest is value
+    let name = without_prefix->substring(0, 1);
+    let value = without_prefix->substring(1, without_prefix->length());
+    let flag = parsed_flag_with(name, value);
+    return ?some flag;
+}
+
+// Parse combined short flags (e.g. -inv -> ["i", "n", "v"]).
+// Returns a list of single-character flag names.
+// Returns empty list if the argument is not combined short flags.
+// Mirrors: parse_combined_short_flags from BeamLang.Runtime
+export fn parse_combined_flags(arg: String) -> [String] {
+    if (is_short_opt(arg) == false) {
+        return list_new();
+    }
+    let without_prefix = arg->substring(1, arg->length());
+    // Must have more than 1 character to be combined
+    if (without_prefix->length() <= 1) {
+        return list_new();
+    }
+    // Check for = sign (if present, it's -n=value not combined flags)
+    let eq_pos = without_prefix->index_of("=");
+    return match (eq_pos) {
+        case?some _ => list_new(),
+        case?none => split_into_chars(without_prefix)
+    };
+}
+
+internal fn split_into_chars(s: String) -> [String] {
+    let mut result: [String] = [];
+    return split_chars_rec(s, 0, result);
+}
+
+internal fn split_chars_rec(s: String, idx: number, acc: [String]) -> [String] {
+    if (idx >= s->length()) {
+        return acc;
+    }
+    let ch = s->substring(idx, idx + 1);
+    return split_chars_rec(s, idx + 1, acc->push(ch));
+}
+
+// ============================================================
+// Argument collection
+// Mirrors: split at "--", parse_named_args, parse_positional_args
+// from BeamLang.Runtime
+// ============================================================
+
+// Split arguments at the "--" separator.
+// Everything before "--" goes in before, everything after goes in after.
+// If no "--" is found, all args go in before and after is empty.
+export fn split_at_separator(args: [String]) -> SplitArgs {
+    let empty: [String] = [];
+    return split_sep_rec(args, 0, empty);
+}
+
+internal fn split_sep_rec(args: [String], idx: number, before: [String]) -> SplitArgs {
+    if (idx >= args->length()) {
+        let empty: [String] = [];
+        return split_args_new(before, empty);
+    }
+    let arg_opt = args->get(idx);
+    let arg = arg_opt->unwrap("");
+    if (is_separator(arg)) {
+        let after = collect_from_idx(args, idx + 1);
+        return split_args_new(before, after);
+    }
+    return split_sep_rec(args, idx + 1, before->push(arg));
+}
+
+internal fn collect_from_idx(args: [String], idx: number) -> [String] {
+    let empty: [String] = [];
+    return collect_from_rec(args, idx, empty);
+}
+
+internal fn collect_from_rec(args: [String], idx: number, acc: [String]) -> [String] {
+    if (idx >= args->length()) {
+        return acc;
+    }
+    let arg_opt = args->get(idx);
+    let arg = arg_opt->unwrap("");
+    return collect_from_rec(args, idx + 1, acc->push(arg));
+}
+
+// Check if a boolean flag is present in args (by long and/or short name).
+// Searches for --long_name or -short_name.
+// Pass "" for short_name if there is no short form.
+// Mirrors: the flag detection logic in do_parse_named_args from BeamLang.Runtime
+export fn find_flag(args: [String], long_name: String, short_name: String) -> bool {
+    return find_flag_rec(args, long_name, short_name, 0);
+}
+
+internal fn find_flag_rec(args: [String], long_name: String, short_name: String, idx: number) -> bool {
+    if (idx >= args->length()) {
+        return false;
+    }
+    let arg_opt = args->get(idx);
+    let arg = arg_opt->unwrap("");
+
+    // Check long form: --long_name
+    if (long_name->length() > 0) {
+        let long_form = "--"->concat(long_name);
+        if (arg == long_form) {
+            return true;
+        }
+    }
+
+    // Check short form: -short_name
+    if (short_name->length() > 0) {
+        let short_form = "-"->concat(short_name);
+        if (arg == short_form) {
+            return true;
+        }
+        // Also check combined flags: -inv contains "i", "n", "v"
+        if (is_short_opt(arg)) {
+            let chars = parse_combined_flags(arg);
+            if (list_contains_str(chars, short_name)) {
+                return true;
+            }
+        }
+    }
+
+    return find_flag_rec(args, long_name, short_name, idx + 1);
+}
+
+internal fn list_contains_str(list: [String], target: String) -> bool {
+    return list_contains_rec(list, target, 0);
+}
+
+internal fn list_contains_rec(list: [String], target: String, idx: number) -> bool {
+    if (idx >= list->length()) {
+        return false;
+    }
+    let item_opt = list->get(idx);
+    let item = item_opt->unwrap("");
+    if (item == target) {
+        return true;
+    }
+    return list_contains_rec(list, target, idx + 1);
+}
+
+// Find the value for a named option.
+// Supports: --name value, --name=value, -n value, -n=value
+// Pass "" for short_name if there is no short form.
+// Mirrors: parse_long_arg, parse_short_arg value extraction from BeamLang.Runtime
+export fn find_option(args: [String], long_name: String, short_name: String) -> String? {
+    return find_option_rec(args, long_name, short_name, 0);
+}
+
+internal fn find_option_rec(args: [String], long_name: String, short_name: String, idx: number) -> String? {
+    if (idx >= args->length()) {
+        return ?none;
+    }
+    let arg_opt = args->get(idx);
+    let arg = arg_opt->unwrap("");
+
+    // Try long form: --name value
+    if (long_name->length() > 0) {
+        let long_form = "--"->concat(long_name);
+        if (arg == long_form) {
+            if (idx + 1 < args->length()) {
+                let val_opt = args->get(idx + 1);
+                let val = val_opt->unwrap("");
+                return ?some val;
+            }
+            return ?none;
+        }
+
+        // Try --name=value form
+        let long_eq = long_form->concat("=");
+        if (arg->starts_with(long_eq)) {
+            let val = arg->substring(long_eq->length(), arg->length());
+            return ?some val;
+        }
+    }
+
+    // Try short form: -n value
+    if (short_name->length() > 0) {
+        let short_form = "-"->concat(short_name);
+        if (arg == short_form) {
+            if (idx + 1 < args->length()) {
+                let val_opt = args->get(idx + 1);
+                let val = val_opt->unwrap("");
+                return ?some val;
+            }
+            return ?none;
+        }
+
+        // Try -n=value form
+        let short_eq = short_form->concat("=");
+        if (arg->starts_with(short_eq)) {
+            let val = arg->substring(short_eq->length(), arg->length());
+            return ?some val;
+        }
+    }
+
+    return find_option_rec(args, long_name, short_name, idx + 1);
+}
+
+// Collect all positional arguments (those not starting with -).
+// Respects the "--" separator: everything after "--" is positional.
+//
+// Note: this is a simple heuristic that treats any non-flag-looking arg
+// as positional. Values following named options (e.g. the "5" in
+// "--count 5") may be included. For precise extraction, use find_option
+// to consume known named options, then filter the remainder.
+export fn positional_args(args: [String]) -> [String] {
+    let split = split_at_separator(args);
+    let before_pos = collect_non_flag_args(split->before);
+    return before_pos->concat(split->after);
+}
+
+internal fn collect_non_flag_args(args: [String]) -> [String] {
+    let empty: [String] = [];
+    return collect_non_flag_rec(args, 0, empty);
+}
+
+internal fn collect_non_flag_rec(args: [String], idx: number, acc: [String]) -> [String] {
+    if (idx >= args->length()) {
+        return acc;
+    }
+    let arg_opt = args->get(idx);
+    let arg = arg_opt->unwrap("");
+    if (arg->starts_with("-")) {
+        return collect_non_flag_rec(args, idx + 1, acc);
+    }
+    return collect_non_flag_rec(args, idx + 1, acc->push(arg));
+}
+
+// ============================================================
+// Help text formatting
+// Mirrors: generate_usage from BeamLang.Runtime
+// ============================================================
+
+// Right-pad a string with spaces to the given width
+internal fn pad_right(s: String, width: number) -> String {
+    if (s->length() >= width) {
+        return s;
+    }
+    let padded = s->concat(" ");
+    return pad_right(padded, width);
+}
+
+// Format a single option help line.
+// Example: "  -v, --verbose            Enable verbose output"
+// Pass "" for short_name/long_name/type_hint if not applicable.
+export fn format_opt_line(short_name: String, long_name: String, type_hint: String, description: String) -> String {
+    let left = build_opt_left(short_name, long_name, type_hint);
+    let padded = pad_right(left, 28);
+    let padded_space = padded->concat(" ");
+    return padded_space->concat(description);
+}
+
+internal fn build_opt_left(short_name: String, long_name: String, type_hint: String) -> String {
+    let flags = build_flag_names(short_name, long_name);
+    let with_hint = append_type_hint(flags, type_hint);
+    return with_hint;
+}
+
+internal fn build_flag_names(short_name: String, long_name: String) -> String {
+    let has_short = short_name->length() > 0;
+    let has_long = long_name->length() > 0;
+
+    if (has_short) {
+        if (has_long) {
+            let s1 = "  -"->concat(short_name);
+            let s2 = s1->concat(", --");
+            return s2->concat(long_name);
+        }
+        let s = "  -"->concat(short_name);
+        return s;
+    }
+
+    if (has_long) {
+        let s = "      --"->concat(long_name);
+        return s;
+    }
+
+    return "        ";
+}
+
+internal fn append_type_hint(base: String, type_hint: String) -> String {
+    if (type_hint->length() > 0) {
+        let open = base->concat(" <");
+        let with_hint = open->concat(type_hint);
+        return with_hint->concat(">");
+    }
+    return base;
+}
+
+// Format a positional argument help line.
+// Example: "  FILE                 STRING (required)  Input file"
+export fn format_pos_line(name: String, type_hint: String, required: bool, description: String) -> String {
+    let label = name->to_upper();
+    let padded = pad_right(label, 20);
+    let prefix = "  "->concat(padded);
+    let prefix_space = prefix->concat(" ");
+    let base = prefix_space->concat(type_hint);
+    let with_req = append_required(base, required);
+    let with_gap = with_req->concat("  ");
+    return with_gap->concat(description);
+}
+
+internal fn append_required(s: String, required: bool) -> String {
+    if (required) {
+        return s->concat(" (required)");
+    }
+    return s;
+}
+
+// Format a full help/usage header line.
+// Example: "Usage: program [OPTIONS] <FILE>"
+export fn format_usage_header(program: String, has_options: bool, positional_names: [String]) -> String {
+    let prefix = "Usage: "->concat(program);
+    let mut line = prefix;
+    if (has_options) {
+        line = line->concat(" [OPTIONS]");
+    }
+    return format_positional_names_rec(positional_names, 0, line);
+}
+
+internal fn format_positional_names_rec(names: [String], idx: number, acc: String) -> String {
+    if (idx >= names->length()) {
+        return acc;
+    }
+    let name_opt = names->get(idx);
+    let name = name_opt->unwrap("");
+    let upper = name->to_upper();
+    let open = acc->concat(" <");
+    let with_name = open->concat(upper);
+    let next = with_name->concat(">");
+    return format_positional_names_rec(names, idx + 1, next);
+}
+
+// ============================================================
+// High-level API (runtime-backed, requires compile-time type info)
+// ============================================================
+//
+// parse_args<T>(args) uses type metadata (field names, types, annotations)
+// injected by the compiler to parse args into a typed struct T.
+// This cannot yet be fully implemented in BeamLang because the language
+// does not expose struct reflection/annotation inspection at runtime.
+//
+// Once BeamLang gains reflection or compile-time macros, these externals
+// can be replaced by calls to the pure-BeamLang helpers above.
+//
 // parse_args<T>(args) parses command line arguments into a struct T.
 // T must be a struct type with fields of type String, number, bool, or char.
 // Returns T!ArgsError - ok with the parsed struct or error with usage info.
+//
+// Features:
+//   - Named flags:    --verbose, -v, --count=5, -n 5
+//   - Combined flags: -inv (equivalent to -i -n -v)
+//   - Separator:      -- (everything after is positional)
+//   - Help:           --help or -h returns ArgsError with generated usage text
 //
 // Field annotations control parsing behavior:
 //   @required()      - Field must be provided (error if missing)
@@ -14,36 +559,11 @@
 //
 // Fields without @short or @long are parsed as positional arguments.
 // Positional arguments are matched in order of field definition.
-//
-// Example:
-//   type Args {
-//       @required()
-//       @description("Input file to process")
-//       file: String,
-//
-//       @short("n")
-//       @long("count")
-//       @default(10)
-//       @description("Number of items")
-//       count: number,
-//
-//       @flag
-//       @short("v")
-//       @long("verbose")
-//       @description("Enable verbose output")
-//       verbose: bool
-//   }
-//
-// Usage: program input.txt -n 5 --verbose
-//        program input.txt --count=5 -v
-
-export error ArgsError {
-    message: String,
-    missing: [String],
-}
-
-// parse_args<T>(args) parses command line arguments into a struct T.
-// T must be a struct type with fields of type String, number, bool, or char.
-// Returns T!ArgsError - ok with the parsed struct or error with usage info.
 @external(elixir, "BeamLang.Runtime", "parse_args")
 fn parse_args<T>(args: [String]) -> T!ArgsError;
+
+// usage<T>(program) generates a formatted usage/help string for type T.
+// Reads @description, @short, @long, @flag, @required, and @default annotations
+// to build a help message suitable for printing.
+@external(elixir, "BeamLang.Runtime", "args_usage")
+fn usage<T>(program: String) -> String;

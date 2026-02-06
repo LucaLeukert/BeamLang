@@ -11,9 +11,14 @@ defmodule BeamLang.Runtime do
   @spec compile_forms(list()) :: {:ok, atom(), binary()} | {:error, map()}
   def compile_forms(forms) do
     case :compile.forms(forms, [:return]) do
-      {:ok, module, binary} -> {:ok, module, binary}
-      {:ok, module, binary, _warnings} -> {:ok, module, binary}
-      {:error, errors, warnings} -> {:error, %{message: "BEAM compile failed: #{inspect({errors, warnings})}"}}
+      {:ok, module, binary} ->
+        {:ok, module, binary}
+
+      {:ok, module, binary, _warnings} ->
+        {:ok, module, binary}
+
+      {:error, errors, warnings} ->
+        {:error, %{message: "BEAM compile failed: #{inspect({errors, warnings})}"}}
     end
   end
 
@@ -26,7 +31,9 @@ defmodule BeamLang.Runtime do
         # Convert raw Erlang list to BeamLang List struct using the loaded module
         beamlang_list = wrap_as_beamlang_list(args, module)
         {:ok, apply(module, :main, [beamlang_list])}
-      {:error, reason} -> {:error, %{message: "Failed to load compiled module: #{inspect(reason)}"}}
+
+      {:error, reason} ->
+        {:error, %{message: "Failed to load compiled module: #{inspect(reason)}"}}
     end
   end
 
@@ -38,14 +45,22 @@ defmodule BeamLang.Runtime do
   @spec wrap_as_beamlang_list(list(), atom()) :: map()
   def wrap_as_beamlang_list(data, module \\ :beamlang_program) when is_list(data) do
     # Wrap each string element as a BeamLang String
-    wrapped_data = Enum.map(data, fn elem ->
-      if is_list(elem) do
-        # It's a charlist - wrap as BeamLang String
-        apply(module, :string_new, [elem])
-      else
-        elem
-      end
-    end)
+    wrapped_data =
+      Enum.map(data, fn elem ->
+        cond do
+          is_list(elem) ->
+            # It's a charlist - wrap as BeamLang String
+            apply(module, :string_new, [elem])
+
+          is_binary(elem) ->
+            # It's an Elixir binary string - convert to charlist and wrap
+            apply(module, :string_new, [String.to_charlist(elem)])
+
+          true ->
+            elem
+        end
+      end)
+
     apply(module, :list_from_data, [wrapped_data])
   end
 
@@ -53,8 +68,11 @@ defmodule BeamLang.Runtime do
   def load_modules(modules) when is_list(modules) do
     Enum.reduce_while(modules, :ok, fn {module, binary}, _acc ->
       case :code.load_binary(module, ~c"beamlang_module.beam", binary) do
-        {:module, ^module} -> {:cont, :ok}
-        {:error, reason} -> {:halt, {:error, %{message: "Failed to load compiled module: #{inspect(reason)}"}}}
+        {:module, ^module} ->
+          {:cont, :ok}
+
+        {:error, reason} ->
+          {:halt, {:error, %{message: "Failed to load compiled module: #{inspect(reason)}"}}}
       end
     end)
   end
@@ -72,19 +90,41 @@ defmodule BeamLang.Runtime do
   @spec typeof_data(term()) :: charlist()
   def typeof_data(value) do
     cond do
-      is_integer(value) or is_float(value) -> ~c"number"
-      is_binary(value) -> ~c"String"
-      is_boolean(value) -> ~c"bool"
-      value == :ok -> ~c"void"
+      is_integer(value) or is_float(value) ->
+        ~c"number"
+
+      is_binary(value) ->
+        ~c"String"
+
+      is_boolean(value) ->
+        ~c"bool"
+
+      value == :ok ->
+        ~c"void"
+
       is_map(value) and Map.has_key?(value, :__beamlang_type__) ->
         ensure_charlist(Map.get(value, :__beamlang_type__))
-      is_map(value) and Map.get(value, :kind) == 1 -> ~c"Optional"
-      is_map(value) and Map.get(value, :kind) == 2 -> ~c"Result"
-      is_map(value) and string_map?(value) -> ~c"String"
-      is_tuple(value) and tuple_size(value) == 2 and elem(value, 0) == :char -> ~c"char"
-      is_list(value) -> ~c"List"
-      is_map(value) -> ~c"Map"
-      true -> ~c"unknown"
+
+      is_map(value) and Map.get(value, :kind) == 1 ->
+        ~c"Optional"
+
+      is_map(value) and Map.get(value, :kind) == 2 ->
+        ~c"Result"
+
+      is_map(value) and string_map?(value) ->
+        ~c"String"
+
+      is_tuple(value) and tuple_size(value) == 2 and elem(value, 0) == :char ->
+        ~c"char"
+
+      is_list(value) ->
+        ~c"List"
+
+      is_map(value) ->
+        ~c"Map"
+
+      true ->
+        ~c"unknown"
     end
   end
 
@@ -109,8 +149,9 @@ defmodule BeamLang.Runtime do
   def string_split_data(value, separator) do
     str = to_string(value)
     sep = to_string(separator)
-    String.split(str, sep)
-    |> Enum.map(&String.to_charlist/1)
+    split_list = String.split(str, sep)
+    string_list = Enum.map(split_list, &stdlib_string_new/1)
+    apply(current_module(), :list_from_data, [string_list])
   end
 
   @spec string_contains_data(term(), term()) :: boolean()
@@ -170,6 +211,7 @@ defmodule BeamLang.Runtime do
   def string_index_of_data(value, needle) do
     str = to_string(value)
     needle_str = to_string(needle)
+
     case :binary.match(str, needle_str) do
       {idx, _} -> %{tag: 1, value: idx}
       :nomatch -> %{tag: 0}
@@ -185,6 +227,7 @@ defmodule BeamLang.Runtime do
   def optional_from_data(%{tag: 1, value: value}) do
     apply(current_module(), :optional_some, [value])
   end
+
   def optional_from_data(%{tag: 0}) do
     apply(current_module(), :optional_none, [])
   end
@@ -278,6 +321,7 @@ defmodule BeamLang.Runtime do
   def list_get(list, index) when index >= 0 and index < length(list) do
     %{tag: 1, value: Enum.at(list, index)}
   end
+
   def list_get(_list, _index), do: %{tag: 0}
 
   @spec list_push(list(), term()) :: list()
@@ -312,6 +356,7 @@ defmodule BeamLang.Runtime do
 
   def list_join(lists, separator) do
     sep_data = string_data(separator) |> to_string()
+
     joined =
       lists
       |> Enum.map(fn lst ->
@@ -373,11 +418,13 @@ defmodule BeamLang.Runtime do
   @spec file_read(term()) :: map()
   def file_read(path) do
     path_str = string_data(path) |> to_string()
+
     case File.read(path_str) do
       {:ok, content} ->
         # Return Result.ok with String struct using stdlib functions
         string_struct = stdlib_string_new(content)
         apply(current_module(), :result_ok, [string_struct])
+
       {:error, reason} ->
         # Return Result.err using stdlib functions
         error_msg = stdlib_string_new(to_string(reason))
@@ -389,9 +436,11 @@ defmodule BeamLang.Runtime do
   def file_write(path, contents) do
     path_str = string_data(path) |> to_string()
     data = string_data(contents)
+
     case File.write(path_str, data) do
       :ok ->
         apply(current_module(), :result_ok, [true])
+
       {:error, reason} ->
         error_msg = stdlib_string_new(to_string(reason))
         apply(current_module(), :result_err, [error_msg])
@@ -407,29 +456,34 @@ defmodule BeamLang.Runtime do
   @spec list_directory(term()) :: map()
   def list_directory(path) do
     path_str = string_data(path) |> to_string()
+
     case File.ls(path_str) do
       {:ok, entries} ->
         # Create a list of maps with name, is_dir, and size
-        entries_list = Enum.flat_map(entries, fn entry ->
-          full_path = Path.join(path_str, entry)
-          case File.stat(full_path, time: :posix) do
-            {:ok, stat} ->
-              is_dir = stat.type == :directory
-              size = stat.size
-              name_string = stdlib_string_new(entry)
-              
-              # Use BeamLang stdlib function to construct FileEntry
-              file_entry = apply(current_module(), :file_entry_new, [name_string, is_dir, size])
-              [file_entry]
-            {:error, _reason} ->
-              # Skip files that cannot be stat'd (deleted, permission denied, etc.)
-              []
-          end
-        end)
-        
+        entries_list =
+          Enum.flat_map(entries, fn entry ->
+            full_path = Path.join(path_str, entry)
+
+            case File.stat(full_path, time: :posix) do
+              {:ok, stat} ->
+                is_dir = stat.type == :directory
+                size = stat.size
+                name_string = stdlib_string_new(entry)
+
+                # Use BeamLang stdlib function to construct FileEntry
+                file_entry = apply(current_module(), :file_entry_new, [name_string, is_dir, size])
+                [file_entry]
+
+              {:error, _reason} ->
+                # Skip files that cannot be stat'd (deleted, permission denied, etc.)
+                []
+            end
+          end)
+
         # Convert to BeamLang list and wrap in Result.ok
         beamlang_list = apply(current_module(), :list_from_data, [entries_list])
         apply(current_module(), :result_ok, [beamlang_list])
+
       {:error, reason} ->
         # Return Result.err using stdlib functions
         error_msg = stdlib_string_new(to_string(reason))
@@ -445,9 +499,13 @@ defmodule BeamLang.Runtime do
       :unknown ->
         error_msg = stdlib_string_new("Unsupported HTTP method.")
         apply(current_module(), :result_err, [error_msg])
+
       method_atom ->
         url_data = string_data(url)
-        url_charlist = if is_list(url_data), do: url_data, else: to_string(url_data) |> String.to_charlist()
+
+        url_charlist =
+          if is_list(url_data), do: url_data, else: to_string(url_data) |> String.to_charlist()
+
         {header_tuples, content_type} = http_headers(headers)
         body_data = string_data(body)
         has_body = body_data != []
@@ -467,10 +525,12 @@ defmodule BeamLang.Runtime do
           {:ok, {{_version, status, _reason}, resp_headers, resp_body}} ->
             response = http_response_struct(status, resp_headers, resp_body)
             apply(current_module(), :result_ok, [response])
+
           {:ok, {status_line, resp_headers, resp_body}} ->
             status = parse_status_line(status_line)
             response = http_response_struct(status, resp_headers, resp_body)
             apply(current_module(), :result_ok, [response])
+
           {:error, reason} ->
             error_msg = stdlib_string_new(to_string(reason))
             apply(current_module(), :result_err, [error_msg])
@@ -483,6 +543,7 @@ defmodule BeamLang.Runtime do
     case IO.read(:stdio, :eof) do
       data when is_binary(data) ->
         stdlib_string_new(data)
+
       _ ->
         stdlib_string_new("")
     end
@@ -491,8 +552,11 @@ defmodule BeamLang.Runtime do
   @spec get_env(term()) :: map()
   def get_env(name) do
     name_str = string_data(name) |> to_string()
+
     case System.get_env(name_str) do
-      nil -> apply(current_module(), :optional_none, [])
+      nil ->
+        apply(current_module(), :optional_none, [])
+
       value ->
         string_struct = stdlib_string_new(value)
         apply(current_module(), :optional_some, [string_struct])
@@ -512,6 +576,7 @@ defmodule BeamLang.Runtime do
 
   defp http_method_atom(method) do
     method_str = string_data(method) |> to_string() |> String.upcase()
+
     case method_str do
       "GET" -> :get
       "POST" -> :post
@@ -530,6 +595,7 @@ defmodule BeamLang.Runtime do
     cond do
       is_number(timeout_ms) and timeout_ms > 0 ->
         round(timeout_ms)
+
       true ->
         30_000
     end
@@ -537,9 +603,12 @@ defmodule BeamLang.Runtime do
 
   defp http_headers(headers) do
     header_items = list_data(headers)
+
     {tuples, content_type} =
-      Enum.reduce(header_items, {[], "application/octet-stream"}, fn header, {acc, content_type} ->
+      Enum.reduce(header_items, {[], "application/octet-stream"}, fn header,
+                                                                     {acc, content_type} ->
         header_str = string_data(header) |> to_string()
+
         case String.split(header_str, ":", parts: 2) do
           [name, value] ->
             key = String.trim(name)
@@ -547,6 +616,7 @@ defmodule BeamLang.Runtime do
             key_downcase = String.downcase(key)
             content_type = if key_downcase == "content-type", do: val, else: content_type
             {[{String.to_charlist(key), String.to_charlist(val)} | acc], content_type}
+
           _ ->
             {acc, content_type}
         end
@@ -558,12 +628,14 @@ defmodule BeamLang.Runtime do
   defp http_response_struct(status, resp_headers, resp_body) do
     body_binary = IO.iodata_to_binary(resp_body)
     body_struct = stdlib_string_new(body_binary)
+
     headers =
       resp_headers
       |> Enum.map(fn {key, value} ->
         line = "#{to_string(key)}: #{to_string(value)}"
         stdlib_string_new(line)
       end)
+
     header_list = wrap_as_beamlang_list(headers, current_module())
     apply(current_module(), :http_response_new, [status, body_struct, header_list])
   end
@@ -574,9 +646,11 @@ defmodule BeamLang.Runtime do
 
   defp string_data(%{__beamlang_type__: "String", data: data}), do: data
   defp string_data(%{__beamlang_type__: ~c"String", data: data}), do: data
+
   defp string_data(value) when is_map(value) do
     if string_map?(value), do: Map.get(value, :data), else: inspect(value)
   end
+
   defp string_data(value) when is_list(value), do: value
   defp string_data(value) when is_binary(value), do: value
   defp string_data({:char, code}) when is_integer(code), do: [code]
@@ -647,6 +721,7 @@ defmodule BeamLang.Runtime do
   defp format_struct_iodata(map) do
     type_label = ensure_charlist(Map.get(map, :__beamlang_type__))
     type_name = to_string(type_label)
+
     fields =
       map
       |> Map.delete(:__beamlang_type__)
@@ -688,9 +763,11 @@ defmodule BeamLang.Runtime do
 
   defp format_map_key(key) when is_atom(key), do: Atom.to_string(key)
   defp format_map_key(key) when is_binary(key), do: inspect(key)
+
   defp format_map_key(key) when is_list(key) do
     if charlist?(key), do: inspect(to_string(key)), else: inspect(key)
   end
+
   defp format_map_key(key), do: inspect(key)
 
   defp format_field_name(key) when is_atom(key), do: Atom.to_string(key)
@@ -702,6 +779,7 @@ defmodule BeamLang.Runtime do
   defp operator_field?(key) when is_atom(key) do
     Atom.to_string(key) |> String.starts_with?("__op_")
   end
+
   defp operator_field?(_key), do: false
 
   defp charlist?(list) do
@@ -719,6 +797,7 @@ defmodule BeamLang.Runtime do
   defp list_data(value) when is_map(value) do
     if list_map?(value), do: Map.get(value, :data), else: []
   end
+
   defp list_data(value) when is_list(value), do: value
   defp list_data(_value), do: []
 
@@ -728,13 +807,16 @@ defmodule BeamLang.Runtime do
   end
 
   defp ensure_charlist(value) when is_binary(value), do: String.to_charlist(value)
+
   defp ensure_charlist(value) when is_map(value) do
     if string_map?(value), do: Map.get(value, :data), else: value
   end
+
   defp ensure_charlist(value), do: value
 
   defp string_map?(value) do
-    is_map(value) and Map.has_key?(value, :data) and Map.has_key?(value, :length) and Map.has_key?(value, :chars)
+    is_map(value) and Map.has_key?(value, :data) and Map.has_key?(value, :length) and
+      Map.has_key?(value, :chars)
   end
 
   @spec parse_args(list(), list(), list(), charlist(), map()) :: map()
@@ -746,11 +828,31 @@ defmodule BeamLang.Runtime do
     # Build field specs from annotations
     field_specs = build_field_specs(field_strs, field_types, field_annotations)
 
-    # Parse the args with annotation support
-    case parse_args_with_annotations(args_data, field_specs, type_label, module) do
-      {:ok, result} -> %{tag: 1, value: result}
-      {:error, error_struct} -> %{tag: 0, value: error_struct}
+    # Check for --help / -h first
+    if has_help_flag?(args_data) do
+      error_struct = %{
+        message: stdlib_string_new("--help"),
+        missing: wrap_as_beamlang_list([], module),
+        __beamlang_type__: ~c"ArgsError"
+      }
+
+      %{tag: 0, value: error_struct}
+    else
+      # Parse the args with annotation support
+      case parse_args_with_annotations(args_data, field_specs, type_label, module) do
+        {:ok, result} -> %{tag: 1, value: result}
+        {:error, error_struct} -> %{tag: 0, value: error_struct}
+      end
     end
+  end
+
+  @spec args_usage(list(), list(), list(), charlist(), map()) :: map()
+  def args_usage(fields, field_types, field_annotations, _type_label, program) do
+    field_strs = Enum.map(fields, &to_string/1)
+    field_specs = build_field_specs(field_strs, field_types, field_annotations)
+    program_str = string_data(program) |> to_string()
+    usage_text = generate_usage(program_str, field_specs)
+    stdlib_string_new(usage_text)
   end
 
   # Build field specifications from annotations
@@ -758,36 +860,145 @@ defmodule BeamLang.Runtime do
     Enum.zip([fields, types, annotations])
     |> Enum.map(fn {field, type, anns} ->
       ann_map = parse_annotations(anns)
+
       %{
         name: field,
         type: type,
         # If no annotations at all, treat as implicitly required (backwards compatibility)
         # Otherwise, check for explicit @required annotation
-        required: if anns == nil or anns == [] do true else Map.get(ann_map, "required", false) end,
+        required:
+          if anns == nil or anns == [] do
+            true
+          else
+            Map.get(ann_map, "required", false)
+          end,
         default: Map.get(ann_map, "default"),
         description: Map.get(ann_map, "description"),
         short: Map.get(ann_map, "short"),
         long: Map.get(ann_map, "long"),
         flag: Map.get(ann_map, "flag", false),
-        positional: !Map.has_key?(ann_map, "short") and !Map.has_key?(ann_map, "long") and !Map.get(ann_map, "flag", false),
+        positional:
+          !Map.has_key?(ann_map, "short") and !Map.has_key?(ann_map, "long") and
+            !Map.get(ann_map, "flag", false),
         # Track whether this field has any annotations (for backwards compatibility)
         has_annotations: anns != nil and anns != []
       }
     end)
   end
 
+  # Check if --help or -h is present in the raw args
+  defp has_help_flag?(args_data) do
+    Enum.any?(args_data, fn arg ->
+      s = string_value(arg)
+      s == "--help" or s == "-h"
+    end)
+  end
+
+  # Generate formatted usage/help text from field specs
+  defp generate_usage(program, field_specs) do
+    {named_specs, positional_specs} =
+      Enum.split_with(field_specs, fn spec -> !spec.positional end)
+
+    # Build the synopsis line
+    positional_parts =
+      Enum.map(positional_specs, fn spec ->
+        label = String.upcase(spec.name)
+        if spec.required, do: "<#{label}>", else: "[#{label}]"
+      end)
+
+    options_part = if named_specs != [], do: " [OPTIONS]", else: ""
+
+    positional_part =
+      if positional_parts != [], do: " " <> Enum.join(positional_parts, " "), else: ""
+
+    synopsis = "Usage: #{program}#{options_part}#{positional_part}"
+
+    # Build positional arguments section
+    positional_section =
+      if positional_specs != [] do
+        lines =
+          Enum.map(positional_specs, fn spec ->
+            label = String.upcase(spec.name)
+            desc = spec.description || ""
+            type_str = format_type_label(spec.type)
+            required_str = if spec.required, do: " (required)", else: ""
+
+            default_str =
+              if spec.default != nil and spec.default != "",
+                do: " [default: #{spec.default}]",
+                else: ""
+
+            "  #{String.pad_trailing(label, 20)} #{type_str}#{required_str}#{default_str}  #{desc}"
+          end)
+
+        "\n\nArguments:\n" <> Enum.join(lines, "\n")
+      else
+        ""
+      end
+
+    # Build options section
+    options_section =
+      if named_specs != [] do
+        lines =
+          Enum.map(named_specs, fn spec ->
+            short_str = if spec.short, do: "-#{spec.short}", else: nil
+            long_str = if spec.long, do: "--#{spec.long}", else: "--#{spec.name}"
+            flag_parts = [short_str, long_str] |> Enum.reject(&is_nil/1) |> Enum.join(", ")
+
+            value_hint =
+              if spec.flag do
+                ""
+              else
+                type_str = format_type_label(spec.type)
+                " <#{type_str}>"
+              end
+
+            left = "  #{flag_parts}#{value_hint}"
+            desc = spec.description || ""
+
+            default_str =
+              if spec.default != nil and spec.default != "",
+                do: " [default: #{spec.default}]",
+                else: ""
+
+            "#{String.pad_trailing(left, 28)} #{desc}#{default_str}"
+          end)
+
+        help_line = "  #{String.pad_trailing("-h, --help", 28)} Show this help message"
+        "\n\nOptions:\n" <> Enum.join(lines ++ [help_line], "\n")
+      else
+        "\n\nOptions:\n  #{String.pad_trailing("-h, --help", 28)} Show this help message"
+      end
+
+    String.trim_trailing(synopsis <> positional_section <> options_section)
+  end
+
+  defp format_type_label(:String), do: "STRING"
+  defp format_type_label({:named, "String"}), do: "STRING"
+  defp format_type_label(:number), do: "NUMBER"
+  defp format_type_label({:named, "number"}), do: "NUMBER"
+  defp format_type_label(:bool), do: "BOOL"
+  defp format_type_label({:named, "bool"}), do: "BOOL"
+  defp format_type_label(:char), do: "CHAR"
+  defp format_type_label({:named, "char"}), do: "CHAR"
+  defp format_type_label(_), do: "VALUE"
+
   # Parse annotation list into a map
   defp parse_annotations(nil), do: %{}
+
   defp parse_annotations(anns) when is_list(anns) do
     Enum.reduce(anns, %{}, fn
       {name, args}, acc when is_list(name) ->
         name_str = to_string(name)
+
         case args do
           [] -> Map.put(acc, name_str, true)
           [value] -> Map.put(acc, name_str, annotation_value(value))
           values -> Map.put(acc, name_str, Enum.map(values, &annotation_value/1))
         end
-      _, acc -> acc
+
+      _, acc ->
+        acc
     end)
   end
 
@@ -797,7 +1008,8 @@ defmodule BeamLang.Runtime do
   # Parse args with annotation support
   defp parse_args_with_annotations(args_data, field_specs, type_label, module) do
     # Separate named/flag args from positional args
-    {named_specs, positional_specs} = Enum.split_with(field_specs, fn spec -> !spec.positional end)
+    {named_specs, positional_specs} =
+      Enum.split_with(field_specs, fn spec -> !spec.positional end)
 
     # Parse named/flag arguments first
     {remaining_args, named_values} = parse_named_args(args_data, named_specs, %{})
@@ -810,7 +1022,9 @@ defmodule BeamLang.Runtime do
           {:ok, result} -> {:ok, result}
           {:error, _} = err -> err
         end
-      {:error, _} = err -> err
+
+      {:error, _} = err ->
+        err
     end
   end
 
@@ -824,33 +1038,85 @@ defmodule BeamLang.Runtime do
   defp do_parse_named_args([], _specs, acc, positional_acc) do
     {Enum.reverse(positional_acc), acc}
   end
+
   defp do_parse_named_args([arg | rest] = _args, specs, acc, positional_acc) do
     arg_str = string_value(arg)
 
     cond do
+      # "--" separator: everything after is positional
+      arg_str == "--" ->
+        {Enum.reverse(positional_acc) ++ rest, acc}
+
+      # Skip --help/-h (handled earlier in parse_args)
+      arg_str == "--help" or arg_str == "-h" ->
+        do_parse_named_args(rest, specs, acc, positional_acc)
+
       # Long form: --name=value or --name value
       String.starts_with?(arg_str, "--") ->
         case parse_long_arg(arg_str, rest, specs) do
           {:ok, field_name, value, remaining} ->
             do_parse_named_args(remaining, specs, Map.put(acc, field_name, value), positional_acc)
+
           :not_matched ->
             # Unrecognized flag, treat as positional
             do_parse_named_args(rest, specs, acc, [arg | positional_acc])
         end
 
-      # Short form: -n=value or -n value
+      # Short form: -n=value, -n value, or combined flags -inv
       String.starts_with?(arg_str, "-") and String.length(arg_str) >= 2 ->
         case parse_short_arg(arg_str, rest, specs) do
           {:ok, field_name, value, remaining} ->
             do_parse_named_args(remaining, specs, Map.put(acc, field_name, value), positional_acc)
+
           :not_matched ->
-            # Unrecognized flag, treat as positional
-            do_parse_named_args(rest, specs, acc, [arg | positional_acc])
+            # Try combined short flags (e.g., -inv = -i -n -v)
+            case parse_combined_short_flags(arg_str, specs) do
+              {:ok, flag_values} ->
+                merged_acc = Map.merge(acc, flag_values)
+                do_parse_named_args(rest, specs, merged_acc, positional_acc)
+
+              :not_matched ->
+                # Unrecognized flag, treat as positional
+                do_parse_named_args(rest, specs, acc, [arg | positional_acc])
+            end
         end
 
       true ->
         # Positional argument, continue collecting
         do_parse_named_args(rest, specs, acc, [arg | positional_acc])
+    end
+  end
+
+  # Parse combined short flags like -inv -> -i -n -v
+  # Only valid if ALL characters match flag-type short options
+  defp parse_combined_short_flags(arg_str, specs) do
+    without_prefix = String.slice(arg_str, 1, String.length(arg_str) - 1)
+    chars = String.graphemes(without_prefix)
+
+    # Only try combined flags if more than 1 character
+    if length(chars) <= 1 do
+      :not_matched
+    else
+      results =
+        Enum.reduce_while(chars, {:ok, %{}}, fn char, {:ok, acc} ->
+          case find_spec_by_short(char, specs) do
+            nil ->
+              {:halt, :not_matched}
+
+            spec ->
+              if spec.flag do
+                {:cont, {:ok, Map.put(acc, spec.name, true)}}
+              else
+                # Non-flag short option in combined form — not allowed
+                {:halt, :not_matched}
+              end
+          end
+        end)
+
+      case results do
+        {:ok, values} -> {:ok, values}
+        :not_matched -> :not_matched
+      end
     end
   end
 
@@ -862,14 +1128,19 @@ defmodule BeamLang.Runtime do
     case String.split(without_prefix, "=", parts: 2) do
       [name, value] ->
         case find_spec_by_long(name, specs) do
-          nil -> :not_matched
+          nil ->
+            :not_matched
+
           spec ->
             parsed_value = if spec.flag, do: true, else: value
             {:ok, spec.name, parsed_value, rest}
         end
+
       [name] ->
         case find_spec_by_long(name, specs) do
-          nil -> :not_matched
+          nil ->
+            :not_matched
+
           spec ->
             if spec.flag do
               {:ok, spec.name, true, rest}
@@ -877,6 +1148,7 @@ defmodule BeamLang.Runtime do
               case rest do
                 [next_arg | remaining] ->
                   {:ok, spec.name, string_value(next_arg), remaining}
+
                 [] ->
                   :not_matched
               end
@@ -893,14 +1165,19 @@ defmodule BeamLang.Runtime do
     case String.split(without_prefix, "=", parts: 2) do
       [name, value] when byte_size(name) == 1 ->
         case find_spec_by_short(name, specs) do
-          nil -> :not_matched
+          nil ->
+            :not_matched
+
           spec ->
             parsed_value = if spec.flag, do: true, else: value
             {:ok, spec.name, parsed_value, rest}
         end
+
       [name] when byte_size(name) == 1 ->
         case find_spec_by_short(name, specs) do
-          nil -> :not_matched
+          nil ->
+            :not_matched
+
           spec ->
             if spec.flag do
               {:ok, spec.name, true, rest}
@@ -908,11 +1185,13 @@ defmodule BeamLang.Runtime do
               case rest do
                 [next_arg | remaining] ->
                   {:ok, spec.name, string_value(next_arg), remaining}
+
                 [] ->
                   :not_matched
               end
             end
         end
+
       _ ->
         :not_matched
     end
@@ -933,12 +1212,15 @@ defmodule BeamLang.Runtime do
     case {args, specs} do
       {[], []} ->
         {:ok, acc}
+
       {[], _remaining_specs} ->
         # Some specs not filled, will be handled by defaults
         {:ok, acc}
+
       {[arg | rest_args], [spec | rest_specs]} ->
         value = string_value(arg)
         parse_positional_args(rest_args, rest_specs, Map.put(acc, spec.name, value))
+
       {_extra_args, []} ->
         # Extra args, ignore them
         {:ok, acc}
@@ -947,48 +1229,57 @@ defmodule BeamLang.Runtime do
 
   # Apply defaults and check required fields
   defp apply_defaults_and_check_required(values, field_specs, type_label, module) do
-    result = Enum.reduce_while(field_specs, %{}, fn spec, acc ->
-      case Map.fetch(values, spec.name) do
-        {:ok, raw_value} ->
-          # Parse the value according to type
-          case parse_arg_value(raw_value, spec.type, spec.name) do
-            {:ok, parsed} -> {:cont, Map.put(acc, String.to_atom(spec.name), parsed)}
-            {:error, _} = err -> {:halt, err}
-          end
-        :error ->
-          # Value not provided, check for default
-          cond do
-            spec.default != nil ->
-              # Use default value
-              case parse_arg_value(spec.default, spec.type, spec.name) do
-                {:ok, parsed} -> {:cont, Map.put(acc, String.to_atom(spec.name), parsed)}
-                {:error, _} = err -> {:halt, err}
-              end
-            spec.flag ->
-              # Flags default to false
-              {:cont, Map.put(acc, String.to_atom(spec.name), false)}
-            spec.required ->
-              # Required field missing
-              error_struct = %{
-                message: stdlib_string_new("Missing required argument: #{spec.name}"),
-                missing: wrap_as_beamlang_list([stdlib_string_new(spec.name)], module),
-                __beamlang_type__: ~c"ArgsError"
-              }
-              {:halt, {:error, error_struct}}
-            true ->
-              # Not required and no default - return error for missing
-              error_struct = %{
-                message: stdlib_string_new("Missing argument: #{spec.name}"),
-                missing: wrap_as_beamlang_list([stdlib_string_new(spec.name)], module),
-                __beamlang_type__: ~c"ArgsError"
-              }
-              {:halt, {:error, error_struct}}
-          end
-      end
-    end)
+    result =
+      Enum.reduce_while(field_specs, %{}, fn spec, acc ->
+        case Map.fetch(values, spec.name) do
+          {:ok, raw_value} ->
+            # Parse the value according to type
+            case parse_arg_value(raw_value, spec.type, spec.name) do
+              {:ok, parsed} -> {:cont, Map.put(acc, String.to_atom(spec.name), parsed)}
+              {:error, _} = err -> {:halt, err}
+            end
+
+          :error ->
+            # Value not provided, check for default
+            cond do
+              spec.default != nil ->
+                # Use default value
+                case parse_arg_value(spec.default, spec.type, spec.name) do
+                  {:ok, parsed} -> {:cont, Map.put(acc, String.to_atom(spec.name), parsed)}
+                  {:error, _} = err -> {:halt, err}
+                end
+
+              spec.flag ->
+                # Flags default to false
+                {:cont, Map.put(acc, String.to_atom(spec.name), false)}
+
+              spec.required ->
+                # Required field missing
+                error_struct = %{
+                  message: stdlib_string_new("Missing required argument: #{spec.name}"),
+                  missing: wrap_as_beamlang_list([stdlib_string_new(spec.name)], module),
+                  __beamlang_type__: ~c"ArgsError"
+                }
+
+                {:halt, {:error, error_struct}}
+
+              true ->
+                # Not required and no default - return error for missing
+                error_struct = %{
+                  message: stdlib_string_new("Missing argument: #{spec.name}"),
+                  missing: wrap_as_beamlang_list([stdlib_string_new(spec.name)], module),
+                  __beamlang_type__: ~c"ArgsError"
+                }
+
+                {:halt, {:error, error_struct}}
+            end
+        end
+      end)
 
     case result do
-      {:error, _} = err -> err
+      {:error, _} = err ->
+        err
+
       values_map ->
         {:ok, Map.put(values_map, :__beamlang_type__, type_label)}
     end
@@ -997,6 +1288,7 @@ defmodule BeamLang.Runtime do
   defp string_value(value) when is_map(value) do
     if string_map?(value), do: to_string(value.data), else: inspect(value)
   end
+
   defp string_value(value) when is_list(value), do: to_string(value)
   defp string_value(value) when is_binary(value), do: value
   defp string_value(value), do: inspect(value)
@@ -1053,6 +1345,7 @@ defmodule BeamLang.Runtime do
 
   defp args_error_struct(field, expected) do
     module = current_module()
+
     %{
       message: stdlib_string_new("Invalid value for #{field} (expected #{expected})."),
       missing: wrap_as_beamlang_list([], module),
@@ -1137,9 +1430,11 @@ defmodule BeamLang.Runtime do
   def range_to_list(start, stop, step) when step > 0 do
     Enum.take_while(Stream.iterate(start, &(&1 + step)), &(&1 < stop))
   end
+
   def range_to_list(start, stop, step) when step < 0 do
     Enum.take_while(Stream.iterate(start, &(&1 + step)), &(&1 > stop))
   end
+
   def range_to_list(start, _stop, 0), do: [start]
 
   # Map functions

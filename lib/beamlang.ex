@@ -74,8 +74,11 @@ defmodule BeamLang do
          {:ok, stdlib_ast} <- load_stdlib_ast(),
          {:ok, merged} <- merge_programs(stdlib_ast, ast) do
       case Semantic.validate(merged, require_main: false) do
-        {:ok, checked} -> {:ok, %{tokens: tokens, ast: checked, errors: []}}
-        {:error, errors} when is_list(errors) -> {:ok, %{tokens: tokens, ast: merged, errors: errors}}
+        {:ok, checked} ->
+          {:ok, %{tokens: tokens, ast: checked, errors: []}}
+
+        {:error, errors} when is_list(errors) ->
+          {:ok, %{tokens: tokens, ast: merged, errors: errors}}
       end
     else
       {:error, %BeamLang.Error{} = error} ->
@@ -132,14 +135,19 @@ defmodule BeamLang do
 
                 {:error, reason} ->
                   span = BeamLang.Span.new(path, 0, 0)
-                  {:halt, {:error, [BeamLang.Error.new(:type, "Failed to read stdlib: #{inspect(reason)}", span)]}}
+
+                  {:halt,
+                   {:error,
+                    [BeamLang.Error.new(:type, "Failed to read stdlib: #{inspect(reason)}", span)]}}
               end
             end)
         end
 
       {:error, reason} ->
         span = BeamLang.Span.new(stdlib_dir, 0, 0)
-        {:error, [BeamLang.Error.new(:type, "Failed to read stdlib directory: #{inspect(reason)}", span)]}
+
+        {:error,
+         [BeamLang.Error.new(:type, "Failed to read stdlib directory: #{inspect(reason)}", span)]}
     end
   end
 
@@ -157,33 +165,52 @@ defmodule BeamLang do
   end
 
   defp merge_programs_simple(
-         {:program, %{types: acc_types, enums: acc_enums, errors: acc_errors, functions: acc_funcs} = acc},
+         {:program,
+          %{types: acc_types, enums: acc_enums, errors: acc_errors, functions: acc_funcs} = acc},
          {:program, %{types: types, enums: enums, errors: errors, functions: funcs}}
        ) do
-    {:program, %{acc | types: acc_types ++ types, enums: acc_enums ++ enums, errors: acc_errors ++ errors, functions: acc_funcs ++ funcs}}
+    {:program,
+     %{
+       acc
+       | types: acc_types ++ types,
+         enums: acc_enums ++ enums,
+         errors: acc_errors ++ errors,
+         functions: acc_funcs ++ funcs
+     }}
   end
 
   # Handle programs without errors/enums field for backwards compatibility
   defp merge_programs_simple(
          {:program, %{types: acc_types, functions: acc_funcs} = acc},
          {:program, %{types: types, functions: funcs} = prog2}
-       ) when not is_map_key(acc, :errors) or not is_map_key(prog2, :errors) do
+       )
+       when not is_map_key(acc, :errors) or not is_map_key(prog2, :errors) do
     acc_errors = Map.get(acc, :errors, [])
     acc_enums = Map.get(acc, :enums, [])
     errors = Map.get(prog2, :errors, [])
     enums = Map.get(prog2, :enums, [])
-    {:program, %{acc | types: acc_types ++ types, enums: acc_enums ++ enums, errors: acc_errors ++ errors, functions: acc_funcs ++ funcs}}
+
+    {:program,
+     %{
+       acc
+       | types: acc_types ++ types,
+         enums: acc_enums ++ enums,
+         errors: acc_errors ++ errors,
+         functions: acc_funcs ++ funcs
+     }}
   end
 
   defp merge_programs(
          {:program, %{types: std_types, functions: std_funcs} = std_prog},
          {:program,
-          %{module: module, imports: imports, types: types, functions: functions, span: span} = user_prog}
+          %{module: module, imports: imports, types: types, functions: functions, span: span} =
+            user_prog}
        ) do
     std_errors = Map.get(std_prog, :errors, [])
     std_enums = Map.get(std_prog, :enums, [])
     user_errors = Map.get(user_prog, :errors, [])
     user_enums = Map.get(user_prog, :enums, [])
+
     {:ok,
      {:program,
       %{
@@ -305,8 +332,16 @@ defmodule BeamLang do
          module
        ) do
     errors = Map.get(prog, :errors, [])
+
     {:program,
-     %{module: module, imports: imports, types: types, errors: errors, functions: functions, span: span}}
+     %{
+       module: module,
+       imports: imports,
+       types: types,
+       errors: errors,
+       functions: functions,
+       span: span
+     }}
   end
 
   defp program_imports({:program, %{imports: imports}}) do
@@ -382,7 +417,8 @@ defmodule BeamLang do
 
   defp resolve_imports_and_qualify(
          {:program,
-          %{module: module, imports: imports, types: types, functions: functions, span: span} = prog},
+          %{module: module, imports: imports, types: types, functions: functions, span: span} =
+            prog},
          exports,
          module_name
        ) do
@@ -458,7 +494,14 @@ defmodule BeamLang do
 
       {:ok,
        {:program,
-        %{module: module, imports: imports, types: types, errors: errors_list, functions: functions, span: span}}}
+        %{
+          module: module,
+          imports: imports,
+          types: types,
+          errors: errors_list,
+          functions: functions,
+          span: span
+        }}}
     end
   end
 
@@ -973,7 +1016,12 @@ defmodule BeamLang do
 
     Enum.with_index(param_types)
     |> Enum.map(fn {type, idx} ->
-      %{name: "arg#{idx + 1}", type: type, mutable: false, span: BeamLang.Span.new("<import>", 0, 0)}
+      %{
+        name: "arg#{idx + 1}",
+        type: type,
+        mutable: false,
+        span: BeamLang.Span.new("<import>", 0, 0)
+      }
     end)
   end
 
@@ -1018,10 +1066,19 @@ defmodule BeamLang do
       Enum.map(params, fn param ->
         case param do
           %{name: name, type: type} ->
-            %{name: name, type: qualify_type(type, type_map, local_types, alias_map), mutable: Map.get(param, :mutable, false), span: param.span}
+            %{
+              name: name,
+              type: qualify_type(type, type_map, local_types, alias_map),
+              mutable: Map.get(param, :mutable, false),
+              span: param.span
+            }
 
           %{pattern: pattern, type: type} ->
-            %{pattern: pattern, type: qualify_type(type, type_map, local_types, alias_map), span: param.span}
+            %{
+              pattern: pattern,
+              type: qualify_type(type, type_map, local_types, alias_map),
+              span: param.span
+            }
         end
       end)
 
@@ -1260,7 +1317,8 @@ defmodule BeamLang do
          _local_types,
          _local_funcs,
          _alias_map
-       ), do: expr
+       ),
+       do: expr
 
   defp qualify_expr(
          {:struct, %{fields: fields, type: type, span: span} = info},
@@ -1426,7 +1484,12 @@ defmodule BeamLang do
        ) do
     params =
       Enum.map(params, fn param ->
-        %{name: param.name, type: qualify_type(param.type, type_map, local_types, alias_map), mutable: Map.get(param, :mutable, false), span: param.span}
+        %{
+          name: param.name,
+          type: qualify_type(param.type, type_map, local_types, alias_map),
+          mutable: Map.get(param, :mutable, false),
+          span: param.span
+        }
       end)
 
     return_type = qualify_type(return_type, type_map, local_types, alias_map)
@@ -1707,10 +1770,10 @@ defmodule BeamLang do
   defp collect_else_refs({:else_block, %{block: block}}), do: collect_expr_refs(block)
   defp collect_else_refs({:else_if, %{if: if_stmt}}), do: collect_stmt_refs(if_stmt)
 
-  @spec run_source(binary()) :: {:ok, term()} | {:error, [BeamLang.Error.t()]}
-  def run_source(source) when is_binary(source) do
+  @spec run_source(binary(), list()) :: {:ok, term()} | {:error, [BeamLang.Error.t()]}
+  def run_source(source, args \\ []) when is_binary(source) do
     with {:ok, %{module: module, binary: binary}} <- compile_source(source),
-         {:ok, value} <- Runtime.load_and_run(module, binary) do
+         {:ok, value} <- Runtime.load_and_run(module, binary, args) do
       {:ok, value}
     end
   end

@@ -54,11 +54,10 @@ defmodule BeamLang.Semantic do
 
   @spec require_main_params([BeamLang.AST.func_param()], BeamLang.Span.t()) ::
           :ok | {:error, [BeamLang.Error.t()]}
-  defp require_main_params([%{name: "args", type: type}], _span) do
+  defp require_main_params([%{name: "args", type: type}], span) do
     if is_string_list_type?(type) do
       :ok
     else
-      span = BeamLang.Span.new("<source>", 0, 0)
       {:error,
        [
          BeamLang.Error.new(
@@ -70,9 +69,7 @@ defmodule BeamLang.Semantic do
     end
   end
 
-  defp require_main_params(params, _span) do
-    span = BeamLang.Span.new("<source>", 0, 0)
-
+  defp require_main_params(params, span) do
     cond do
       length(params) == 0 ->
         {:error,
@@ -379,7 +376,7 @@ defmodule BeamLang.Semantic do
     type_args = Map.get(info, :type_args, [])
 
     parse_args_errors =
-      if name == "parse_args" do
+      if name in ["parse_args", "usage"] do
         parse_args_type_errors(type_args, type_table, call_span)
       else
         []
@@ -3716,7 +3713,7 @@ defmodule BeamLang.Semantic do
       end
 
     type_info =
-      if name == "parse_args" do
+      if name in ["parse_args", "usage"] do
         case parse_args_type_info(type_args, type_table, span) do
           {:ok, info} -> info
           {:error, _} -> nil

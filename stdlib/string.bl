@@ -30,7 +30,7 @@ fn string_concat_data(left: any, right: any) -> any;
 fn string_chars_data(value: any) -> any;
 
 @external(elixir, "BeamLang.Runtime", "string_split_data")
-fn string_split_data(value: any, separator: any) -> any;
+fn string_split_data(value: any, separator: any) -> [String];
 
 @external(elixir, "BeamLang.Runtime", "string_contains_data")
 fn string_contains_data(value: any, needle: any) -> bool;
@@ -123,8 +123,7 @@ internal fn string_chars(self: String) -> Iterator<char> {
 }
 
 internal fn string_split(self: String, separator: String) -> [String] {
-    let parts = string_split_data(self->data, separator->data);
-    return list_map_to_strings(parts);
+    return string_split_data(self->data, separator->data);
 }
 
 @external(elixir, "BeamLang.Runtime", "list_map_to_strings")

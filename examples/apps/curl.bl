@@ -194,21 +194,8 @@ fn run_curl(opts: Args) -> number {
 }
 
 fn print_usage() -> void {
-    let usage = """Usage: beamlang curl.bl [OPTIONS] URL
-
-Options:
-  -X, --request METHOD     Request method (GET, POST, PUT, ...)
-  -d, --data DATA          Request body data
-  -H, --header HEADERS     Headers, comma-separated
-  -o, --output PATH        Write response body to file
-  -A, --user-agent UA      User-Agent header
-  -I, --head               Fetch headers only
-  -L, --location           Follow redirects
-  -i, --include            Include response headers
-  -s, --silent             Suppress error output
-      --max-time SEC       Timeout in seconds
-""";
-    println(usage);
+    let help = usage<Args>("curl");
+    println(help);
 }
 
 fn main(args: [String]) -> number {
@@ -217,6 +204,10 @@ fn main(args: [String]) -> number {
     return match (parsed) {
         case!ok opts => run_curl(opts),
         case!err err -> {
+            if (err->message == "--help") {
+                print_usage();
+                return 0;
+            }
             print_usage();
             println("");
             println("Error: ${err->message}");

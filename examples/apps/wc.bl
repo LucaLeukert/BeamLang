@@ -109,18 +109,10 @@ fn wc_content(content: String, opts: Args) -> number {
 }
 
 fn print_usage() -> void {
-    let usage = """Usage: beamlang wc.bl [OPTIONS] [FILE]
-
-Count lines, words, and bytes in FILE or stdin (-).
-
-Options:
-  -l, --lines     Print line count
-  -w, --words     Print word count
-  -c, --bytes     Print byte count
-
-If no options are provided, all counts are printed.
-""";
-    println(usage);
+    let help = usage<Args>("wc");
+    println(help);
+    println("");
+    println("If no options are provided, all counts are printed.");
 }
 
 fn main(args: [String]) -> number {
@@ -149,6 +141,10 @@ fn main(args: [String]) -> number {
             }
         },
         case!err err -> {
+            if (err->message == "--help") {
+                print_usage();
+                return 0;
+            }
             print_usage();
             println("");
             println("Error: ${err->message}");

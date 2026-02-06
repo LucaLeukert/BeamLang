@@ -2,6 +2,8 @@
 // Usage: beamlang cat.bl <file>
 
 type Args {
+    @required()
+    @description("File to read and print")
     file: String
 }
 
@@ -13,11 +15,11 @@ fn cat_file(filename: String) -> number {
     
     let result = read_file(filename);
     match (result) {
-        case!ok content => {
+        case!ok content -> {
             print(content);
             return 0;
         },
-        case!err err => {
+        case!err err -> {
             println("cat: ${filename}: ${err->message}");
             return 1;
         }
@@ -28,10 +30,18 @@ fn main(args: [String]) -> number {
     let parsed = parse_args<Args>(args);
 
     return match (parsed) {
-        case!ok opts => cat_file(opts->file),
-        case!err err => {
-            let missing  = err->missing->join(", ");
-            println("Missing fields: ${missing}");
+        case!ok opts -> {
+            cat_file(opts->file);
+        },
+        case!err err -> {
+            let help = usage<Args>("cat");
+            if (err->message == "--help") {
+                println(help);
+                return 0;
+            }
+            println("Error: ${err->message}");
+            println("");
+            println(help);
             1;
         }
     };
