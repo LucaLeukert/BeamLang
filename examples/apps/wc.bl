@@ -134,11 +134,12 @@ fn main(args: [String]) -> number {
                 }
             }
 
-            let content_result = if (opts->file == "-") {
-                !ok read_stdin();
-            } else {
-                read_file(opts->file);
-            };
+            if (opts->file == "-") {
+                let content = read_stdin();
+                return wc_content(content, opts);
+            }
+
+            let content_result = read_file(opts->file);
 
             match (content_result) {
                 case!ok content => wc_content(content, opts),
