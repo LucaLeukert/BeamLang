@@ -70,4 +70,4 @@ See `examples/` for runnable programs, including:
 ## Design Docs
 
 - `beamlang_design.md` (original design)
-- `beamlang_design_current.md` (current, implemented language)
+- `beamlang_design.md` (current, implemented language)

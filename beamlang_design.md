@@ -1,4 +1,4 @@
-# BeamLang Current Design (January 2026)
+# BeamLang Design (January 2026)
 
 This document reflects the current, implemented BeamLang language features and standard library structure.
 
