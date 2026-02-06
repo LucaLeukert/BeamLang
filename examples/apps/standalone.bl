@@ -1,0 +1,7 @@
+// standalone - minimal program for --compile demo
+// Usage: beamlang standalone.bl
+
+fn main(args: [String]) -> number {
+    println("Hello from a standalone BeamLang binary!");
+    return 0;
+}

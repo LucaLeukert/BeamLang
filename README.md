@@ -32,13 +32,17 @@ fn main(args: [String]) -> number {
 
 ```bash
 # Run a program
-mix beamlang examples/basics/hello.bl
+mix beamlang run examples/basics/hello.bl
 
 # With debug (print AST, don't run)
-mix beamlang examples/hello.bl --print-ast --no-run
+mix beamlang run --print-ast --no-run examples/hello.bl
+
+# Build a standalone binary
+mix beamlang compile examples/basics/hello.bl
+./examples/basics/hello
 
 # Or use the helper script (after mix escript.build)
-bin/beamlang examples/basics/hello.bl
+bin/beamlang run examples/basics/hello.bl
 ```
 
 **Tests:**
@@ -80,7 +84,7 @@ Debug LSP logs: `./beamlang --lsp --lsp-debug`
 | **Control flow** | `control_flow.bl`, `loops.bl`, `if_expr.bl`, `guard.bl` |
 | **Collections** | `iterator_methods.bl`, `list.bl`, `list_methods.bl`, `range_demo.bl` |
 | **Modules** | `use_math.bl`, `stdlib_methods.bl` |
-| **Apps** | `examples/apps/` — `cat`, `curl`, `grep`, `ls`, `wc` |
+| **Apps** | `examples/apps/` — `cat`, `curl`, `grep`, `ls`, `standalone`, `wc` |
 | **LSP** | `examples/lsp/lsp_features.bl`, `hover_types.bl` |
 
 ---
