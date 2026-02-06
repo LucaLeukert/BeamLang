@@ -44,7 +44,8 @@ fn count_words(text: String) -> number {
     if (trimmed->length() == 0) {
         return 0;
     }
-    let parts = trimmed->split(" ");
+    let raw_parts = trimmed->split(" ");
+    let parts = list_of(raw_parts);
     let words = parts->filter(is_non_empty);
     return words->length();
 }
