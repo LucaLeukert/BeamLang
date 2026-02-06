@@ -175,6 +175,24 @@ fn handle_response(resp: HttpResponse, opts: Args) -> number {
     return output_body(opts, resp->body);
 }
 
+fn run_curl(opts: Args) -> number {
+    let headers = split_headers(opts->header);
+    let headers_with_ua = add_user_agent(headers, opts->user_agent);
+    let method = resolve_method(opts);
+    let timeout_ms = opts->max_time * 1000;
+    let result = http_request(method, opts->url, headers_with_ua, opts->data, timeout_ms, opts->follow);
+
+    return match (result) {
+        case!ok resp => handle_response(resp, opts),
+        case!err err -> {
+            if (opts->silent == false) {
+                println("curl: ${err->message}");
+            }
+            1;
+        }
+    };
+}
+
 fn print_usage() -> void {
     let usage = """Usage: beamlang curl.bl [OPTIONS] URL
 
@@ -197,23 +215,7 @@ fn main(args: [String]) -> number {
     let parsed = parse_args<Args>(args);
 
     return match (parsed) {
-        case!ok opts -> {
-            let headers = split_headers(opts->header);
-            let headers_with_ua = add_user_agent(headers, opts->user_agent);
-            let method = resolve_method(opts);
-            let timeout_ms = opts->max_time * 1000;
-            let result = http_request(method, opts->url, headers_with_ua, opts->data, timeout_ms, opts->follow);
-
-            return match (result) {
-                case!ok resp => handle_response(resp, opts),
-                case!err err -> {
-                    if (opts->silent == false) {
-                        println("curl: ${err->message}");
-                    }
-                    1;
-                }
-            };
-        },
+        case!ok opts => run_curl(opts),
         case!err err -> {
             print_usage();
             println("");
