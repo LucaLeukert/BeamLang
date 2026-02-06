@@ -1,0 +1,158 @@
+// wc - count lines, words, and bytes
+// Usage: beamlang wc.bl [OPTIONS] [file]
+//
+// Counts lines, words, and bytes in a file or stdin (-).
+
+type Args {
+    @default("-")
+    @description("File to read (or - for stdin)")
+    file: String,
+
+    @flag
+    @short("l")
+    @long("lines")
+    @description("Print line count")
+    lines: bool,
+
+    @flag
+    @short("w")
+    @long("words")
+    @description("Print word count")
+    words: bool,
+
+    @flag
+    @short("c")
+    @long("bytes")
+    @description("Print byte count")
+    bytes: bool
+}
+
+fn normalize_whitespace(text: String) -> String {
+    let step1 = text->replace("\n", " ");
+    let step2 = step1->replace("\t", " ");
+    let step3 = step2->replace("\r", " ");
+    return step3;
+}
+
+fn is_non_empty(word: String) -> bool {
+    return word->length() > 0;
+}
+
+fn count_words(text: String) -> number {
+    let normalized = normalize_whitespace(text);
+    let trimmed = normalized->trim();
+    if (trimmed->length() == 0) {
+        return 0;
+    }
+    let parts = trimmed->split(" ");
+    let words = parts->filter(is_non_empty);
+    return words->length();
+}
+
+fn count_lines(text: String) -> number {
+    let stripped = text->replace("\n", "");
+    return text->length() - stripped->length();
+}
+
+fn count_bytes(text: String) -> number {
+    return text->length();
+}
+
+fn should_show_all(opts: Args) -> bool {
+    if (opts->lines) {
+        return false;
+    }
+    if (opts->words) {
+        return false;
+    }
+    if (opts->bytes) {
+        return false;
+    }
+    return true;
+}
+
+fn format_output(opts: Args, line_count: number, word_count: number, byte_count: number) -> String {
+    let show_all = should_show_all(opts);
+    let mut parts: [String] = [];
+
+    if (show_all) {
+        parts = parts->push("${line_count}");
+        parts = parts->push("${word_count}");
+        parts = parts->push("${byte_count}");
+    } else {
+        if (opts->lines) {
+            parts = parts->push("${line_count}");
+        }
+        if (opts->words) {
+            parts = parts->push("${word_count}");
+        }
+        if (opts->bytes) {
+            parts = parts->push("${byte_count}");
+        }
+    }
+
+    if (opts->file != "-") {
+        parts = parts->push(opts->file);
+    }
+
+    return parts->join(" ");
+}
+
+fn wc_content(content: String, opts: Args) -> number {
+    let line_count = count_lines(content);
+    let word_count = count_words(content);
+    let byte_count = count_bytes(content);
+    let output = format_output(opts, line_count, word_count, byte_count);
+    println(output);
+    return 0;
+}
+
+fn print_usage() -> void {
+    let usage = """Usage: beamlang wc.bl [OPTIONS] [FILE]
+
+Count lines, words, and bytes in FILE or stdin (-).
+
+Options:
+  -l, --lines     Print line count
+  -w, --words     Print word count
+  -c, --bytes     Print byte count
+
+If no options are provided, all counts are printed.
+""";
+    println(usage);
+}
+
+fn main(args: [String]) -> number {
+    let parsed = parse_args<Args>(args);
+
+    return match (parsed) {
+        case!ok opts => {
+            if (opts->file != "-") {
+                if (file_exists(opts->file) == false) {
+                    println("wc: ${opts->file}: No such file or directory");
+                    return 1;
+                }
+            }
+
+            let content_result = if (opts->file == "-") {
+                !ok read_stdin();
+            } else {
+                read_file(opts->file);
+            };
+
+            match (content_result) {
+                case!ok content => wc_content(content, opts),
+                case!err err => {
+                    println("wc: ${opts->file}: ${err->message}");
+                    1;
+                }
+            }
+        },
+        case!err err => {
+            print_usage();
+            println("");
+            println("Error: ${err->message}");
+            1;
+        }
+    };
+}

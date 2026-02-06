@@ -1016,6 +1016,38 @@ defmodule BeamLang.ParserTest do
     assert Enum.any?(verbose_field.annotations, fn a -> a.name == "short" and a.args == ["v"] end)
   end
 
+  test "parses default string annotation" do
+    source = """
+    type Args {
+        @default("-")
+        file: String,
+
+        @flag
+        @short("l")
+        lines: bool
+    }
+
+    fn main(args: [String]) -> number {
+        return 0;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{types: [type_def]}} = ast
+    assert {:type_def, %{name: "Args", fields: fields}} = type_def
+
+    file_field = Enum.find(fields, fn f -> f.name == "file" end)
+    assert file_field != nil
+    assert Enum.any?(file_field.annotations, fn a -> a.name == "default" and a.args == ["-"] end)
+
+    lines_field = Enum.find(fields, fn f -> f.name == "lines" end)
+    assert lines_field != nil
+    assert Enum.any?(lines_field.annotations, fn a -> a.name == "flag" end)
+    assert Enum.any?(lines_field.annotations, fn a -> a.name == "short" and a.args == ["l"] end)
+  end
+
   test "parses type without field annotations (backwards compatible)" do
     source = """
     type Simple {
