@@ -22,10 +22,32 @@ defmodule BeamLang.LSP.Server do
       :eof ->
         :ok
 
+      {:error, _reason} ->
+        # Malformed message, skip and continue
+        loop(state)
+
       {:ok, message} ->
-        state
-        |> handle_message(message)
-        |> loop()
+        state =
+          try do
+            handle_message(state, message)
+          rescue
+            e ->
+              # Log the crash but keep the server alive
+              BeamLang.LSP.Debug.log("handle_message crashed: #{Exception.message(e)}\n#{Exception.format_stacktrace(__STACKTRACE__)}")
+
+              # If the message had a request id, send an error response so the client doesn't hang
+              case message do
+                %{"id" => id} when not is_nil(id) ->
+                  Protocol.send_error(id, -32603, "Internal error: #{Exception.message(e)}")
+
+                _ ->
+                  :ok
+              end
+
+              state
+          end
+
+        loop(state)
     end
   end
 
@@ -38,7 +60,10 @@ defmodule BeamLang.LSP.Server do
         "completionProvider" => %{"resolveProvider" => false},
         "documentSymbolProvider" => true,
         "workspaceSymbolProvider" => true,
-        "signatureHelpProvider" => %{"triggerCharacters" => ["(", ","]}
+        "signatureHelpProvider" => %{"triggerCharacters" => ["(", ","]},
+        "renameProvider" => %{"prepareProvider" => true},
+        "referencesProvider" => true,
+        "documentFormattingProvider" => true
       }
     })
 
@@ -148,6 +173,58 @@ defmodule BeamLang.LSP.Server do
     state
   end
 
+  defp handle_message(state, %{"method" => "textDocument/prepareRename", "id" => id, "params" => params}) do
+    result =
+      with %{"textDocument" => %{"uri" => uri}, "position" => position} <- params,
+           doc when not is_nil(doc) <- Map.get(state.documents, uri) do
+        prepare_rename(doc, position)
+      else
+        _ -> nil
+      end
+
+    Protocol.send_response(id, result)
+    state
+  end
+
+  defp handle_message(state, %{"method" => "textDocument/rename", "id" => id, "params" => params}) do
+    result =
+      with %{"textDocument" => %{"uri" => uri}, "position" => position, "newName" => new_name} <- params,
+           doc when not is_nil(doc) <- Map.get(state.documents, uri) do
+        rename_symbol(state, doc, position, new_name)
+      else
+        _ -> nil
+      end
+
+    Protocol.send_response(id, result)
+    state
+  end
+
+  defp handle_message(state, %{"method" => "textDocument/references", "id" => id, "params" => params}) do
+    result =
+      with %{"textDocument" => %{"uri" => uri}, "position" => position} <- params,
+           doc when not is_nil(doc) <- Map.get(state.documents, uri) do
+        find_references(state, doc, position)
+      else
+        _ -> []
+      end
+
+    Protocol.send_response(id, result)
+    state
+  end
+
+  defp handle_message(state, %{"method" => "textDocument/formatting", "id" => id, "params" => params}) do
+    result =
+      with %{"textDocument" => %{"uri" => uri}} <- params,
+           doc when not is_nil(doc) <- Map.get(state.documents, uri) do
+        format_document(doc)
+      else
+        _ -> nil
+      end
+
+    Protocol.send_response(id, result)
+    state
+  end
+
   defp handle_message(state, _message) do
     state
   end
@@ -156,24 +233,43 @@ defmodule BeamLang.LSP.Server do
     path = uri_to_path(uri)
 
     {tokens, ast, diagnostics} =
-      case BeamLang.analyze_source(text, path) do
-        {:ok, %{tokens: tokens, ast: ast, errors: errors}} ->
-          {tokens, ast, errors}
+      try do
+        case BeamLang.analyze_source(text, path) do
+          {:ok, %{tokens: tokens, ast: ast, errors: errors}} ->
+            {tokens, ast, errors}
 
-        {:error, errors} when is_list(errors) ->
+          {:error, errors} when is_list(errors) ->
+            tokens =
+              case BeamLang.Lexer.tokenize(text, path) do
+                {:ok, tokens} -> tokens
+                _ -> []
+              end
+
+            ast =
+              case BeamLang.Parser.parse(tokens) do
+                {:ok, ast} -> ast
+                _ -> nil
+              end
+
+            {tokens, ast, errors}
+
+          _ ->
+            {[], nil, []}
+        end
+      rescue
+        _ ->
+          # If analysis crashes entirely, still return a valid document with raw tokens
           tokens =
-            case BeamLang.Lexer.tokenize(text, path) do
-              {:ok, tokens} -> tokens
+            try do
+              case BeamLang.Lexer.tokenize(text, path) do
+                {:ok, tokens} -> tokens
+                _ -> []
+              end
+            rescue
               _ -> []
             end
 
-          ast =
-            case BeamLang.Parser.parse(tokens) do
-              {:ok, ast} -> ast
-              _ -> nil
-            end
-
-          {tokens, ast, errors}
+          {tokens, nil, []}
       end
 
     index = build_index(ast)
@@ -330,7 +426,221 @@ defmodule BeamLang.LSP.Server do
   defp completion_for(doc, %{"line" => line, "character" => character}) do
     offset = position_to_offset(doc.text, line, character)
     context = completion_context(doc, offset)
-    %{"isIncomplete" => false, "items" => completion_items(doc, context, offset)}
+    prefix = completion_prefix(doc.text, offset)
+    items = completion_items(doc, context, offset)
+
+    # Filter items by prefix when the user has started typing
+    filtered =
+      if prefix != "" do
+        prefix_down = String.downcase(prefix)
+
+        Enum.filter(items, fn item ->
+          String.starts_with?(String.downcase(item["label"]), prefix_down)
+        end)
+      else
+        items
+      end
+
+    %{"isIncomplete" => false, "items" => filtered}
+  end
+
+  # --- Rename ---
+
+  defp prepare_rename(doc, %{"line" => line, "character" => character}) do
+    offset = position_to_offset(doc.text, line, character)
+
+    case identifier_at(doc, offset) do
+      %BeamLang.Token{type: :identifier, value: name, span: span} ->
+        # Only allow renaming symbols defined in the current document
+        case classify_symbol(doc, name, offset) do
+          :unknown ->
+            nil
+
+          _kind ->
+            %{
+              "range" => range_for_span(doc.text, span),
+              "placeholder" => name
+            }
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp rename_symbol(state, doc, %{"line" => line, "character" => character}, new_name) do
+    offset = position_to_offset(doc.text, line, character)
+
+    case identifier_at(doc, offset) do
+      %BeamLang.Token{type: :identifier, value: name} ->
+        edits = collect_rename_edits(state, doc, name, offset, new_name)
+
+        if map_size(edits) > 0 do
+          %{"changes" => edits}
+        else
+          nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp collect_rename_edits(state, doc, name, offset, new_name) do
+    kind = classify_symbol(doc, name, offset)
+
+    case kind do
+      :local ->
+        # Rename local variable - only within the containing function scope
+        edits = find_local_references_in_tokens(doc, name, offset)
+
+        if edits != [] do
+          %{doc.uri => Enum.map(edits, fn span ->
+            %{"range" => range_for_span(doc.text, span), "newText" => new_name}
+          end)}
+        else
+          %{}
+        end
+
+      :function ->
+        # Rename function across all open documents
+        Enum.reduce(state.documents, %{}, fn {uri, d}, acc ->
+          refs = find_identifier_references_in_tokens(d, name)
+
+          if refs != [] do
+            Map.put(acc, uri, Enum.map(refs, fn span ->
+              %{"range" => range_for_span(d.text, span), "newText" => new_name}
+            end))
+          else
+            acc
+          end
+        end)
+
+      :type ->
+        Enum.reduce(state.documents, %{}, fn {uri, d}, acc ->
+          refs = find_identifier_references_in_tokens(d, name)
+
+          if refs != [] do
+            Map.put(acc, uri, Enum.map(refs, fn span ->
+              %{"range" => range_for_span(d.text, span), "newText" => new_name}
+            end))
+          else
+            acc
+          end
+        end)
+
+      :error_type ->
+        Enum.reduce(state.documents, %{}, fn {uri, d}, acc ->
+          refs = find_identifier_references_in_tokens(d, name)
+
+          if refs != [] do
+            Map.put(acc, uri, Enum.map(refs, fn span ->
+              %{"range" => range_for_span(d.text, span), "newText" => new_name}
+            end))
+          else
+            acc
+          end
+        end)
+
+      _ ->
+        %{}
+    end
+  end
+
+  defp classify_symbol(doc, name, offset) do
+    cond do
+      match?({:ok, _}, lookup_local(doc, name, offset)) -> :local
+      Map.has_key?(doc.index[:functions] || %{}, name) -> :function
+      Map.has_key?(doc.index[:types] || %{}, name) -> :type
+      Map.has_key?(doc.index[:errors] || %{}, name) -> :error_type
+      true -> :unknown
+    end
+  end
+
+  defp find_local_references_in_tokens(doc, name, offset) do
+    # Find the function scope containing this offset
+    func_span = find_enclosing_function_span(doc, offset)
+
+    doc.tokens
+    |> Enum.filter(fn %BeamLang.Token{type: type, value: value, span: span} ->
+      type == :identifier and value == name and
+        (func_span == nil or span_contains?(func_span, span.start))
+    end)
+    |> Enum.map(fn %BeamLang.Token{span: span} -> span end)
+  end
+
+  defp find_enclosing_function_span(doc, offset) do
+    doc.index
+    |> Map.get(:functions, %{})
+    |> Enum.find_value(fn {_name, info} ->
+      if span_in_doc?(doc, info.span) and span_contains?(info.span, offset) do
+        info.span
+      else
+        nil
+      end
+    end)
+  end
+
+  defp find_identifier_references_in_tokens(doc, name) do
+    doc.tokens
+    |> Enum.filter(fn %BeamLang.Token{type: type, value: value} ->
+      type == :identifier and value == name
+    end)
+    |> Enum.map(fn %BeamLang.Token{span: span} -> span end)
+  end
+
+  # --- References ---
+
+  defp find_references(state, doc, %{"line" => line, "character" => character}) do
+    offset = position_to_offset(doc.text, line, character)
+
+    case identifier_at(doc, offset) do
+      %BeamLang.Token{type: :identifier, value: name} ->
+        kind = classify_symbol(doc, name, offset)
+
+        case kind do
+          :local ->
+            find_local_references_in_tokens(doc, name, offset)
+            |> Enum.map(fn span ->
+              %{"uri" => doc.uri, "range" => range_for_span(doc.text, span)}
+            end)
+
+          _ ->
+            state.documents
+            |> Enum.flat_map(fn {uri, d} ->
+              find_identifier_references_in_tokens(d, name)
+              |> Enum.map(fn span ->
+                %{"uri" => uri, "range" => range_for_span(d.text, span)}
+              end)
+            end)
+        end
+
+      _ ->
+        []
+    end
+  end
+
+  # --- Formatting ---
+
+  defp format_document(doc) do
+    case BeamLang.Formatter.format(doc.text) do
+      {:ok, formatted} when formatted != doc.text ->
+        lines = String.split(doc.text, "\n", trim: false)
+        line_count = length(lines)
+
+        [
+          %{
+            "range" => %{
+              "start" => %{"line" => 0, "character" => 0},
+              "end" => %{"line" => line_count, "character" => 0}
+            },
+            "newText" => formatted
+          }
+        ]
+
+      _ ->
+        []
+    end
   end
 
   defp document_symbols_for(doc) do
@@ -1223,13 +1533,53 @@ defmodule BeamLang.LSP.Server do
   defp find_call_name([_ | rest]), do: find_call_name(rest)
 
   defp completion_context(doc, offset) do
-    case previous_token(doc.tokens, offset) do
-      nil -> :statement
-      %BeamLang.Token{type: :arrow} -> :methods
-      %BeamLang.Token{type: :lbrace} -> :statement
-      %BeamLang.Token{type: :semicolon} -> :statement
-      _ -> :expression
+    # When the user is typing an identifier, look at the token *before* that identifier
+    prev = previous_token(doc.tokens, offset)
+
+    case prev do
+      nil ->
+        :statement
+
+      %BeamLang.Token{type: :arrow} ->
+        :methods
+
+      %BeamLang.Token{type: :lbrace} ->
+        :statement
+
+      %BeamLang.Token{type: :semicolon} ->
+        :statement
+
+      %BeamLang.Token{type: :identifier, span: span} ->
+        # If cursor is inside/at-end of an identifier, look at what's before that identifier
+        if offset >= span.start and offset <= span.end + 1 do
+          case previous_token(doc.tokens, span.start) do
+            nil -> :statement
+            %BeamLang.Token{type: :arrow} -> :methods
+            %BeamLang.Token{type: :lbrace} -> :statement
+            %BeamLang.Token{type: :semicolon} -> :statement
+            _ -> :expression
+          end
+        else
+          :expression
+        end
+
+      _ ->
+        :expression
     end
+  end
+
+  # Extract the identifier prefix at the cursor position (text before cursor on current word)
+  defp completion_prefix(text, offset) do
+    before = binary_part(text, 0, min(offset, byte_size(text)))
+
+    before
+    |> String.reverse()
+    |> then(fn reversed ->
+      case Regex.run(~r/^[a-zA-Z0-9_]+/, reversed) do
+        [match] -> String.reverse(match)
+        _ -> ""
+      end
+    end)
   end
 
   defp previous_token(tokens, offset) do
@@ -1306,6 +1656,14 @@ defmodule BeamLang.LSP.Server do
   end
 
   defp collect_stmt_locals({:expr, %{expr: expr}}, func_span, scope_span, func_table, env) do
+    {collect_expr_locals(expr, func_span, scope_span, func_table, env), env}
+  end
+
+  defp collect_stmt_locals({:return, %{expr: expr}}, func_span, scope_span, func_table, env) do
+    {collect_expr_locals(expr, func_span, scope_span, func_table, env), env}
+  end
+
+  defp collect_stmt_locals({:assign, %{expr: expr}}, func_span, scope_span, func_table, env) do
     {collect_expr_locals(expr, func_span, scope_span, func_table, env), env}
   end
 
