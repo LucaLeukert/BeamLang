@@ -383,7 +383,7 @@ loop { ... break; }
 
 ### For Loops
 
-`for` loops iterate over `Iterator<T>` values only.
+`for` loops iterate over `List<T>` and `Range` values.
 
 ```beamlang
 for (ch in "hi"->chars()) {
@@ -447,18 +447,20 @@ Line two ${value}""";
 
 ## Standard Library (.bl)
 
-The stdlib is split into multiple `.bl` files under `stdlib/`.
+The stdlib is organized into two directories under `stdlib/`:
 
-### Iterator
+- **`stdlib/core/`** — Always auto-imported. Contains fundamental types and data structures: `string`, `list`, `range`, `result`, `optional`, `map`, `set`, `math`, `vec2`.
+- **`stdlib/ext/`** — Requires explicit `import`. Contains modules for IO, networking, and argument parsing: `system`, `network`, `args`.
 
 ```beamlang
-type Iterator<T> {
-    internal data: any,
-    next: fn(Iterator<T>) -> T?,
-    map: fn(Iterator<T>, fn(T) -> any) -> Iterator<any>,
-    filter: fn(Iterator<T>, fn(T) -> bool) -> Iterator<T>,
-    fold: fn(Iterator<T>, any, fn(any, T) -> any) -> any
-}
+// Core types are always available — no import needed
+let nums: [number] = [1, 2, 3];
+let r = 1..5;
+
+// Ext modules require an import
+import system.*;
+import args.*;
+import network.*;
 ```
 
 ### String
@@ -467,7 +469,7 @@ type Iterator<T> {
 type String {
     data: any,
     length: fn(String) -> number,
-    chars: fn(String) -> Iterator<char>,
+    chars: fn(String) -> [char],
     concat: fn(String, String) -> String
 }
 ```
@@ -497,7 +499,6 @@ type List<T> {
     pop: fn(List<T>) -> List<T>,
     first: fn(List<T>) -> T?,
     last: fn(List<T>) -> T?,
-    iter: fn(List<T>) -> Iterator<T>,
     map: fn(List<T>, fn(T) -> any) -> List<any>,
     filter: fn(List<T>, fn(T) -> bool) -> List<T>,
     fold: fn(List<T>, any, fn(any, T) -> any) -> any,
@@ -750,13 +751,6 @@ fn list_filter_method<T>(self: List<T>, predicate: fn(T) -> bool) -> List<T>
 fn list_fold_method<T, U>(self: List<T>, initial: U, folder: fn(U, T) -> U) -> U
 fn list_for_each_method<T>(self: List<T>, callback: fn(T) -> void) -> void
 
-// Iterator methods are generic
-fn iterator_from_list<T>(data: any) -> Iterator<T>
-fn iterator_next<T>(self: Iterator<T>) -> T?
-fn iterator_map<T, U>(self: Iterator<T>, mapper: fn(T) -> U) -> Iterator<U>
-fn iterator_filter<T>(self: Iterator<T>, predicate: fn(T) -> bool) -> Iterator<T>
-fn iterator_fold<T, U>(self: Iterator<T>, initial: U, folder: fn(U, T) -> U) -> U
-
 // Optional methods are generic
 fn optional_some<T>(value: T) -> T?
 fn optional_none<T>() -> T?
@@ -829,7 +823,6 @@ type Range {
     internal start: number,
     internal end: number,
     internal step: number,
-    iter: fn(Range) -> Iterator<number>,
     contains: fn(Range, number) -> bool,
     length: fn(Range) -> number
 }

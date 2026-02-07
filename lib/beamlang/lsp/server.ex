@@ -1636,28 +1636,12 @@ defmodule BeamLang.LSP.Server do
       "get" -> {:optional, elem_type}
       "length" -> :number
       "is_empty" -> :bool
-      "iter" -> {:generic, {:named, "Iterator"}, [elem_type]}
       "map" -> {:generic, {:named, "List"}, [:any]}  # Would need lambda type inference
       "filter" -> {:generic, {:named, "List"}, [elem_type]}
       "push" -> {:generic, {:named, "List"}, [elem_type]}
       "pop" -> {:optional, elem_type}
       "reverse" -> {:generic, {:named, "List"}, [elem_type]}
       "concat" -> {:generic, {:named, "List"}, [elem_type]}
-      _ -> nil
-    end
-  end
-
-  defp infer_method_return_type({:generic, {:named, "Iterator"}, [elem_type]}, name) do
-    case name do
-      "next" -> {:optional, elem_type}
-      "collect" -> {:generic, {:named, "List"}, [elem_type]}
-      "map" -> {:generic, {:named, "Iterator"}, [:any]}
-      "filter" -> {:generic, {:named, "Iterator"}, [elem_type]}
-      "take" -> {:generic, {:named, "Iterator"}, [elem_type]}
-      "skip" -> {:generic, {:named, "Iterator"}, [elem_type]}
-      "count" -> :number
-      "any" -> :bool
-      "all" -> :bool
       _ -> nil
     end
   end
@@ -1674,12 +1658,11 @@ defmodule BeamLang.LSP.Server do
     end
   end
 
-  defp infer_method_return_type({:generic, {:named, "Set"}, [elem_type]}, name) do
+  defp infer_method_return_type({:generic, {:named, "Set"}, [_elem_type]}, name) do
     case name do
       "contains" -> :bool
       "length" -> :number
       "is_empty" -> :bool
-      "iter" -> {:generic, {:named, "Iterator"}, [elem_type]}
       _ -> nil
     end
   end
@@ -1711,7 +1694,7 @@ defmodule BeamLang.LSP.Server do
     case name do
       "length" -> :number
       "is_empty" -> :bool
-      "chars" -> {:generic, {:named, "Iterator"}, [:char]}
+      "chars" -> {:generic, {:named, "List"}, [:char]}
       "split" -> {:generic, {:named, "List"}, [:String]}
       "trim" -> :String
       "to_uppercase" -> :String
@@ -1727,7 +1710,6 @@ defmodule BeamLang.LSP.Server do
 
   defp infer_method_return_type({:named, "Range"}, name) do
     case name do
-      "iter" -> {:generic, {:named, "Iterator"}, [:number]}
       "contains" -> :bool
       _ -> nil
     end

@@ -4,6 +4,9 @@
 // Lists the contents of the specified directory, or the current directory if none is provided.
 // Displays file names with indicators for directories (/).
 
+import args.*;
+import system.*;
+
 type Args {
     @default(".")
     @description("Directory to list")

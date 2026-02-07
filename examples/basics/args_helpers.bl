@@ -8,6 +8,8 @@
 // Try:
 //   beamlang args_helpers.bl hello.txt --verbose -n 5
 //   beamlang args_helpers.bl --count=3 hello.txt -- --not-a-flag
+
+import args.*;
 //   beamlang args_helpers.bl -h
 
 fn main(args: [String]) -> number {

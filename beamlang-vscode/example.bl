@@ -115,7 +115,7 @@ fn infinite_demo() -> number {
     return i;
 }
 
-// For loop with Iterator
+// For loop over List
 fn iterate_string(text: String) -> void {
     for (ch in text->chars()) {
         println(ch);

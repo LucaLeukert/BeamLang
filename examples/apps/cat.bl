@@ -1,6 +1,9 @@
 // cat - read and print a file
 // Usage: beamlang cat.bl <file>
 
+import args.*;
+import system.*;
+
 type Args {
     @required()
     @description("File to read and print")

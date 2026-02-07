@@ -243,6 +243,8 @@ defmodule BeamLang.IntegrationTest do
 
   test "parse_args returns err on argument mismatch" do
     source = """
+    import args.*;
+
     type Args {
         path: String
     }
@@ -293,7 +295,7 @@ defmodule BeamLang.IntegrationTest do
     assert {:ok, 0} == BeamLang.run_source(source)
   end
 
-  test "runs for over iterator" do
+  test "runs for over list" do
     source = """
     fn main(args: [String]) -> number {
         for (item in "hi"->chars()) { break; }
@@ -363,6 +365,8 @@ defmodule BeamLang.IntegrationTest do
 
   test "parse_args with annotations and flags" do
     source = """
+    import args.*;
+
     type Args {
         @required()
         @description("Input file")
@@ -401,6 +405,8 @@ defmodule BeamLang.IntegrationTest do
 
   test "parse_args detects --help" do
     source = """
+    import args.*;
+
     type Args {
         @required()
         file: String
@@ -429,6 +435,8 @@ defmodule BeamLang.IntegrationTest do
 
   test "parse_args supports combined short flags" do
     source = """
+    import args.*;
+
     type Args {
         @flag
         @short("a")
@@ -471,6 +479,8 @@ defmodule BeamLang.IntegrationTest do
 
   test "parse_args supports -- separator" do
     source = """
+    import args.*;
+
     type Args {
         @required()
         file: String,
@@ -504,6 +514,8 @@ defmodule BeamLang.IntegrationTest do
 
   test "usage generates help text" do
     source = """
+    import args.*;
+
     type Args {
         @required()
         @description("Input file")
@@ -532,6 +544,8 @@ defmodule BeamLang.IntegrationTest do
 
   test "pure-BeamLang args helpers: classify and find" do
     source = """
+    import args.*;
+
     fn main(args: [String]) -> number {
         // is_help should detect --help
         let h1 = is_help("--help");
@@ -562,6 +576,8 @@ defmodule BeamLang.IntegrationTest do
 
   test "pure-BeamLang args helpers: find_flag and find_option" do
     source = """
+    import args.*;
+
     fn main(args: [String]) -> number {
         let verbose = find_flag(args, "verbose", "v");
         guard (verbose) else { return 1; }
@@ -579,6 +595,8 @@ defmodule BeamLang.IntegrationTest do
 
   test "pure-BeamLang args helpers: parse_long_opt and parse_short_opt" do
     source = """
+    import args.*;
+
     fn check_long() -> number {
         let parsed = parse_long_opt("--name=value");
         return match (parsed) {
@@ -621,6 +639,8 @@ defmodule BeamLang.IntegrationTest do
 
   test "pure-BeamLang args helpers: split_at_separator" do
     source = """
+    import args.*;
+
     fn main(args: [String]) -> number {
         let split = split_at_separator(args);
         let before_len = split->before->length();

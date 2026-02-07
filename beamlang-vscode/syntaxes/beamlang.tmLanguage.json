@@ -54,7 +54,7 @@
         },
         {
           "name": "support.type.builtin.beamlang",
-          "match": "\\b(Optional|Result|Iterator|List)\\b"
+          "match": "\\b(Optional|Result|List)\\b"
         },
         {
           "name": "entity.name.type.beamlang",

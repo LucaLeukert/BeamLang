@@ -11,6 +11,9 @@
 //   -c, --count           Only print count of matching lines
 //   -v, --invert-match    Select non-matching lines
 
+import args.*;
+import system.*;
+
 // Argument definition with annotations
 type Args {
     @required()

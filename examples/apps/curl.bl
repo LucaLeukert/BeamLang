@@ -11,6 +11,10 @@
 // - Head request (-I)
 // - Silent errors (-s)
 
+import args.*;
+import system.*;
+import network.*;
+
 type Args {
     @required()
     @description("URL to fetch")

@@ -3054,7 +3054,7 @@ defmodule BeamLang.Semantic do
             [
               BeamLang.Error.new(
                 :type,
-                "For loop requires Iterator<T>, got #{type_label(type)}.",
+                "For loop requires List<T> or Range, got #{type_label(type)}.",
                 span
               )
             ]
@@ -3081,7 +3081,6 @@ defmodule BeamLang.Semantic do
 
   defp iterator_item_type_from_type(type) do
     case normalize_type(type) do
-      {:generic, {:named, "Iterator"}, [item_type]} -> {:ok, item_type}
       {:generic, {:named, "List"}, [item_type]} -> {:ok, item_type}
       {:named, "Range"} -> {:ok, :number}
       _ -> :error

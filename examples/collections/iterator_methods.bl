@@ -3,9 +3,8 @@ fn always_one(value: any) -> number {
 }
 
 fn main(args: [String]) -> number {
-    let iter = "hi"->chars();
-    let next_fn = iter->next;
-    let first = next_fn(iter);
+    let chars = "hi"->chars();
+    let first = chars->first();
     let mapped = first->map(always_one);
     return match (mapped) {
         case?some value => value,

@@ -8,6 +8,8 @@
 //   @long("config")  - Long flag form, e.g., --config
 //   @flag            - Boolean flag (presence = true, absence = false)
 
+import args.*;
+
 type Args {
     @required()
     @description("Path to the file")

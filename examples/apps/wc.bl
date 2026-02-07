@@ -3,6 +3,9 @@
 //
 // Counts lines, words, and bytes in a file or stdin (-).
 
+import args.*;
+import system.*;
+
 type Args {
     @default("-")
     @description("File to read (or - for stdin)")

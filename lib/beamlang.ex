@@ -33,6 +33,7 @@ defmodule BeamLang do
     with {:ok, tokens} <- Lexer.tokenize(source, filename),
          {:ok, ast} <- Parser.parse(tokens),
          {:ok, stdlib_ast} <- load_stdlib_ast(),
+         {:ok, stdlib_ast} <- load_ext_modules_for_imports(ast, stdlib_ast),
          {:ok, merged} <- merge_programs(stdlib_ast, ast),
          {:ok, checked} <- Semantic.validate(merged, require_main: true) do
       forms = Codegen.to_erlang_forms(checked)
@@ -72,6 +73,7 @@ defmodule BeamLang do
     with {:ok, tokens} <- Lexer.tokenize(source, filename),
          {:ok, ast} <- Parser.parse(tokens),
          {:ok, stdlib_ast} <- load_stdlib_ast(),
+         {:ok, stdlib_ast} <- load_ext_modules_for_imports(ast, stdlib_ast),
          {:ok, merged} <- merge_programs(stdlib_ast, ast) do
       case Semantic.validate(merged, require_main: false) do
         {:ok, checked} ->
@@ -104,10 +106,19 @@ defmodule BeamLang do
     end
   end
 
-  defp load_stdlib_ast() do
-    stdlib_dir = Path.expand("../stdlib", __DIR__)
+  @stdlib_base_dir Path.expand("../stdlib", __DIR__)
+  @stdlib_core_dir Path.join(@stdlib_base_dir, "core")
+  @stdlib_ext_dir Path.join(@stdlib_base_dir, "ext")
 
-    case File.ls(stdlib_dir) do
+  # Known ext stdlib module names (require explicit import)
+  @stdlib_ext_modules ~w(system network args)
+
+  defp load_stdlib_ast() do
+    load_stdlib_dir(@stdlib_core_dir)
+  end
+
+  defp load_stdlib_dir(dir) do
+    case File.ls(dir) do
       {:ok, entries} ->
         files =
           entries
@@ -116,12 +127,12 @@ defmodule BeamLang do
 
         case files do
           [] ->
-            span = BeamLang.Span.new(stdlib_dir, 0, 0)
+            span = BeamLang.Span.new(dir, 0, 0)
             {:error, [BeamLang.Error.new(:type, "No stdlib files found.", span)]}
 
           _ ->
             Enum.reduce_while(files, {:ok, empty_program()}, fn file, {:ok, acc} ->
-              path = Path.join(stdlib_dir, file)
+              path = Path.join(dir, file)
 
               case File.read(path) do
                 {:ok, source} ->
@@ -144,11 +155,53 @@ defmodule BeamLang do
         end
 
       {:error, reason} ->
-        span = BeamLang.Span.new(stdlib_dir, 0, 0)
+        span = BeamLang.Span.new(dir, 0, 0)
 
         {:error,
          [BeamLang.Error.new(:type, "Failed to read stdlib directory: #{inspect(reason)}", span)]}
     end
+  end
+
+  @doc false
+  def stdlib_ext_dir, do: @stdlib_ext_dir
+
+  defp stdlib_ext_module?(name), do: name in @stdlib_ext_modules
+
+  defp stdlib_ext_path(module_name), do: Path.join(@stdlib_ext_dir, "#{module_name}.bl")
+
+  defp load_ext_modules_for_imports(user_ast, stdlib_ast) do
+    import_names =
+      case user_ast do
+        {:program, %{imports: imports}} ->
+          Enum.map(imports, fn {:import, %{module: m}} -> m end)
+
+        _ ->
+          []
+      end
+
+    ext_needed = Enum.filter(import_names, &stdlib_ext_module?/1)
+
+    Enum.reduce_while(ext_needed, {:ok, stdlib_ast}, fn mod_name, {:ok, acc} ->
+      path = stdlib_ext_path(mod_name)
+
+      case File.read(path) do
+        {:ok, source} ->
+          with {:ok, tokens} <- Lexer.tokenize(source, path),
+               {:ok, ast} <- Parser.parse(tokens) do
+            {:cont, {:ok, merge_programs_simple(acc, ast)}}
+          else
+            {:error, %BeamLang.Error{} = err} -> {:halt, {:error, [err]}}
+            {:error, errs} when is_list(errs) -> {:halt, {:error, errs}}
+          end
+
+        {:error, reason} ->
+          span = BeamLang.Span.new(path, 0, 0)
+
+          {:halt,
+           {:error,
+            [BeamLang.Error.new(:type, "Failed to read ext stdlib '#{mod_name}': #{inspect(reason)}", span)]}}
+      end
+    end)
   end
 
   defp empty_program() do
@@ -260,8 +313,15 @@ defmodule BeamLang do
                                                              {acc_mods, acc_errs} ->
                 dep_path = Path.join(Path.dirname(path), "#{dep_module}.bl")
 
-                if File.exists?(dep_path) do
-                  case do_load_module(dep_path, acc_mods, acc_errs) do
+                resolved_path =
+                  cond do
+                    File.exists?(dep_path) -> dep_path
+                    stdlib_ext_module?(dep_module) -> stdlib_ext_path(dep_module)
+                    true -> nil
+                  end
+
+                if resolved_path do
+                  case do_load_module(resolved_path, acc_mods, acc_errs) do
                     {:ok, mods2, errs2} -> {mods2, errs2}
                     {:error, errs2} -> {acc_mods, acc_errs ++ errs2}
                   end
@@ -297,7 +357,8 @@ defmodule BeamLang do
       fn {module_name, %{ast: ast}}, {:ok, acc} ->
         case resolve_imports_and_qualify(ast, exports, module_name) do
           {:ok, resolved} ->
-            with {:ok, merged} <- merge_programs(stdlib_ast, resolved),
+            with {:ok, full_stdlib} <- load_ext_modules_for_imports(resolved, stdlib_ast),
+                 {:ok, merged} <- merge_programs(full_stdlib, resolved),
                  {:ok, checked} <-
                    Semantic.validate(merged, require_main: module_name == entry_module) do
               forms = Codegen.to_erlang_forms(checked)

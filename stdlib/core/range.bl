@@ -4,7 +4,6 @@ type Range {
     internal start: number,
     internal end: number,
     internal step: number,
-    iter: fn(Range) -> Iterator<number>,
     contains: fn(Range, number) -> bool,
     length: fn(Range) -> number
 }
@@ -23,7 +22,6 @@ fn range(start: number, end: number) -> Range {
         start = start,
         end = end,
         step = 1,
-        iter = range_iter,
         contains = range_contains,
         length = range_length
     };
@@ -34,15 +32,9 @@ fn range_step(start: number, end: number, step: number) -> Range {
         start = start,
         end = end,
         step = step,
-        iter = range_iter,
         contains = range_contains,
         length = range_length
     };
-}
-
-fn range_iter(self: Range) -> Iterator<number> {
-    let data = range_to_list_data(self->start, self->end, self->step);
-    return iterator_from_list(data);
 }
 
 fn range_contains(self: Range, n: number) -> bool {

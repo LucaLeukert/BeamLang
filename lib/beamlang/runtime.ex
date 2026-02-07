@@ -291,25 +291,6 @@ defmodule BeamLang.Runtime do
     |> String.to_charlist()
   end
 
-  @spec iterator_next_data(list()) :: map()
-  def iterator_next_data([]), do: %{tag: 0}
-  def iterator_next_data([head | _]), do: %{tag: 1, value: head}
-
-  @spec iterator_map_data(list(), function()) :: list()
-  def iterator_map_data(list, mapper) do
-    Enum.map(list, mapper)
-  end
-
-  @spec iterator_filter_data(list(), function()) :: list()
-  def iterator_filter_data(list, predicate) do
-    Enum.filter(list, predicate)
-  end
-
-  @spec iterator_fold_data(list(), term(), function()) :: term()
-  def iterator_fold_data(list, initial, folder) do
-    Enum.reduce(list, initial, folder)
-  end
-
   # List functions
   @spec list_empty() :: list()
   def list_empty(), do: []
@@ -366,11 +347,6 @@ defmodule BeamLang.Runtime do
       |> Enum.join(sep_data)
 
     stdlib_string_new(joined)
-  end
-
-  @spec list_iter(list()) :: map()
-  def list_iter(list) do
-    apply(current_module(), :iterator_from_list, [list])
   end
 
   @spec list_map(list(), function()) :: list()

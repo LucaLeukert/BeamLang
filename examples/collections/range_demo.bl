@@ -37,7 +37,7 @@ fn main(args: List<String>) -> number {
     // Range literal assigned to variable
     println("Range 10..15:");
     let r3 = 10..15;
-    for (i in r3->iter()) {
+    for (i in r3) {
         println(to_string(i));
     }
     

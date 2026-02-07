@@ -1,7 +1,7 @@
 type String {
     data: any,
     length: fn(String) -> number,
-    chars: fn(String) -> Iterator<char>,
+    chars: fn(String) -> [char],
     concat: fn(String, String) -> String,
     split: fn(String, String) -> [String],
     contains: fn(String, String) -> bool,
@@ -117,9 +117,9 @@ internal fn string_concat(self: String, right: String) -> String {
     return string_new(data);
 }
 
-internal fn string_chars(self: String) -> Iterator<char> {
+internal fn string_chars(self: String) -> [char] {
     let data = string_chars_data(self->data);
-    return iterator_from_list(data);
+    return list_from_data(data);
 }
 
 internal fn string_split(self: String, separator: String) -> [String] {

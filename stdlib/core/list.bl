@@ -6,7 +6,6 @@ type List<T> {
     pop: fn(List<T>) -> List<T>,
     first: fn(List<T>) -> T?,
     last: fn(List<T>) -> T?,
-    iter: fn(List<T>) -> Iterator<T>,
     map: fn(List<T>, fn(T) -> any) -> List<any>,
     filter: fn(List<T>, fn(T) -> bool) -> List<T>,
     fold: fn(List<T>, any, fn(any, T) -> any) -> any,
@@ -49,6 +48,15 @@ fn list_for_each_data(data: any, callback: fn(any) -> void) -> void;
 @external(elixir, "BeamLang.Runtime", "list_join")
 fn list_join_data(data: any, separator: String) -> String;
 
+@external(elixir, "BeamLang.Runtime", "list_map")
+fn list_map_data(data: any, mapper: fn(any) -> any) -> any;
+
+@external(elixir, "BeamLang.Runtime", "list_filter")
+fn list_filter_data(data: any, predicate: fn(any) -> bool) -> any;
+
+@external(elixir, "BeamLang.Runtime", "list_fold")
+fn list_fold_data(data: any, initial: any, folder: fn(any, any) -> any) -> any;
+
 fn list_new<T>() -> List<T> {
     return list_from_data(list_empty_data());
 }
@@ -57,7 +65,7 @@ fn list_of<T>(items: [T]) -> List<T> {
     return list_from_data(items);
 }
 
-internal fn list_from_data<T>(data: any) -> List<T> {
+fn list_from_data<T>(data: any) -> List<T> {
     return {
         data = data,
         length = list_length_method,
@@ -66,7 +74,6 @@ internal fn list_from_data<T>(data: any) -> List<T> {
         pop = list_pop_method,
         first = list_first_method,
         last = list_last_method,
-        iter = list_iter_method,
         map = list_map_method,
         filter = list_filter_method,
         fold = list_fold_method,
@@ -106,22 +113,18 @@ internal fn list_last_method<T>(self: List<T>) -> T? {
     return wrap_optional(raw);
 }
 
-internal fn list_iter_method<T>(self: List<T>) -> Iterator<T> {
-    return iterator_from_list(self->data);
-}
-
 internal fn list_map_method<T, U>(self: List<T>, mapper: fn(T) -> U) -> List<U> {
-    let mapped = iterator_map_data(self->data, mapper);
+    let mapped = list_map_data(self->data, mapper);
     return list_from_data(mapped);
 }
 
 internal fn list_filter_method<T>(self: List<T>, predicate: fn(T) -> bool) -> List<T> {
-    let filtered = iterator_filter_data(self->data, predicate);
+    let filtered = list_filter_data(self->data, predicate);
     return list_from_data(filtered);
 }
 
 internal fn list_fold_method<T, U>(self: List<T>, initial: U, folder: fn(U, T) -> U) -> U {
-    return iterator_fold_data(self->data, initial, folder);
+    return list_fold_data(self->data, initial, folder);
 }
 
 internal fn list_for_each_method<T>(self: List<T>, callback: fn(T) -> void) -> void {

@@ -152,9 +152,9 @@ defmodule BeamLang.ParserTest do
 
   test "parses function type in struct fields" do
     source = """
-    type Iterator<T> {
-        next: fn(Iterator<T>) -> Optional<T>,
-        fold: fn(Iterator<T>, any, fn(any, T) -> any) -> any
+    type Stream<T> {
+        next: fn(Stream<T>) -> Optional<T>,
+        fold: fn(Stream<T>, any, fn(any, T) -> any) -> any
     }
     """
 
@@ -162,7 +162,7 @@ defmodule BeamLang.ParserTest do
     {:ok, ast} = Parser.parse(tokens)
 
     assert {:program, %{types: [type_def]}} = ast
-    assert {:type_def, %{name: "Iterator", fields: fields}} = type_def
+    assert {:type_def, %{name: "Stream", fields: fields}} = type_def
     assert %{name: "next", type: {:fn, [_], _}} = Enum.at(fields, 0)
     assert %{name: "fold", type: {:fn, [_, _, {:fn, [_, _], _}], _}} = Enum.at(fields, 1)
   end
@@ -259,7 +259,7 @@ defmodule BeamLang.ParserTest do
     assert {:let, %{expr: {:method_call, %{name: "unwrap"}}}} = s2
   end
 
-  test "parses for loop over iterator" do
+  test "parses for loop over list" do
     source = """
     fn main() -> number {
         for (item in "hi"->chars()) { break; }

@@ -21,8 +21,8 @@ fn main(args: [String]) -> number {
 | **Types** | Primitives, structs, generics, `T?` / `Optional<T>`, `Ok!Err` / `Result<Ok,Err>` |
 | **Functions** | Named functions, lambdas, `internal` (module-private), method-style `->` on structs |
 | **Modules** | One module per `.bl` file, `export` / `import`, namespace `math::add` |
-| **Control flow** | `if`, `match` (exhaustive), `for` over `Iterator<T>` |
-| **Stdlib** | Implemented in BeamLang under `stdlib/` — `math`, `string`, `list`, `optional`, `result`, `iterator`, `range`, `map`, `set`, `args`, `system`, `network`, `vec2` |
+| **Control flow** | `if`, `match` (exhaustive), `for` over `List<T>` / `Range` |
+| **Stdlib** | Implemented in BeamLang under `stdlib/` — core (auto-imported): `math`, `string`, `list`, `optional`, `result`, `range`, `map`, `set`, `vec2`; ext (require import): `args`, `system`, `network` |
 
 ---
 
@@ -82,7 +82,7 @@ Debug LSP logs: `./beamlang --lsp --lsp-debug`
 | **Types** | `optional.bl`, `result.bl`, `generic.bl`, `enum.bl`, `tuples.bl` |
 | **Functions** | `generic_fn.bl`, `lambda.bl`, `pattern_params.bl`, `self_method.bl` |
 | **Control flow** | `control_flow.bl`, `loops.bl`, `if_expr.bl`, `guard.bl` |
-| **Collections** | `iterator_methods.bl`, `list.bl`, `list_methods.bl`, `range_demo.bl` |
+| **Collections** | `list.bl`, `list_methods.bl`, `range_demo.bl` |
 | **Modules** | `use_math.bl`, `stdlib_methods.bl` |
 | **Apps** | `examples/apps/` — `cat`, `curl`, `grep`, `ls`, `standalone`, `wc` |
 | **LSP** | `examples/lsp/lsp_features.bl`, `hover_types.bl` |

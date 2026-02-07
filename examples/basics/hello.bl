@@ -1,6 +1,7 @@
 fn main(args: [String]) -> number {
     let test = "Hallo"->split(" ");
     let first = test->first();
-    println(first->unwrap(""));
+    let value = first->unwrap("");
+    println(value->length());
     return 0;
 }

@@ -5,7 +5,7 @@ fn main(args: [String]) -> number {
     print_number(count);
     
     // Iterate over args and print each one
-    for (arg in args->iter()) {
+    for (arg in args) {
         println(arg);
     }
     

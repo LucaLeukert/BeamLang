@@ -29,7 +29,7 @@ defmodule BeamLang.Codegen do
 
   # Internal stdlib constructors that need to be exported for Runtime use
   @runtime_required_internals ~w(
-    string_new list_from_data iterator_from_list
+    string_new list_from_data
     result_ok result_err optional_some optional_none
     file_entry_new http_response_new
   )
@@ -1080,16 +1080,12 @@ defmodule BeamLang.Codegen do
 
     collection_form =
       cond do
-        iterator_type?(collection_type) ->
-          # Iterator: access .data field
-          expr_form(line, {:field, %{target: collection, name: "data"}}, env)
-
         list_type?(collection_type) ->
           # List: access .data field
           expr_form(line, {:field, %{target: collection, name: "data"}}, env)
 
         range_type?(collection_type) ->
-          # Range type: call iter() then access .data field
+          # Range type: expand to list via range_to_list_data, then iterate
           range_iter_form(line, collection, env)
 
         true ->
@@ -1109,9 +1105,11 @@ defmodule BeamLang.Codegen do
   end
 
   defp range_iter_form(line, collection, env) do
-    # Generate: collection->iter()->data which becomes range_iter(collection).data
-    iter_call = {:method_call, %{target: collection, name: "iter", args: [], span: BeamLang.Span.new("<gen>", 0, 0)}}
-    expr_form(line, {:field, %{target: iter_call, name: "data"}}, env)
+    # Generate: range_to_list_data(collection.start, collection.end, collection.step)
+    start_form = expr_form(line, {:field, %{target: collection, name: "start"}}, env)
+    end_form = expr_form(line, {:field, %{target: collection, name: "end"}}, env)
+    step_form = expr_form(line, {:field, %{target: collection, name: "step"}}, env)
+    {:call, line, {:atom, line, :range_to_list_data}, [start_form, end_form, step_form]}
   end
 
   @spec loop_fun_expr(
@@ -1470,10 +1468,6 @@ defmodule BeamLang.Codegen do
     {first, rest} = String.split_at(name, 1)
     String.to_atom(String.upcase(first) <> rest <> "_" <> Integer.to_string(id))
   end
-
-  defp iterator_type?({:generic, {:named, "Iterator"}, _}), do: true
-  defp iterator_type?({:named, "Iterator"}), do: true
-  defp iterator_type?(_), do: false
 
   defp list_type?({:generic, {:named, "List"}, _}), do: true
   defp list_type?({:named, "List"}), do: true
