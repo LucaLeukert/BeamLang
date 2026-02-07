@@ -16,10 +16,19 @@ defmodule BeamLang.LSP.Protocol do
             length = String.to_integer(String.trim(length_str))
 
             case IO.binread(:stdio, length) do
-              :eof -> :eof
-              body ->
+              :eof ->
+                :eof
+
+              body when is_binary(body) ->
                 BeamLang.LSP.Debug.log(fn -> "recv: " <> body end)
-                {:ok, Jason.decode!(body)}
+
+                case Jason.decode(body) do
+                  {:ok, decoded} -> {:ok, decoded}
+                  {:error, _reason} -> {:error, :invalid_json}
+                end
+
+              _ ->
+                :eof
             end
         end
     end

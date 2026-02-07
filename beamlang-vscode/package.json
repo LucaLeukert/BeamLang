@@ -34,6 +34,12 @@
         "path": "./syntaxes/beamlang.tmLanguage.json"
       }
     ],
+    "commands": [
+      {
+        "command": "beamlang.formatFile",
+        "title": "BeamLang: Format File"
+      }
+    ],
     "configuration": {
       "title": "BeamLang",
       "properties": {

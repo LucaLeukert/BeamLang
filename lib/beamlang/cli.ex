@@ -19,19 +19,23 @@ defmodule BeamLang.CLI do
       case command do
         :run -> run_command(rest, opts)
         :compile -> compile_command(rest, opts)
+        :format -> format_command(rest, opts)
       end
     end
   end
 
-  @spec parse_command([binary()]) :: {:run | :compile, [binary()]}
+  @spec parse_command([binary()]) :: {:run | :compile | :format, [binary()]}
   def parse_command(["run" | rest]) when is_list(rest), do: {:run, rest}
   def parse_command(["compile" | rest]) when is_list(rest), do: {:compile, rest}
+  def parse_command(["format" | rest]) when is_list(rest), do: {:format, rest}
+  def parse_command(["fmt" | rest]) when is_list(rest), do: {:format, rest}
   def parse_command(args) when is_list(args), do: {:run, args}
 
-  @spec parse_args([binary()], :run | :compile) :: {keyword(), [binary()]}
+  @spec parse_args([binary()], :run | :compile | :format) :: {keyword(), [binary()]}
   def parse_args(args, command \\ :run) when is_list(args) do
     case command do
       :compile -> parse_compile_args(args)
+      :format -> parse_format_args(args)
       :run -> parse_run_args(args)
     end
   end
@@ -95,6 +99,83 @@ defmodule BeamLang.CLI do
     else
       # Before the .bl file, treat everything as CLI args for OptionParser
       do_normalize_with_bl_split(rest, [arg | opt_acc])
+    end
+  end
+
+  defp parse_format_args(args) when is_list(args) do
+    {opts, rest, _invalid} =
+      OptionParser.parse(args,
+        strict: [
+          write: :boolean,
+          check: :boolean
+        ],
+        aliases: [w: :write, c: :check]
+      )
+
+    {opts, rest}
+  end
+
+  defp format_command(rest, opts) do
+    files =
+      case rest do
+        [] ->
+          # Format all .bl files in the current directory recursively
+          Path.wildcard("**/*.bl")
+
+        paths ->
+          Enum.flat_map(paths, fn path ->
+            if File.dir?(path) do
+              Path.wildcard(Path.join(path, "**/*.bl"))
+            else
+              [path]
+            end
+          end)
+      end
+
+    if files == [] do
+      IO.puts(:stderr, "No .bl files found")
+      System.halt(1)
+    end
+
+    check_mode = opts[:check] || false
+    write_mode = opts[:write] || false
+    had_changes = Enum.reduce(files, false, fn file, changed ->
+      format_single_file(file, check_mode, write_mode) or changed
+    end)
+
+    if check_mode and had_changes do
+      System.halt(1)
+    end
+
+    :ok
+  end
+
+  defp format_single_file(path, check_mode, write_mode) do
+    case BeamLang.Formatter.format_file(path) do
+      {:ok, formatted} ->
+        original = File.read!(path)
+
+        if formatted == original do
+          false
+        else
+          if check_mode do
+            IO.puts("#{path} needs formatting")
+            true
+          else
+            if write_mode do
+              File.write!(path, formatted)
+              IO.puts("Formatted #{path}")
+            else
+              IO.write(formatted)
+            end
+
+            true
+          end
+        end
+
+      {:error, message} ->
+        IO.puts(:stderr, "Error formatting #{path}: #{message}")
+        false
     end
   end
 
