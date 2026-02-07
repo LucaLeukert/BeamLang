@@ -1,58 +1,59 @@
 // Math utilities
 
-@external(elixir, "BeamLang.Runtime", "math_sqrt")
+@external(erlang, "math", "sqrt")
 fn sqrt(n: number) -> number;
 
-@external(elixir, "BeamLang.Runtime", "math_abs")
+@external(erlang, "erlang", "abs")
 fn abs(n: number) -> number;
 
-@external(elixir, "BeamLang.Runtime", "math_floor")
+@external(erlang, "math", "floor")
 fn floor(n: number) -> number;
 
-@external(elixir, "BeamLang.Runtime", "math_ceil")
+@external(erlang, "math", "ceil")
 fn ceil(n: number) -> number;
 
-@external(elixir, "BeamLang.Runtime", "math_round")
+@external(erlang, "erlang", "round")
 fn round(n: number) -> number;
 
-@external(elixir, "BeamLang.Runtime", "math_sin")
+@external(erlang, "math", "sin")
 fn sin(n: number) -> number;
 
-@external(elixir, "BeamLang.Runtime", "math_cos")
+@external(erlang, "math", "cos")
 fn cos(n: number) -> number;
 
-@external(elixir, "BeamLang.Runtime", "math_tan")
+@external(erlang, "math", "tan")
 fn tan(n: number) -> number;
 
-@external(elixir, "BeamLang.Runtime", "math_asin")
+@external(erlang, "math", "asin")
 fn asin(n: number) -> number;
 
-@external(elixir, "BeamLang.Runtime", "math_acos")
+@external(erlang, "math", "acos")
 fn acos(n: number) -> number;
 
-@external(elixir, "BeamLang.Runtime", "math_atan")
+@external(erlang, "math", "atan")
 fn atan(n: number) -> number;
 
-@external(elixir, "BeamLang.Runtime", "math_atan2")
+@external(erlang, "math", "atan2")
 fn atan2(y: number, x: number) -> number;
 
-@external(elixir, "BeamLang.Runtime", "math_pow")
+@external(erlang, "math", "pow")
 fn pow(base: number, exp: number) -> number;
 
-@external(elixir, "BeamLang.Runtime", "math_log")
+@external(erlang, "math", "log")
 fn log(n: number) -> number;
 
-@external(elixir, "BeamLang.Runtime", "math_log10")
+@external(erlang, "math", "log10")
 fn log10(n: number) -> number;
 
-@external(elixir, "BeamLang.Runtime", "math_exp")
+@external(erlang, "math", "exp")
 fn exp(n: number) -> number;
 
-@external(elixir, "BeamLang.Runtime", "math_pi")
+@external(erlang, "math", "pi")
 fn pi() -> number;
 
-@external(elixir, "BeamLang.Runtime", "math_e")
-fn e() -> number;
+fn e() -> number {
+    return exp(1);
+}
 
 fn min(a: number, b: number) -> number {
     return match (a < b) {

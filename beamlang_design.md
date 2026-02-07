@@ -1,12 +1,14 @@
 # BeamLang Design (January 2026)
 
-This document reflects the current, implemented BeamLang language features and standard library structure.
+This document describes the BeamLang language design: syntax, type system, semantics, and compilation model. For standard library API documentation, see [`docs/stdlib.md`](docs/stdlib.md).
 
 ## Overview
 
-BeamLang is a statically-typed language that compiles to BEAM. It emphasizes explicit control flow, typed data, and lightweight interop with the runtime through externals. The standard library is written in BeamLang (.bl) files and is loaded automatically.
+BeamLang is a statically-typed language that compiles to BEAM bytecode via Erlang abstract forms. It emphasizes explicit control flow, typed data, and lightweight interop with the runtime through externals.
 
 Internally, all values are represented as struct literals (similar to how everything in JavaScript is an object). This applies to primitives, optionals/results, and user-defined types.
+
+The standard library is written in BeamLang (`.bl` files) and is loaded automatically.
 
 ## Tooling
 
@@ -155,33 +157,6 @@ fn Path_op_div(self: Path, segment: String) -> Path {
 }
 ```
 
-Example usage:
-
-```beamlang
-type Path {
-    path: String,
-    operator /: fn(Path, String) -> Path
-}
-
-fn path_join(self: Path, segment: String) -> Path {
-    let sep = "/";
-    let with_sep = self->path->concat(sep);
-    let new_path = with_sep->concat(segment);
-    return path_new(new_path);
-}
-
-fn path_new(p: String) -> Path {
-    return { path = p, operator / = path_join };
-}
-
-fn main(args: [String]) -> number {
-    let base = path_new("/home");
-    let full = base / "user" / "documents";
-    println("${full->path}");  // /home/user/documents
-    return 0;
-}
-```
-
 ### Internal Fields
 
 Fields can be marked as `internal` to prevent direct access from outside the type's methods. Internal fields can only be accessed within method functions of the same type:
@@ -290,7 +265,11 @@ fn identity<T>(value: T) -> T {
 }
 ```
 
-Type parameters are inferred from arguments when possible.
+Type parameters are inferred from arguments when possible. Generic functions can be called with explicit type arguments:
+
+```beamlang
+let parsed = parse_args<Args>(args);
+```
 
 ### Lambdas
 
@@ -326,8 +305,6 @@ Rules:
 - The name `self` is reserved and cannot be used for other bindings (variables, patterns, loop variables, assignments).
 
 ## Comments
-
-BeamLang supports two styles of comments:
 
 ### Single-line Comments
 
@@ -445,11 +422,11 @@ let text = """Line one
 Line two ${value}""";
 ```
 
-## Standard Library (.bl)
+## Standard Library Organization
 
 The stdlib is organized into two directories under `stdlib/`:
 
-- **`stdlib/core/`** — Always auto-imported. Contains fundamental types and data structures: `string`, `list`, `range`, `result`, `optional`, `map`, `set`, `math`, `vec2`.
+- **`stdlib/core/`** — Always auto-imported. Contains fundamental types and data structures: `string`, `list`, `range`, `result`, `optional`, `map`, `math`.
 - **`stdlib/ext/`** — Requires explicit `import`. Contains modules for IO, networking, and argument parsing: `system`, `network`, `args`.
 
 ```beamlang
@@ -463,453 +440,25 @@ import args.*;
 import network.*;
 ```
 
-### String
-
-```beamlang
-type String {
-    data: any,
-    length: fn(String) -> number,
-    chars: fn(String) -> [char],
-    concat: fn(String, String) -> String
-}
-```
-
-### Optional
-
-```beamlang
-type Optional<T> {
-    internal kind: number,
-    internal tag: number,
-    internal value: any,
-    unwrap: fn(T?, T) -> T,
-    map: fn(T?, fn(T) -> any) -> any?,
-    and_then: fn(T?, fn(T) -> any?) -> any?,
-    is_present: fn(T?) -> bool
-}
-```
-
-### List
-
-```beamlang
-type List<T> {
-    internal data: any,
-    length: fn(List<T>) -> number,
-    get: fn(List<T>, number) -> T?,
-    push: fn(List<T>, T) -> List<T>,
-    pop: fn(List<T>) -> List<T>,
-    first: fn(List<T>) -> T?,
-    last: fn(List<T>) -> T?,
-    map: fn(List<T>, fn(T) -> any) -> List<any>,
-    filter: fn(List<T>, fn(T) -> bool) -> List<T>,
-    fold: fn(List<T>, any, fn(any, T) -> any) -> any,
-    for_each: fn(List<T>, fn(T) -> void) -> void,
-    reverse: fn(List<T>) -> List<T>,
-    concat: fn(List<T>, List<T>) -> List<T>
-}
-```
-
-### Args
-
-`parse_args<T>(args: [String]) -> T!ArgsError` parses command-line arguments into a struct literal of `T`.
-`T` must be a struct type with `String`, `number`, `bool`, or `char` fields.
-
-Field annotations control parsing behavior:
-- `@required()` - Field must be provided (error if missing)
-- `@default(value)` - Default value when not provided
-- `@description("...")` - Help text description
-- `@short("c")` - Short flag form, e.g., `-c`
-- `@long("config")` - Long flag form, e.g., `--config`
-- `@flag` - Boolean flag (presence = true, absence = false)
-
-Fields without `@short` or `@long` are parsed as positional arguments (matched in field definition order).
-
-Parsing features:
-- Named flags: `--verbose`, `-v`, `--count=5`, `-n 5`
-- Combined short flags: `-inv` is equivalent to `-i -n -v` (flag-type options only)
-- `--` separator: everything after `--` is treated as positional
-- Built-in help: `--help` or `-h` returns `ArgsError` with auto-generated usage text
-
-`usage<T>(program: String) -> String` generates a formatted help/usage string from the type's annotations.
-
-```beamlang
-error ArgsError {
-    message: String,
-    missing: [String]
-}
-
-fn parse_args<T>(args: [String]) -> T!ArgsError
-fn usage<T>(program: String) -> String
-```
-
-#### Low-Level Argument Helpers (Pure BeamLang)
-
-The args module also provides pure-BeamLang helper functions for manual/custom argument parsing. These implement the same parsing algorithms as the runtime but without requiring compile-time type metadata.
-
-```beamlang
-// Types
-type ParsedFlag { name: String, has_value: bool, value: String }
-type SplitArgs { before: [String], after: [String] }
-
-// Classification
-fn is_help(arg: String) -> bool
-fn has_help_flag(args: [String]) -> bool
-fn is_long_opt(arg: String) -> bool
-fn is_short_opt(arg: String) -> bool
-fn is_separator(arg: String) -> bool
-
-// Parsing
-fn parse_long_opt(arg: String) -> ParsedFlag?
-fn parse_short_opt(arg: String) -> ParsedFlag?
-fn parse_combined_flags(arg: String) -> [String]
-
-// Collection
-fn split_at_separator(args: [String]) -> SplitArgs
-fn find_flag(args: [String], long_name: String, short_name: String) -> bool
-fn find_option(args: [String], long_name: String, short_name: String) -> String?
-fn positional_args(args: [String]) -> [String]
-
-// Help text formatting
-fn format_opt_line(short: String, long: String, hint: String, desc: String) -> String
-fn format_pos_line(name: String, hint: String, required: bool, desc: String) -> String
-fn format_usage_header(program: String, has_options: bool, names: [String]) -> String
-```
-
-Low-level example (no struct type needed):
-
-```beamlang
-fn main(args: [String]) -> number {
-    if (has_help_flag(args)) {
-        let names: [String] = ["file"];
-        println(format_usage_header("myapp", true, names));
-        println(format_opt_line("v", "verbose", "", "Verbose output"));
-        println(format_opt_line("n", "count", "NUMBER", "Item count"));
-        return 0;
-    }
-    let verbose = find_flag(args, "verbose", "v");
-    let count = find_option(args, "count", "n");
-    let count_val = count->unwrap("10");
-    let pos = positional_args(args);
-    return 0;
-}
-```
-
-Example:
-
-```beamlang
-type Args {
-    @required()
-    @description("Input file to process")
-    file: String,
-
-    @short("n")
-    @long("count")
-    @default(10)
-    @description("Number of items")
-    count: number,
-
-    @flag
-    @short("v")
-    @long("verbose")
-    @description("Enable verbose output")
-    verbose: bool
-}
-
-fn main(args: [String]) -> number {
-    let parsed = parse_args<Args>(args);
-    match (parsed) {
-        case!ok opts => println(opts->file),
-        case!err err -> {
-            println("Error: ${err->message}");
-            let help = usage<Args>("my_program");
-            println(help);
-            1;
-        }
-    }
-}
-```
-
 Type alias: `[T]` is equivalent to `List<T>`.
 
-List literal syntax:
-
-```beamlang
-let nums: [number] = [1, 2, 3, 4, 5];
-let empty: [String] = [];
-let nested: [[number]] = [[1, 2], [3, 4]];
-```
-
-Example:
-
-```beamlang
-let nums: [number] = [1, 2, 3, 4, 5];
-let sum = nums->fold(0, add_nums);
-println("Sum: ${sum}");
-
-match (nums->first()) {
-    case ?some val => println("First: ${val}"),
-    case ?none => println("Empty")
-};
-```
-
-### Result
-
-```beamlang
-type Result<Ok, Err> {
-    internal kind: number,
-    internal tag: number,
-    internal value: any,
-    unwrap: fn(Ok!Err, Ok) -> Ok,
-    map: fn(Ok!Err, fn(Ok) -> any) -> any!Err,
-    and_then: fn(Ok!Err, fn(Ok) -> any!Err) -> any!Err
-}
-```
-
-### IO
-
-```beamlang
-println<T>(value: T) -> void
-print<T>(value: T) -> void
-```
-
-### System
-
-The system module provides file and environment operations with proper error types:
-
-```beamlang
-// Error type for IO operations
-export error IoError {
-    kind: String,
-    message: String
-}
-
-fn read_file(path: String) -> String!IoError
-fn write_file(path: String, contents: String) -> bool!IoError
-fn file_exists(path: String) -> bool
-fn get_env(name: String) -> String?
-```
-
-Example:
-
-```beamlang
-let result = read_file("config.txt");
-match (result) {
-    case!ok content => println(content),
-    case!err err => println("Error: ${err->message}")
-};
-```
-
-### Networking (HTTP)
-
-```beamlang
-export error NetError {
-    kind: String,
-    message: String
-}
-
-type HttpResponse {
-    status: number,
-    body: String,
-    headers: [String]
-}
-
-fn http_request(method: String, url: String, headers: [String], body: String, timeout_ms: number, follow_redirects: bool) -> HttpResponse!NetError
-fn http_get(url: String) -> HttpResponse!NetError
-fn http_head(url: String) -> HttpResponse!NetError
-```
-
-Example:
-
-```beamlang
-let result = http_get("https://example.com");
-match (result) {
-    case!ok resp => println(resp->body),
-    case!err err => println("Network error: ${err->message}")
-};
-```
-
-### Type Inspection
-
-```beamlang
-typeof<T>(value: T) -> String
-to_string<T>(value: T) -> String
-```
-
-## Standard Library Generic Functions
-
-The stdlib is fully generic - all internal methods preserve type information:
-
-```beamlang
-// Create typed lists
-fn list_new<T>() -> List<T>
-fn list_of<T>(items: [T]) -> List<T>
-
-// List methods are generic
-fn list_get_method<T>(self: List<T>, index: number) -> T?
-fn list_push_method<T>(self: List<T>, item: T) -> List<T>
-fn list_map_method<T, U>(self: List<T>, mapper: fn(T) -> U) -> List<U>
-fn list_filter_method<T>(self: List<T>, predicate: fn(T) -> bool) -> List<T>
-fn list_fold_method<T, U>(self: List<T>, initial: U, folder: fn(U, T) -> U) -> U
-fn list_for_each_method<T>(self: List<T>, callback: fn(T) -> void) -> void
-
-// Optional methods are generic
-fn optional_some<T>(value: T) -> T?
-fn optional_none<T>() -> T?
-fn optional_unwrap<T>(self: T?, fallback: T) -> T
-fn optional_map<T, U>(self: T?, mapper: fn(T) -> U) -> U?
-
-// Result methods are generic
-fn result_ok<T, E>(value: T) -> T!E
-fn result_err<T, E>(value: E) -> T!E
-fn result_unwrap<T, E>(self: T!E, fallback: T) -> T
-fn result_map<T, E, U>(self: T!E, mapper: fn(T) -> U) -> U!E
-
-// IO functions are generic
-fn println<T>(value: T) -> void
-fn print<T>(value: T) -> void
-
-// Convert any value to string
-fn to_string<T>(value: T) -> String
-fn typeof<T>(value: T) -> String
-```
-
-### Vec2 (2D Vector with Operators)
-
-```beamlang
-type Vec2 {
-    x: number,
-    y: number,
-    length: fn(Vec2) -> number,
-    normalize: fn(Vec2) -> Vec2,
-    dot: fn(Vec2, Vec2) -> number,
-    operator +: fn(Vec2, Vec2) -> Vec2,
-    operator -: fn(Vec2, Vec2) -> Vec2,
-    operator *: fn(Vec2, number) -> Vec2,
-    operator /: fn(Vec2, number) -> Vec2,
-    operator ==: fn(Vec2, Vec2) -> bool,
-    operator !=: fn(Vec2, Vec2) -> bool
-}
-
-fn vec2(x: number, y: number) -> Vec2
-fn vec2_zero() -> Vec2
-fn vec2_one() -> Vec2
-fn vec2_distance(a: Vec2, b: Vec2) -> number
-fn vec2_lerp(a: Vec2, b: Vec2, t: number) -> Vec2
-```
-
-### Range (Iteration Support)
-
-The `..` operator creates a Range value. Ranges can be iterated directly in for loops or used with methods like `contains()` and `length()`.
-
-```beamlang
-// Range literal syntax
-for (i in 0..10) {
-    println(to_string(i));  // 0, 1, 2, ..., 9
-}
-
-// Assign to variable
-let r = 1..5;
-println(to_string(r->contains(3)));  // true
-println(to_string(r->length()));     // 4.0
-
-// Using range() function (equivalent to 0..5)
-let r2 = range(0, 5);
-
-// Range with custom step
-let r3 = range_step(0, 10, 2);  // 0, 2, 4, 6, 8
-```
-
-```beamlang
-type Range {
-    internal start: number,
-    internal end: number,
-    internal step: number,
-    contains: fn(Range, number) -> bool,
-    length: fn(Range) -> number
-}
-
-fn range(start: number, end: number) -> Range
-fn range_step(start: number, end: number, step: number) -> Range
-```
-
-### Map (Key-Value Dictionary)
-
-```beamlang
-type Map<K, V> {
-    internal data: any,
-    get: fn(Map<K, V>, K) -> V?,
-    put: fn(Map<K, V>, K, V) -> Map<K, V>,
-    remove: fn(Map<K, V>, K) -> Map<K, V>,
-    contains: fn(Map<K, V>, K) -> bool,
-    size: fn(Map<K, V>) -> number,
-    keys: fn(Map<K, V>) -> List<K>,
-    values: fn(Map<K, V>) -> List<V>
-}
-
-fn map_new<K, V>() -> Map<K, V>
-```
-
-### Set (Unique Elements)
-
-```beamlang
-type Set<T> {
-    internal data: any,
-    add: fn(Set<T>, T) -> Set<T>,
-    remove: fn(Set<T>, T) -> Set<T>,
-    contains: fn(Set<T>, T) -> bool,
-    size: fn(Set<T>) -> number,
-    to_list: fn(Set<T>) -> List<T>,
-    union: fn(Set<T>, Set<T>) -> Set<T>,
-    intersection: fn(Set<T>, Set<T>) -> Set<T>,
-    difference: fn(Set<T>, Set<T>) -> Set<T>
-}
-
-fn set_new<T>() -> Set<T>
-```
-
-### Math Functions
-
-```beamlang
-fn sqrt(n: number) -> number
-fn abs(n: number) -> number
-fn floor(n: number) -> number
-fn ceil(n: number) -> number
-fn round(n: number) -> number
-fn sin(n: number) -> number
-fn cos(n: number) -> number
-fn tan(n: number) -> number
-fn asin(n: number) -> number
-fn acos(n: number) -> number
-fn atan(n: number) -> number
-fn atan2(y: number, x: number) -> number
-fn pow(base: number, exp: number) -> number
-fn log(n: number) -> number
-fn log10(n: number) -> number
-fn exp(n: number) -> number
-fn pi() -> number
-fn e() -> number
-fn min(a: number, b: number) -> number
-fn max(a: number, b: number) -> number
-fn clamp(value: number, min_val: number, max_val: number) -> number
-fn lerp(a: number, b: number, t: number) -> number
-fn deg_to_rad(deg: number) -> number
-fn rad_to_deg(rad: number) -> number
-fn sign(n: number) -> number
-```
-
-Generic functions can be called with explicit type arguments:
-
-```beamlang
-let parsed = parse_args<Args>(args);
-```
+For the full stdlib API reference, see [`docs/stdlib.md`](docs/stdlib.md).
 
 ## External Functions
 
-BeamLang uses external function declarations for runtime interop:
+BeamLang uses external function declarations for runtime interop. Both Erlang and Elixir modules are supported:
 
 ```beamlang
+// Call an Erlang stdlib function directly
+@external(erlang, "math", "sqrt")
+fn sqrt(n: number) -> number;
+
+// Call an Elixir module function
 @external(elixir, "BeamLang.Runtime", "println")
 fn println(value: any) -> void;
 ```
+
+The stdlib prefers `@external(erlang, ...)` for functions that map directly to Erlang/OTP builtins (math, list operations, etc.) and uses `@external(elixir, ...)` only when the BeamLang runtime provides necessary value wrapping or conversion logic.
 
 ## Notes
 

@@ -11,10 +11,10 @@ type Range {
 @external(elixir, "BeamLang.Runtime", "range_to_list")
 fn range_to_list_data(start: number, end: number, step: number) -> any;
 
-@external(elixir, "BeamLang.Runtime", "math_abs")
+@external(erlang, "erlang", "abs")
 fn abs(n: number) -> number;
 
-@external(elixir, "BeamLang.Runtime", "math_floor")
+@external(erlang, "math", "floor")
 fn floor(n: number) -> number;
 
 fn range(start: number, end: number) -> Range {

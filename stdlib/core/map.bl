@@ -17,7 +17,7 @@ type Pair<A, B> {
     second: B
 }
 
-@external(elixir, "BeamLang.Runtime", "map_new")
+@external(erlang, "maps", "new")
 fn map_new_data() -> any;
 
 @external(elixir, "BeamLang.Runtime", "map_get")
@@ -32,13 +32,13 @@ fn map_remove_data(data: any, key: any) -> any;
 @external(elixir, "BeamLang.Runtime", "map_contains")
 fn map_contains_data(data: any, key: any) -> bool;
 
-@external(elixir, "BeamLang.Runtime", "map_size_data")
+@external(erlang, "erlang", "map_size")
 fn map_size_data(data: any) -> number;
 
-@external(elixir, "BeamLang.Runtime", "map_keys")
+@external(erlang, "maps", "keys")
 fn map_keys_data(data: any) -> any;
 
-@external(elixir, "BeamLang.Runtime", "map_values")
+@external(erlang, "maps", "values")
 fn map_values_data(data: any) -> any;
 
 @external(elixir, "BeamLang.Runtime", "map_entries")

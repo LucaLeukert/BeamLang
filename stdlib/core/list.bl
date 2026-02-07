@@ -15,7 +15,7 @@ type List<T> {
     join: fn(List<T>, String) -> String
 }
 
-@external(elixir, "BeamLang.Runtime", "list_length")
+@external(erlang, "erlang", "length")
 fn list_length_data(data: any) -> number;
 
 @external(elixir, "BeamLang.Runtime", "list_get")
@@ -33,10 +33,10 @@ fn list_first_data(data: any) -> any?;
 @external(elixir, "BeamLang.Runtime", "list_last")
 fn list_last_data(data: any) -> any?;
 
-@external(elixir, "BeamLang.Runtime", "list_reverse")
+@external(erlang, "lists", "reverse")
 fn list_reverse_data(data: any) -> any;
 
-@external(elixir, "BeamLang.Runtime", "list_concat")
+@external(erlang, "lists", "append")
 fn list_concat_data(left: any, right: any) -> any;
 
 @external(elixir, "BeamLang.Runtime", "list_empty")
