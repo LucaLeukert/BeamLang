@@ -353,17 +353,69 @@ defmodule BeamLang.LSP.Server do
   end
 
   defp diagnostic_for(source, %BeamLang.Error{} = error) do
+    dot_method_hint = dot_method_hint_message(source, error)
+    has_dot_method_fix_note = Enum.member?(error.notes || [], "fix:replace_dot_with_arrow")
+    message = dot_method_hint || error.message
+
     diagnostic = %{
       "range" => range_for_span(source, error.span),
       "severity" => 1,
       "source" => "BeamLang",
-      "message" => error.message
+      "message" => message
     }
 
-    if Enum.member?(error.notes || [], "fix:replace_dot_with_arrow") do
+    if has_dot_method_fix_note or is_binary(dot_method_hint) do
       Map.put(diagnostic, "code", "BL001")
     else
       diagnostic
+    end
+  end
+
+  defp dot_method_hint_message(source, %BeamLang.Error{
+         kind: :parser,
+         message: "Expected semicolon.",
+         span: %BeamLang.Span{start: start_offset}
+       }) do
+    case infer_dot_method_name(source, start_offset) do
+      {:ok, method_name} ->
+        "BeamLang uses '->' for method calls, not '.'. Replace '.' with '->' (for example: receiver->#{method_name}(...) )."
+
+      :error ->
+        nil
+    end
+  end
+
+  defp dot_method_hint_message(_source, _error), do: nil
+
+  defp infer_dot_method_name(source, start_offset)
+       when is_binary(source) and is_integer(start_offset) and start_offset >= 0 do
+    if start_offset >= byte_size(source) do
+      :error
+    else
+      case binary_part(source, start_offset, 1) do
+        "." ->
+          rest = binary_part(source, start_offset + 1, byte_size(source) - start_offset - 1)
+          rest = String.trim_leading(rest, " \t")
+          {method_name, _rest} = take_identifier_prefix(rest)
+
+          if method_name == "" do
+            :error
+          else
+            {:ok, method_name}
+          end
+
+        _ ->
+          :error
+      end
+    end
+  end
+
+  defp infer_dot_method_name(_source, _start_offset), do: :error
+
+  defp take_identifier_prefix(binary) when is_binary(binary) do
+    case Regex.run(~r/^([A-Za-z_][A-Za-z0-9_]*)(.*)$/s, binary) do
+      [_, ident, rest] -> {ident, rest}
+      _ -> {"", binary}
     end
   end
 

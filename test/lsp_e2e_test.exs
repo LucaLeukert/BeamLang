@@ -650,4 +650,40 @@ defmodule BeamLang.LSP.E2ETest do
 
     stop_server(port)
   end
+
+  test "diagnostics show method-call arrow hint instead of generic semicolon error" do
+    port = start_server()
+    initialize(port)
+
+    source = """
+    fn main() -> void {
+        let body = "x";
+        "/".concat(body);
+    }
+    """
+
+    open_document(port, test_uri(), source)
+
+    send_request(port, 22, "textDocument/documentSymbol", %{
+      "textDocument" => %{"uri" => test_uri()}
+    })
+
+    {resp, notifications} = recv_response_by_id(port, 22)
+    assert is_list(resp["result"])
+
+    diagnostics =
+      notifications
+      |> Enum.filter(fn msg ->
+        msg["method"] == "textDocument/publishDiagnostics" and
+          get_in(msg, ["params", "uri"]) == test_uri()
+      end)
+      |> Enum.flat_map(fn msg -> get_in(msg, ["params", "diagnostics"]) || [] end)
+
+    assert Enum.any?(diagnostics, fn diagnostic ->
+             msg = diagnostic["message"] || ""
+             msg =~ "uses '->' for method calls"
+           end)
+
+    stop_server(port)
+  end
 end
