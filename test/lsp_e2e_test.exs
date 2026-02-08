@@ -189,6 +189,7 @@ defmodule BeamLang.LSP.E2ETest do
     resp = initialize(port)
 
     capabilities = resp["result"]["capabilities"]
+    assert resp["result"]["serverInfo"]["name"] == "beamlang-lsp"
     assert capabilities["hoverProvider"] == true
     assert capabilities["completionProvider"]
     assert capabilities["definitionProvider"] == true
@@ -358,7 +359,9 @@ defmodule BeamLang.LSP.E2ETest do
     {resp, _} = recv_response_by_id(port, 8)
     result = resp["result"]
     # Should be a WorkspaceEdit or nil
-    assert result == nil or (is_map(result) and Map.has_key?(result, "changes"))
+    assert result == nil or
+             (is_map(result) and
+                (Map.has_key?(result, "changes") or Map.has_key?(result, "documentChanges")))
 
     stop_server(port)
   end
@@ -651,7 +654,16 @@ defmodule BeamLang.LSP.E2ETest do
     assert is_map(action)
     assert action["title"] =~ "Replace '.' with '->'"
 
-    edits = get_in(action, ["edit", "changes", test_uri()]) || []
+    edits =
+      (get_in(action, ["edit", "changes", test_uri()]) || []) ++
+        Enum.flat_map(get_in(action, ["edit", "documentChanges"]) || [], fn item ->
+          if get_in(item, ["textDocument", "uri"]) == test_uri() do
+            item["edits"] || []
+          else
+            []
+          end
+        end)
+
     assert Enum.any?(edits, fn edit -> edit["newText"] == "->" end)
 
     stop_server(port)

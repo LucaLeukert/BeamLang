@@ -10,7 +10,7 @@ defmodule Beamlang.MixProject do
       escript: [main_module: BeamLang.CLI, name: "beamlang"],
       deps: [
         {:jason, "~> 1.4"},
-        {:elixir_lsp, "~> 0.1.0"}
+        {:elixir_lsp, "~> 0.2.1"}
       ]
     ]
   end
