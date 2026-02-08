@@ -33,7 +33,9 @@ defmodule BeamLang.LSP.Server do
           rescue
             e ->
               # Log the crash but keep the server alive
-              BeamLang.LSP.Debug.log("handle_message crashed: #{Exception.message(e)}\n#{Exception.format_stacktrace(__STACKTRACE__)}")
+              BeamLang.LSP.Debug.log(
+                "handle_message crashed: #{Exception.message(e)}\n#{Exception.format_stacktrace(__STACKTRACE__)}"
+              )
 
               # If the message had a request id, send an error response so the client doesn't hang
               case message do
@@ -97,7 +99,12 @@ defmodule BeamLang.LSP.Server do
 
   defp handle_message(state, %{"method" => "textDocument/didClose", "params" => params}) do
     %{"textDocument" => %{"uri" => uri}} = params
-    Protocol.send_notification("textDocument/publishDiagnostics", %{"uri" => uri, "diagnostics" => []})
+
+    Protocol.send_notification("textDocument/publishDiagnostics", %{
+      "uri" => uri,
+      "diagnostics" => []
+    })
+
     update_in(state[:documents], &Map.delete(&1, uri))
   end
 
@@ -114,7 +121,11 @@ defmodule BeamLang.LSP.Server do
     state
   end
 
-  defp handle_message(state, %{"method" => "textDocument/definition", "id" => id, "params" => params}) do
+  defp handle_message(state, %{
+         "method" => "textDocument/definition",
+         "id" => id,
+         "params" => params
+       }) do
     definition =
       with %{"textDocument" => %{"uri" => uri}, "position" => position} <- params,
            doc when not is_nil(doc) <- Map.get(state.documents, uri) do
@@ -127,7 +138,11 @@ defmodule BeamLang.LSP.Server do
     state
   end
 
-  defp handle_message(state, %{"method" => "textDocument/completion", "id" => id, "params" => params}) do
+  defp handle_message(state, %{
+         "method" => "textDocument/completion",
+         "id" => id,
+         "params" => params
+       }) do
     completion =
       with %{"textDocument" => %{"uri" => uri}, "position" => position} <- params,
            doc when not is_nil(doc) <- Map.get(state.documents, uri) do
@@ -140,7 +155,11 @@ defmodule BeamLang.LSP.Server do
     state
   end
 
-  defp handle_message(state, %{"method" => "textDocument/documentSymbol", "id" => id, "params" => params}) do
+  defp handle_message(state, %{
+         "method" => "textDocument/documentSymbol",
+         "id" => id,
+         "params" => params
+       }) do
     symbols =
       with %{"textDocument" => %{"uri" => uri}} <- params,
            doc when not is_nil(doc) <- Map.get(state.documents, uri) do
@@ -160,7 +179,11 @@ defmodule BeamLang.LSP.Server do
     state
   end
 
-  defp handle_message(state, %{"method" => "textDocument/signatureHelp", "id" => id, "params" => params}) do
+  defp handle_message(state, %{
+         "method" => "textDocument/signatureHelp",
+         "id" => id,
+         "params" => params
+       }) do
     signature =
       with %{"textDocument" => %{"uri" => uri}, "position" => position} <- params,
            doc when not is_nil(doc) <- Map.get(state.documents, uri) do
@@ -173,7 +196,11 @@ defmodule BeamLang.LSP.Server do
     state
   end
 
-  defp handle_message(state, %{"method" => "textDocument/prepareRename", "id" => id, "params" => params}) do
+  defp handle_message(state, %{
+         "method" => "textDocument/prepareRename",
+         "id" => id,
+         "params" => params
+       }) do
     result =
       with %{"textDocument" => %{"uri" => uri}, "position" => position} <- params,
            doc when not is_nil(doc) <- Map.get(state.documents, uri) do
@@ -188,7 +215,8 @@ defmodule BeamLang.LSP.Server do
 
   defp handle_message(state, %{"method" => "textDocument/rename", "id" => id, "params" => params}) do
     result =
-      with %{"textDocument" => %{"uri" => uri}, "position" => position, "newName" => new_name} <- params,
+      with %{"textDocument" => %{"uri" => uri}, "position" => position, "newName" => new_name} <-
+             params,
            doc when not is_nil(doc) <- Map.get(state.documents, uri) do
         rename_symbol(state, doc, position, new_name)
       else
@@ -199,7 +227,11 @@ defmodule BeamLang.LSP.Server do
     state
   end
 
-  defp handle_message(state, %{"method" => "textDocument/references", "id" => id, "params" => params}) do
+  defp handle_message(state, %{
+         "method" => "textDocument/references",
+         "id" => id,
+         "params" => params
+       }) do
     result =
       with %{"textDocument" => %{"uri" => uri}, "position" => position} <- params,
            doc when not is_nil(doc) <- Map.get(state.documents, uri) do
@@ -212,7 +244,11 @@ defmodule BeamLang.LSP.Server do
     state
   end
 
-  defp handle_message(state, %{"method" => "textDocument/formatting", "id" => id, "params" => params}) do
+  defp handle_message(state, %{
+         "method" => "textDocument/formatting",
+         "id" => id,
+         "params" => params
+       }) do
     result =
       with %{"textDocument" => %{"uri" => uri}} <- params,
            doc when not is_nil(doc) <- Map.get(state.documents, uri) do
@@ -342,17 +378,27 @@ defmodule BeamLang.LSP.Server do
   defp lookup_hover_with_field_access(doc, field_name, offset) do
     # First check if this is a field access pattern: target->field
     case detect_field_access(doc, offset) do
-      {:ok, target_name, _arrow_span, field_name_detected} when field_name_detected == field_name ->
+      {:ok, target_name, _arrow_span, field_name_detected}
+      when field_name_detected == field_name ->
         # This is a field access, get the target's type and field info
         case lookup_local(doc, target_name, offset) do
           {:ok, %{type: target_type}} when not is_nil(target_type) ->
             case lookup_field_type(doc, target_type, field_name) do
+              {:ok, type_name, {:fn, params, return_type}} ->
+                {:ok, format_method_info(type_name, field_name, params, return_type)}
+
               {:ok, type_name, field_type} ->
                 {:ok, "field #{field_name}: #{format_type(field_type)} (on #{type_name})"}
 
               :error ->
-                # Field not found, fall back to regular lookup
-                lookup_hover(doc, field_name, offset)
+                case method_infos_for_type(doc, field_name, target_type) do
+                  [] ->
+                    # Field/method not found on the receiver, fall back to regular lookup
+                    lookup_hover(doc, field_name, offset)
+
+                  infos ->
+                    {:ok, format_methods_info(field_name, infos)}
+                end
             end
 
           _ ->
@@ -430,7 +476,8 @@ defmodule BeamLang.LSP.Server do
 
     with %BeamLang.Token{type: :identifier, value: name} = token <- identifier_at(doc, offset),
          lookup_name <- qualified_lookup_name(doc, token, name),
-         {:ok, %{span: span, path: path}} <- lookup_definition(state.documents, doc, lookup_name, offset) do
+         {:ok, %{span: span, path: path}} <-
+           lookup_definition(state.documents, doc, lookup_name, offset) do
       [
         %{
           "uri" => path_to_uri(path),
@@ -514,9 +561,12 @@ defmodule BeamLang.LSP.Server do
         edits = find_local_references_in_tokens(doc, name, offset)
 
         if edits != [] do
-          %{doc.uri => Enum.map(edits, fn span ->
-            %{"range" => range_for_span(doc.text, span), "newText" => new_name}
-          end)}
+          %{
+            doc.uri =>
+              Enum.map(edits, fn span ->
+                %{"range" => range_for_span(doc.text, span), "newText" => new_name}
+              end)
+          }
         else
           %{}
         end
@@ -527,9 +577,13 @@ defmodule BeamLang.LSP.Server do
           refs = find_identifier_references_in_tokens(d, name)
 
           if refs != [] do
-            Map.put(acc, uri, Enum.map(refs, fn span ->
-              %{"range" => range_for_span(d.text, span), "newText" => new_name}
-            end))
+            Map.put(
+              acc,
+              uri,
+              Enum.map(refs, fn span ->
+                %{"range" => range_for_span(d.text, span), "newText" => new_name}
+              end)
+            )
           else
             acc
           end
@@ -540,9 +594,13 @@ defmodule BeamLang.LSP.Server do
           refs = find_identifier_references_in_tokens(d, name)
 
           if refs != [] do
-            Map.put(acc, uri, Enum.map(refs, fn span ->
-              %{"range" => range_for_span(d.text, span), "newText" => new_name}
-            end))
+            Map.put(
+              acc,
+              uri,
+              Enum.map(refs, fn span ->
+                %{"range" => range_for_span(d.text, span), "newText" => new_name}
+              end)
+            )
           else
             acc
           end
@@ -553,9 +611,13 @@ defmodule BeamLang.LSP.Server do
           refs = find_identifier_references_in_tokens(d, name)
 
           if refs != [] do
-            Map.put(acc, uri, Enum.map(refs, fn span ->
-              %{"range" => range_for_span(d.text, span), "newText" => new_name}
-            end))
+            Map.put(
+              acc,
+              uri,
+              Enum.map(refs, fn span ->
+                %{"range" => range_for_span(d.text, span), "newText" => new_name}
+              end)
+            )
           else
             acc
           end
@@ -708,14 +770,14 @@ defmodule BeamLang.LSP.Server do
       |> symbol_matches(query)
       |> Enum.map(fn {name, kind, span} ->
         if span_in_doc?(doc, span) do
-        %{
-          "name" => name,
-          "kind" => kind,
-          "location" => %{
-            "uri" => doc.uri,
-            "range" => range_for_span_in_doc(doc, span)
+          %{
+            "name" => name,
+            "kind" => kind,
+            "location" => %{
+              "uri" => doc.uri,
+              "range" => range_for_span_in_doc(doc, span)
+            }
           }
-        }
         else
           nil
         end
@@ -726,6 +788,7 @@ defmodule BeamLang.LSP.Server do
 
   defp signature_help_for(doc, %{"line" => line, "character" => character}) do
     offset = position_to_offset(doc.text, line, character)
+
     case infer_call_name(doc.tokens, offset) do
       nil ->
         nil
@@ -739,6 +802,7 @@ defmodule BeamLang.LSP.Server do
 
               [info | _] ->
                 label = format_method_info(info.type_name, name, info.params, info.return_type)
+
                 %{
                   "signatures" => [
                     %{
@@ -756,6 +820,7 @@ defmodule BeamLang.LSP.Server do
 
           info ->
             label = format_function_info(name, info.params, info.return_type)
+
             %{
               "signatures" => [
                 %{
@@ -839,7 +904,8 @@ defmodule BeamLang.LSP.Server do
                       infos -> {:ok, format_methods_info(name, infos)}
                     end
 
-                  info -> {:ok, format_type_info("error", name, info.fields)}
+                  info ->
+                    {:ok, format_type_info("error", name, info.fields)}
                 end
 
               info ->
@@ -884,7 +950,8 @@ defmodule BeamLang.LSP.Server do
                   [info | _] -> {:ok, %{span: info.span, path: doc.path}}
                 end
 
-              info -> {:ok, %{span: info.span, path: doc.path}}
+              info ->
+                {:ok, %{span: info.span, path: doc.path}}
             end
 
           info ->
@@ -1126,7 +1193,10 @@ defmodule BeamLang.LSP.Server do
       {env, param_entries} =
         Enum.reduce(params, {%{}, []}, fn param, {env, acc} ->
           bindings = extract_param_bindings(param, func_span, scope_span, type_table)
-          new_env = Enum.reduce(bindings, env, fn entry, e -> Map.put(e, entry.name, entry.type) end)
+
+          new_env =
+            Enum.reduce(bindings, env, fn entry, e -> Map.put(e, entry.name, entry.type) end)
+
           {new_env, bindings ++ acc}
         end)
 
@@ -1136,14 +1206,40 @@ defmodule BeamLang.LSP.Server do
   end
 
   # Extract bindings from a function parameter (handles both regular and pattern params)
-  defp extract_param_bindings(%{name: name, type: type, span: span}, func_span, scope_span, _type_table) do
-    [%{name: name, type: type, span: span, func_span: func_span, scope_span: scope_span, kind: :param}]
+  defp extract_param_bindings(
+         %{name: name, type: type, span: span},
+         func_span,
+         scope_span,
+         _type_table
+       ) do
+    [
+      %{
+        name: name,
+        type: type,
+        span: span,
+        func_span: func_span,
+        scope_span: scope_span,
+        kind: :param
+      }
+    ]
   end
 
-  defp extract_param_bindings(%{pattern: pattern, type: type, span: _span}, func_span, scope_span, type_table) do
+  defp extract_param_bindings(
+         %{pattern: pattern, type: type, span: _span},
+         func_span,
+         scope_span,
+         type_table
+       ) do
     pattern_bindings_with_type(pattern, type, type_table)
     |> Enum.map(fn {name, span, var_type} ->
-      %{name: name, type: var_type, span: span, func_span: func_span, scope_span: scope_span, kind: :param}
+      %{
+        name: name,
+        type: var_type,
+        span: span,
+        func_span: func_span,
+        scope_span: scope_span,
+        kind: :param
+      }
     end)
   end
 
@@ -1161,14 +1257,17 @@ defmodule BeamLang.LSP.Server do
   defp format_param(_), do: "_"
 
   defp format_pattern({:pat_identifier, %{name: name}}), do: name
+
   defp format_pattern({:struct_pattern, %{name: type_name, fields: fields}}) do
     field_names = Enum.map_join(fields, ", ", fn %{name: n} -> n end)
     "#{type_name} { #{field_names} }"
   end
+
   defp format_pattern({:tuple_pattern, %{elements: elements}}) do
     elem_names = Enum.map_join(elements, ", ", &format_pattern/1)
     "(#{elem_names})"
   end
+
   defp format_pattern(_), do: "_"
 
   defp format_function_info(name, params, return_type) do
@@ -1211,7 +1310,10 @@ defmodule BeamLang.LSP.Server do
   defp format_type({:type_var, name}) when is_binary(name), do: name
   defp format_type({:named, name}) when is_binary(name), do: name
   defp format_type({:optional, inner}), do: "#{format_type(inner)}?"
-  defp format_type({:result, ok_type, err_type}), do: "#{format_type(ok_type)}!#{format_type(err_type)}"
+
+  defp format_type({:result, ok_type, err_type}),
+    do: "#{format_type(ok_type)}!#{format_type(err_type)}"
+
   defp format_type({:fn, params, return_type}) do
     "fn(#{Enum.map_join(params, ", ", &format_type/1)}) -> #{format_type(return_type)}"
   end
@@ -1220,12 +1322,17 @@ defmodule BeamLang.LSP.Server do
 
   defp instantiated_function_info(doc, name, offset, info) do
     case Map.get(info, :type_params, []) do
-      [] -> nil
+      [] ->
+        nil
+
       _ ->
         case find_call_at_offset(doc.ast, name, offset) do
-          nil -> nil
+          nil ->
+            nil
+
           {:call, args} ->
             subst = build_type_subst(doc, args, info.params, offset)
+
             if map_size(subst) == 0 do
               nil
             else
@@ -1278,7 +1385,8 @@ defmodule BeamLang.LSP.Server do
     |> Enum.reduce(subst, fn {a, b}, acc -> unify_types(a, b, acc) end)
   end
 
-  defp unify_types({:optional, inner_a}, {:optional, inner_b}, subst), do: unify_types(inner_a, inner_b, subst)
+  defp unify_types({:optional, inner_a}, {:optional, inner_b}, subst),
+    do: unify_types(inner_a, inner_b, subst)
 
   defp unify_types({:result, ok_a, err_a}, {:result, ok_b, err_b}, subst) do
     subst
@@ -1305,6 +1413,7 @@ defmodule BeamLang.LSP.Server do
   end
 
   defp substitute_type({:optional, inner}, subst), do: {:optional, substitute_type(inner, subst)}
+
   defp substitute_type({:result, ok_type, err_type}, subst),
     do: {:result, substitute_type(ok_type, subst), substitute_type(err_type, subst)}
 
@@ -1316,7 +1425,9 @@ defmodule BeamLang.LSP.Server do
 
   defp infer_expr_type_for_call({:identifier, %{name: name}}, doc, offset) do
     case lookup_local(doc, name, offset) do
-      {:ok, info} -> info.type
+      {:ok, info} ->
+        info.type
+
       :error ->
         case Map.get(doc.index[:functions] || %{}, name) do
           nil -> nil
@@ -1356,23 +1467,47 @@ defmodule BeamLang.LSP.Server do
     end)
   end
 
-  defp find_call_in_stmt({:let, %{expr: expr}}, name, offset), do: find_call_in_expr(expr, name, offset)
-  defp find_call_in_stmt({:assign, %{expr: expr}}, name, offset), do: find_call_in_expr(expr, name, offset)
-  defp find_call_in_stmt({:return, %{expr: expr}}, name, offset), do: find_call_in_expr(expr, name, offset)
-  defp find_call_in_stmt({:expr, %{expr: expr}}, name, offset), do: find_call_in_expr(expr, name, offset)
-  defp find_call_in_stmt({:if_stmt, %{then_block: then_block, else_branch: else_branch}}, name, offset) do
+  defp find_call_in_stmt({:let, %{expr: expr}}, name, offset),
+    do: find_call_in_expr(expr, name, offset)
+
+  defp find_call_in_stmt({:assign, %{expr: expr}}, name, offset),
+    do: find_call_in_expr(expr, name, offset)
+
+  defp find_call_in_stmt({:return, %{expr: expr}}, name, offset),
+    do: find_call_in_expr(expr, name, offset)
+
+  defp find_call_in_stmt({:expr, %{expr: expr}}, name, offset),
+    do: find_call_in_expr(expr, name, offset)
+
+  defp find_call_in_stmt(
+         {:if_stmt, %{then_block: then_block, else_branch: else_branch}},
+         name,
+         offset
+       ) do
     find_call_in_block(then_block, name, offset) || find_call_in_else(else_branch, name, offset)
   end
 
-  defp find_call_in_stmt({:while, %{body: body}}, name, offset), do: find_call_in_block(body, name, offset)
-  defp find_call_in_stmt({:loop, %{body: body}}, name, offset), do: find_call_in_block(body, name, offset)
-  defp find_call_in_stmt({:for, %{body: body}}, name, offset), do: find_call_in_block(body, name, offset)
-  defp find_call_in_stmt({:guard, %{else_block: block}}, name, offset), do: find_call_in_block(block, name, offset)
+  defp find_call_in_stmt({:while, %{body: body}}, name, offset),
+    do: find_call_in_block(body, name, offset)
+
+  defp find_call_in_stmt({:loop, %{body: body}}, name, offset),
+    do: find_call_in_block(body, name, offset)
+
+  defp find_call_in_stmt({:for, %{body: body}}, name, offset),
+    do: find_call_in_block(body, name, offset)
+
+  defp find_call_in_stmt({:guard, %{else_block: block}}, name, offset),
+    do: find_call_in_block(block, name, offset)
+
   defp find_call_in_stmt(_stmt, _name, _offset), do: nil
 
   defp find_call_in_else(nil, _name, _offset), do: nil
-  defp find_call_in_else({:else_block, %{block: block}}, name, offset), do: find_call_in_block(block, name, offset)
-  defp find_call_in_else({:else_if, %{if: if_stmt}}, name, offset), do: find_call_in_stmt(if_stmt, name, offset)
+
+  defp find_call_in_else({:else_block, %{block: block}}, name, offset),
+    do: find_call_in_block(block, name, offset)
+
+  defp find_call_in_else({:else_if, %{if: if_stmt}}, name, offset),
+    do: find_call_in_stmt(if_stmt, name, offset)
 
   defp find_call_in_expr(nil, _name, _offset), do: nil
 
@@ -1385,19 +1520,26 @@ defmodule BeamLang.LSP.Server do
   end
 
   defp find_call_in_expr({:method_call, %{target: target, args: args}}, name, offset) do
-    find_call_in_expr(target, name, offset) || Enum.find_value(args, &find_call_in_expr(&1, name, offset))
+    find_call_in_expr(target, name, offset) ||
+      Enum.find_value(args, &find_call_in_expr(&1, name, offset))
   end
 
   defp find_call_in_expr({:binary, %{left: left, right: right}}, name, offset) do
     find_call_in_expr(left, name, offset) || find_call_in_expr(right, name, offset)
   end
 
-  defp find_call_in_expr({:block_expr, %{block: block}}, name, offset), do: find_call_in_block(block, name, offset)
+  defp find_call_in_expr({:block_expr, %{block: block}}, name, offset),
+    do: find_call_in_block(block, name, offset)
+
   defp find_call_in_expr({:match, %{cases: cases}}, name, offset) do
     Enum.find_value(cases, fn %{body: body} -> find_call_in_expr(body, name, offset) end)
   end
 
-  defp find_call_in_expr({:if_expr, %{then_block: then_block, else_branch: else_branch}}, name, offset) do
+  defp find_call_in_expr(
+         {:if_expr, %{then_block: then_block, else_branch: else_branch}},
+         name,
+         offset
+       ) do
     find_call_in_block(then_block, name, offset) || find_call_in_else(else_branch, name, offset)
   end
 
@@ -1405,9 +1547,15 @@ defmodule BeamLang.LSP.Server do
     Enum.find_value(fields, fn %{expr: expr} -> find_call_in_expr(expr, name, offset) end)
   end
 
-  defp find_call_in_expr({:res_ok, %{expr: expr}}, name, offset), do: find_call_in_expr(expr, name, offset)
-  defp find_call_in_expr({:res_err, %{expr: expr}}, name, offset), do: find_call_in_expr(expr, name, offset)
-  defp find_call_in_expr({:opt_some, %{expr: expr}}, name, offset), do: find_call_in_expr(expr, name, offset)
+  defp find_call_in_expr({:res_ok, %{expr: expr}}, name, offset),
+    do: find_call_in_expr(expr, name, offset)
+
+  defp find_call_in_expr({:res_err, %{expr: expr}}, name, offset),
+    do: find_call_in_expr(expr, name, offset)
+
+  defp find_call_in_expr({:opt_some, %{expr: expr}}, name, offset),
+    do: find_call_in_expr(expr, name, offset)
+
   defp find_call_in_expr(_expr, _name, _offset), do: nil
 
   defp format_local_info(%{name: name, type: nil, kind: kind}) do
@@ -1420,7 +1568,9 @@ defmodule BeamLang.LSP.Server do
 
   defp format_methods_info(name, infos) do
     infos
-    |> Enum.map(fn info -> format_method_info(info.type_name, name, info.params, info.return_type) end)
+    |> Enum.map(fn info ->
+      format_method_info(info.type_name, name, info.params, info.return_type)
+    end)
     |> Enum.join("\n")
   end
 
@@ -1485,7 +1635,9 @@ defmodule BeamLang.LSP.Server do
             |> Enum.filter(fn %BeamLang.Token{type: type, span: span} ->
               type == :identifier and span.start >= line_start and span.start <= line_end
             end)
-            |> Enum.min_by(fn %BeamLang.Token{span: span} -> abs(span.start - offset) end, fn -> nil end)
+            |> Enum.min_by(fn %BeamLang.Token{span: span} -> abs(span.start - offset) end, fn ->
+              nil
+            end)
         end
     end
   end
@@ -1509,6 +1661,7 @@ defmodule BeamLang.LSP.Server do
 
               interpolation_field_access(expr_str) ->
                 {target, field} = interpolation_field_parts(expr_str)
+
                 arrow_idx =
                   case :binary.match(expr_str, "->") do
                     {idx, _} -> idx
@@ -1554,7 +1707,8 @@ defmodule BeamLang.LSP.Server do
     end
   end
 
-  defp interpolation_field_info(doc, target, field, offset) when is_binary(target) and is_binary(field) do
+  defp interpolation_field_info(doc, target, field, offset)
+       when is_binary(target) and is_binary(field) do
     target_type =
       case lookup_local(doc, target, offset) do
         {:ok, info} -> info.type
@@ -1586,11 +1740,53 @@ defmodule BeamLang.LSP.Server do
     lookup_named_field(doc, type_name, field)
   end
 
+  defp lookup_field_type(doc, {:generic, {:named, type_name}, _args}, field) do
+    lookup_named_field(doc, type_name, field)
+  end
+
+  defp lookup_field_type(doc, {:optional, _inner}, field) do
+    lookup_named_field(doc, "Optional", field)
+  end
+
+  defp lookup_field_type(doc, {:result, _ok_type, _err_type}, field) do
+    lookup_named_field(doc, "Result", field)
+  end
+
+  defp lookup_field_type(doc, type_name, field) when is_atom(type_name) do
+    lookup_named_field(doc, Atom.to_string(type_name), field)
+  end
+
   defp lookup_field_type(doc, type_name, field) when is_binary(type_name) do
     lookup_named_field(doc, type_name, field)
   end
 
   defp lookup_field_type(_doc, _type, _field), do: :error
+
+  defp method_infos_for_type(doc, method_name, target_type) do
+    owner_type_name = method_owner_type_name(target_type)
+
+    case {owner_type_name, Map.get(doc.index[:methods] || %{}, method_name)} do
+      {nil, _} ->
+        []
+
+      {_type_name, nil} ->
+        []
+
+      {type_name, infos} ->
+        Enum.filter(infos, fn info -> info.type_name == type_name end)
+    end
+  end
+
+  defp method_owner_type_name({:named, type_name}) when is_binary(type_name), do: type_name
+
+  defp method_owner_type_name({:generic, {:named, type_name}, _args}) when is_binary(type_name),
+    do: type_name
+
+  defp method_owner_type_name({:optional, _inner}), do: "Optional"
+  defp method_owner_type_name({:result, _ok_type, _err_type}), do: "Result"
+  defp method_owner_type_name(type_name) when is_atom(type_name), do: Atom.to_string(type_name)
+  defp method_owner_type_name(type_name) when is_binary(type_name), do: type_name
+  defp method_owner_type_name(_), do: nil
 
   defp lookup_named_field(doc, type_name, field) do
     case Map.get(doc.index[:types] || %{}, type_name) do
@@ -1654,9 +1850,16 @@ defmodule BeamLang.LSP.Server do
   defp find_interpolation_at(<<>>, _rel_offset, _idx), do: nil
 
   defp find_closing_brace(<<"}", rest::binary>>, 0, acc), do: {:ok, acc, rest}
-  defp find_closing_brace(<<"}", rest::binary>>, depth, acc), do: find_closing_brace(rest, depth - 1, acc <> "}")
-  defp find_closing_brace(<<"{", rest::binary>>, depth, acc), do: find_closing_brace(rest, depth + 1, acc <> "{")
-  defp find_closing_brace(<<char::utf8, rest::binary>>, depth, acc), do: find_closing_brace(rest, depth, acc <> <<char::utf8>>)
+
+  defp find_closing_brace(<<"}", rest::binary>>, depth, acc),
+    do: find_closing_brace(rest, depth - 1, acc <> "}")
+
+  defp find_closing_brace(<<"{", rest::binary>>, depth, acc),
+    do: find_closing_brace(rest, depth + 1, acc <> "{")
+
+  defp find_closing_brace(<<char::utf8, rest::binary>>, depth, acc),
+    do: find_closing_brace(rest, depth, acc <> <<char::utf8>>)
+
   defp find_closing_brace(<<>>, _depth, _acc), do: {:error, :unclosed}
 
   defp infer_call_name(tokens, offset) do
@@ -1668,7 +1871,10 @@ defmodule BeamLang.LSP.Server do
 
   defp find_call_name([]), do: nil
 
-  defp find_call_name([%BeamLang.Token{type: :identifier, value: name}, %BeamLang.Token{type: :lparen} | _]) do
+  defp find_call_name([
+         %BeamLang.Token{type: :identifier, value: name},
+         %BeamLang.Token{type: :lparen} | _
+       ]) do
     name
   end
 
@@ -1751,32 +1957,74 @@ defmodule BeamLang.LSP.Server do
 
   defp collect_block_locals(nil, _func_span, _func_table, env), do: {[], env}
 
-  defp collect_block_locals({:block, %{stmts: stmts, span: block_span}}, func_span, func_table, env) do
+  defp collect_block_locals(
+         {:block, %{stmts: stmts, span: block_span}},
+         func_span,
+         func_table,
+         env
+       ) do
     Enum.reduce(stmts, {[], env}, fn stmt, {locals, acc_env} ->
-      {new_locals, next_env} = collect_stmt_locals(stmt, func_span, block_span, func_table, acc_env)
+      {new_locals, next_env} =
+        collect_stmt_locals(stmt, func_span, block_span, func_table, acc_env)
+
       {locals ++ new_locals, next_env}
     end)
   end
 
-  defp collect_stmt_locals({:let, %{name: name, type: type, expr: expr, span: span} = info}, func_span, scope_span, func_table, env) do
+  defp collect_stmt_locals(
+         {:let, %{name: name, type: type, expr: expr, span: span} = info},
+         func_span,
+         scope_span,
+         func_table,
+         env
+       ) do
     inferred =
       case Map.get(info, :inferred_type) do
         nil -> type || infer_expr_type_with_env(expr, func_table, env)
         :any -> type || infer_expr_type_with_env(expr, func_table, env) || :any
         other -> other
       end
-    entry = %{name: name, type: inferred, span: span, func_span: func_span, scope_span: scope_span, kind: :let}
+
+    entry = %{
+      name: name,
+      type: inferred,
+      span: span,
+      func_span: func_span,
+      scope_span: scope_span,
+      kind: :let
+    }
+
     expr_locals = collect_expr_locals(expr, func_span, scope_span, func_table, env)
     {expr_locals ++ [entry], Map.put(env, name, inferred)}
   end
 
-  defp collect_stmt_locals({:for, %{name: name, body: body, span: span}}, func_span, _scope_span, func_table, env) do
-    entry = %{name: name, type: nil, span: span, func_span: func_span, scope_span: span, kind: :for}
+  defp collect_stmt_locals(
+         {:for, %{name: name, body: body, span: span}},
+         func_span,
+         _scope_span,
+         func_table,
+         env
+       ) do
+    entry = %{
+      name: name,
+      type: nil,
+      span: span,
+      func_span: func_span,
+      scope_span: span,
+      kind: :for
+    }
+
     {body_locals, _} = collect_block_locals(body, func_span, func_table, Map.put(env, name, nil))
     {[entry | body_locals], env}
   end
 
-  defp collect_stmt_locals({:if_stmt, %{then_block: then_block, else_branch: else_branch}}, func_span, _scope_span, func_table, env) do
+  defp collect_stmt_locals(
+         {:if_stmt, %{then_block: then_block, else_branch: else_branch}},
+         func_span,
+         _scope_span,
+         func_table,
+         env
+       ) do
     {then_locals, _} = collect_block_locals(then_block, func_span, func_table, env)
     else_locals = collect_else_locals(else_branch, func_span, func_table, env)
     {then_locals ++ else_locals, env}
@@ -1792,7 +2040,13 @@ defmodule BeamLang.LSP.Server do
     {body_locals, env}
   end
 
-  defp collect_stmt_locals({:guard, %{else_block: block}}, func_span, _scope_span, func_table, env) do
+  defp collect_stmt_locals(
+         {:guard, %{else_block: block}},
+         func_span,
+         _scope_span,
+         func_table,
+         env
+       ) do
     {body_locals, _} = collect_block_locals(block, func_span, func_table, env)
     {body_locals, env}
   end
@@ -1809,26 +2063,35 @@ defmodule BeamLang.LSP.Server do
     {collect_expr_locals(expr, func_span, scope_span, func_table, env), env}
   end
 
-  defp collect_stmt_locals({:let_destruct, %{pattern: pattern, expr: expr, span: span}}, func_span, scope_span, func_table, env) do
+  defp collect_stmt_locals(
+         {:let_destruct, %{pattern: pattern, expr: expr, span: span}},
+         func_span,
+         scope_span,
+         func_table,
+         env
+       ) do
     # Infer type of the expression (should be a tuple)
     expr_type = infer_expr_type_with_env(expr, func_table, env)
 
     # Extract element types if it's a tuple
-    element_types = case expr_type do
-      {:tuple, types} -> types
-      _ -> []
-    end
+    element_types =
+      case expr_type do
+        {:tuple, types} -> types
+        _ -> []
+      end
 
     # Collect bindings from the pattern with their types
-    bindings = destruct_pattern_bindings_with_types(pattern, element_types, span, func_span, scope_span)
+    bindings =
+      destruct_pattern_bindings_with_types(pattern, element_types, span, func_span, scope_span)
 
     # Collect locals from the expression
     expr_locals = collect_expr_locals(expr, func_span, scope_span, func_table, env)
 
     # Update environment with new bindings
-    new_env = Enum.reduce(bindings, env, fn %{name: name, type: type}, acc ->
-      Map.put(acc, name, type)
-    end)
+    new_env =
+      Enum.reduce(bindings, env, fn %{name: name, type: type}, acc ->
+        Map.put(acc, name, type)
+      end)
 
     {expr_locals ++ bindings, new_env}
   end
@@ -1836,27 +2099,59 @@ defmodule BeamLang.LSP.Server do
   defp collect_stmt_locals(_stmt, _func_span, _scope_span, _func_table, env), do: {[], env}
 
   # Helper to extract bindings with types from destructuring patterns
-  defp destruct_pattern_bindings_with_types({:tuple_destruct, %{elements: elements}}, element_types, _span, func_span, scope_span) do
+  defp destruct_pattern_bindings_with_types(
+         {:tuple_destruct, %{elements: elements}},
+         element_types,
+         _span,
+         func_span,
+         scope_span
+       ) do
     elements
     |> Enum.with_index()
     |> Enum.map(fn {elem, idx} ->
-      {name, elem_span} = case elem do
-        %{name: n, span: s} -> {n, s}
-        n when is_binary(n) -> {n, nil}
-      end
+      {name, elem_span} =
+        case elem do
+          %{name: n, span: s} -> {n, s}
+          n when is_binary(n) -> {n, nil}
+        end
+
       type = Enum.at(element_types, idx)
-      %{name: name, type: type, span: elem_span, func_span: func_span, scope_span: scope_span, kind: :let}
+
+      %{
+        name: name,
+        type: type,
+        span: elem_span,
+        func_span: func_span,
+        scope_span: scope_span,
+        kind: :let
+      }
     end)
   end
 
-  defp destruct_pattern_bindings_with_types({:struct_destruct, %{fields: fields, span: pattern_span}}, _element_types, _span, func_span, scope_span) do
+  defp destruct_pattern_bindings_with_types(
+         {:struct_destruct, %{fields: fields, span: pattern_span}},
+         _element_types,
+         _span,
+         func_span,
+         scope_span
+       ) do
     Enum.map(fields, fn field ->
-      name = case field do
-        %{binding: nil, name: n} -> n
-        %{binding: b} -> b
-      end
+      name =
+        case field do
+          %{binding: nil, name: n} -> n
+          %{binding: b} -> b
+        end
+
       field_span = Map.get(field, :span, pattern_span)
-      %{name: name, type: :any, span: field_span, func_span: func_span, scope_span: scope_span, kind: :let}
+
+      %{
+        name: name,
+        type: :any,
+        span: field_span,
+        func_span: func_span,
+        scope_span: scope_span,
+        kind: :let
+      }
     end)
   end
 
@@ -1876,18 +2171,36 @@ defmodule BeamLang.LSP.Server do
 
   defp collect_expr_locals(nil, _func_span, _scope_span, _func_table, _env), do: []
 
-  defp collect_expr_locals({:block_expr, %{block: block}}, func_span, _scope_span, func_table, env) do
+  defp collect_expr_locals(
+         {:block_expr, %{block: block}},
+         func_span,
+         _scope_span,
+         func_table,
+         env
+       ) do
     {locals, _} = collect_block_locals(block, func_span, func_table, env)
     locals
   end
 
-  defp collect_expr_locals({:if_expr, %{then_block: then_block, else_branch: else_branch}}, func_span, _scope_span, func_table, env) do
+  defp collect_expr_locals(
+         {:if_expr, %{then_block: then_block, else_branch: else_branch}},
+         func_span,
+         _scope_span,
+         func_table,
+         env
+       ) do
     {then_locals, _} = collect_block_locals(then_block, func_span, func_table, env)
     else_locals = collect_else_locals(else_branch, func_span, func_table, env)
     then_locals ++ else_locals
   end
 
-  defp collect_expr_locals({:match, %{expr: match_expr, cases: cases}}, func_span, _scope_span, func_table, env) do
+  defp collect_expr_locals(
+         {:match, %{expr: match_expr, cases: cases}},
+         func_span,
+         _scope_span,
+         func_table,
+         env
+       ) do
     match_type =
       match_expr
       |> infer_expr_type_with_env(func_table, env)
@@ -1898,7 +2211,14 @@ defmodule BeamLang.LSP.Server do
         pattern
         |> pattern_bindings_with_type(match_type)
         |> Enum.map(fn {name, span, type} ->
-          %{name: name, type: type, span: span, func_span: func_span, scope_span: case_span, kind: :let}
+          %{
+            name: name,
+            type: type,
+            span: span,
+            func_span: func_span,
+            scope_span: case_span,
+            kind: :let
+          }
         end)
 
       pattern_locals ++ collect_expr_locals(body, func_span, case_span, func_table, env)
@@ -1909,43 +2229,72 @@ defmodule BeamLang.LSP.Server do
     Enum.flat_map(args, &collect_expr_locals(&1, func_span, scope_span, func_table, env))
   end
 
-  defp collect_expr_locals({:method_call, %{target: target, args: args}}, func_span, scope_span, func_table, env) do
+  defp collect_expr_locals(
+         {:method_call, %{target: target, args: args}},
+         func_span,
+         scope_span,
+         func_table,
+         env
+       ) do
     collect_expr_locals(target, func_span, scope_span, func_table, env) ++
       Enum.flat_map(args, &collect_expr_locals(&1, func_span, scope_span, func_table, env))
   end
 
-  defp collect_expr_locals({:binary, %{left: left, right: right}}, func_span, scope_span, func_table, env) do
+  defp collect_expr_locals(
+         {:binary, %{left: left, right: right}},
+         func_span,
+         scope_span,
+         func_table,
+         env
+       ) do
     collect_expr_locals(left, func_span, scope_span, func_table, env) ++
       collect_expr_locals(right, func_span, scope_span, func_table, env)
   end
 
   defp collect_expr_locals({:struct, %{fields: fields}}, func_span, scope_span, func_table, env) do
-    Enum.flat_map(fields, fn %{expr: expr} -> collect_expr_locals(expr, func_span, scope_span, func_table, env) end)
+    Enum.flat_map(fields, fn %{expr: expr} ->
+      collect_expr_locals(expr, func_span, scope_span, func_table, env)
+    end)
   end
 
   defp collect_expr_locals(_expr, _func_span, _scope_span, _func_table, _env), do: []
 
   # Version with type table for function parameter patterns (can look up field types)
-  defp pattern_bindings_with_type({:pat_identifier, %{name: name, span: span}}, type, _type_table),
-    do: [{name, span, type}]
+  defp pattern_bindings_with_type(
+         {:pat_identifier, %{name: name, span: span}},
+         type,
+         _type_table
+       ),
+       do: [{name, span, type}]
 
-  defp pattern_bindings_with_type({:struct_pattern, %{name: type_name, fields: fields}}, _type, type_table) do
+  defp pattern_bindings_with_type(
+         {:struct_pattern, %{name: type_name, fields: fields}},
+         _type,
+         type_table
+       ) do
     Enum.flat_map(fields, fn %{name: field_name, pattern: pat} ->
       field_type = lookup_field_type_in_table(type_table, type_name, field_name)
       pattern_bindings_with_type(pat, field_type, type_table)
     end)
   end
 
-  defp pattern_bindings_with_type({:tuple_pattern, %{elements: elements}}, {:tuple, element_types}, type_table) do
+  defp pattern_bindings_with_type(
+         {:tuple_pattern, %{elements: elements}},
+         {:tuple, element_types},
+         type_table
+       ) do
     Enum.zip(elements, element_types)
-    |> Enum.flat_map(fn {pat, elem_type} -> pattern_bindings_with_type(pat, elem_type, type_table) end)
+    |> Enum.flat_map(fn {pat, elem_type} ->
+      pattern_bindings_with_type(pat, elem_type, type_table)
+    end)
   end
 
   defp pattern_bindings_with_type({:tuple_pattern, %{elements: elements}}, _type, type_table) do
     Enum.flat_map(elements, fn pat -> pattern_bindings_with_type(pat, nil, type_table) end)
   end
 
-  defp pattern_bindings_with_type(pattern, type, _type_table), do: pattern_bindings_with_type(pattern, type)
+  defp pattern_bindings_with_type(pattern, type, _type_table),
+    do: pattern_bindings_with_type(pattern, type)
 
   # Look up field type from type table
   defp lookup_field_type_in_table(type_table, type_name, field_name) do
@@ -1955,7 +2304,9 @@ defmodule BeamLang.LSP.Server do
           %{type: type} -> type
           _ -> nil
         end
-      _ -> nil
+
+      _ ->
+        nil
     end
   end
 
@@ -1969,23 +2320,34 @@ defmodule BeamLang.LSP.Server do
   defp pattern_bindings_with_type({:opt_some_pat, %{name: name, span: span}}, _),
     do: [{name, span, nil}]
 
-  defp pattern_bindings_with_type({:res_ok_pat, %{name: name, span: span}}, {:result, ok_type, _err_type}),
-    do: [{name, span, ok_type}]
+  defp pattern_bindings_with_type(
+         {:res_ok_pat, %{name: name, span: span}},
+         {:result, ok_type, _err_type}
+       ),
+       do: [{name, span, ok_type}]
 
   defp pattern_bindings_with_type({:res_ok_pat, %{name: name, span: span}}, _),
     do: [{name, span, nil}]
 
-  defp pattern_bindings_with_type({:res_err_pat, %{name: name, span: span}}, {:result, _ok_type, err_type}),
-    do: [{name, span, err_type}]
+  defp pattern_bindings_with_type(
+         {:res_err_pat, %{name: name, span: span}},
+         {:result, _ok_type, err_type}
+       ),
+       do: [{name, span, err_type}]
 
   defp pattern_bindings_with_type({:res_err_pat, %{name: name, span: span}}, _),
     do: [{name, span, nil}]
 
   defp pattern_bindings_with_type({:struct_pattern, %{name: type_name, fields: fields}}, _type) do
-    Enum.flat_map(fields, fn %{pattern: pat} -> pattern_bindings_with_type(pat, {:named, type_name}) end)
+    Enum.flat_map(fields, fn %{pattern: pat} ->
+      pattern_bindings_with_type(pat, {:named, type_name})
+    end)
   end
 
-  defp pattern_bindings_with_type({:tuple_pattern, %{elements: elements}}, {:tuple, element_types}) do
+  defp pattern_bindings_with_type(
+         {:tuple_pattern, %{elements: elements}},
+         {:tuple, element_types}
+       ) do
     Enum.zip(elements, element_types)
     |> Enum.flat_map(fn {pat, elem_type} -> pattern_bindings_with_type(pat, elem_type) end)
   end
@@ -2010,6 +2372,7 @@ defmodule BeamLang.LSP.Server do
   defp infer_expr_type({:char, _}), do: :char
   defp infer_expr_type({:bool, _}), do: :bool
   defp infer_expr_type({:struct, %{type: type}}) when not is_nil(type), do: type
+
   defp infer_expr_type({:opt_some, %{expr: expr}}) do
     case infer_expr_type(expr) do
       nil -> nil
@@ -2045,9 +2408,11 @@ defmodule BeamLang.LSP.Server do
 
   # Tuple literal
   defp infer_expr_type({:tuple, %{elements: elements}}) do
-    types = Enum.map(elements, fn elem ->
-      infer_expr_type(elem) || :any
-    end)
+    types =
+      Enum.map(elements, fn elem ->
+        infer_expr_type(elem) || :any
+      end)
+
     {:tuple, types}
   end
 
@@ -2071,14 +2436,19 @@ defmodule BeamLang.LSP.Server do
   defp infer_expr_type({:unary, %{op: :minus, expr: expr}}), do: infer_expr_type(expr)
 
   # Binary expressions - infer type based on operator
-  defp infer_expr_type({:binary, %{op: op}}) when op in [:eq, :neq, :lt, :lte, :gt, :gte, :and, :or], do: :bool
-  defp infer_expr_type({:binary, %{op: op, left: left}}) when op in [:add, :sub, :mul, :div, :mod] do
+  defp infer_expr_type({:binary, %{op: op}})
+       when op in [:eq, :neq, :lt, :lte, :gt, :gte, :and, :or], do: :bool
+
+  defp infer_expr_type({:binary, %{op: op, left: left}})
+       when op in [:add, :sub, :mul, :div, :mod] do
     infer_expr_type(left) || :number
   end
+
   defp infer_expr_type({:binary, %{op: :concat}}), do: :String
 
   # Index access on list
-  defp infer_expr_type({:index, _}), do: nil  # Would need type context
+  # Would need type context
+  defp infer_expr_type({:index, _}), do: nil
 
   # Interpolated string
   defp infer_expr_type({:interpolated_string, _}), do: :String
@@ -2102,9 +2472,14 @@ defmodule BeamLang.LSP.Server do
   end
 
   # Field access on struct
-  defp infer_expr_type_with_env({:field_access, %{target: target, field: _field}}, func_table, env) do
+  defp infer_expr_type_with_env(
+         {:field_access, %{target: target, field: _field}},
+         func_table,
+         env
+       ) do
     case infer_expr_type_with_env(target, func_table, env) do
-      {:named, _type_name} -> nil  # Would need type definitions to look up field type
+      # Would need type definitions to look up field type
+      {:named, _type_name} -> nil
       _ -> nil
     end
   end
@@ -2136,7 +2511,8 @@ defmodule BeamLang.LSP.Server do
       "get" -> {:optional, elem_type}
       "length" -> :number
       "is_empty" -> :bool
-      "map" -> {:generic, {:named, "List"}, [:any]}  # Would need lambda type inference
+      # Would need lambda type inference
+      "map" -> {:generic, {:named, "List"}, [:any]}
       "filter" -> {:generic, {:named, "List"}, [elem_type]}
       "push" -> {:generic, {:named, "List"}, [elem_type]}
       "pop" -> {:optional, elem_type}
@@ -2218,6 +2594,7 @@ defmodule BeamLang.LSP.Server do
   defp infer_method_return_type(_, _), do: nil
 
   defp span_contains?(nil, _offset), do: false
+
   defp span_contains?(%BeamLang.Span{start: start_pos, end: end_pos}, offset) do
     offset >= start_pos and offset <= end_pos
   end
@@ -2232,8 +2609,12 @@ defmodule BeamLang.LSP.Server do
   defp range_for_span_in_doc(doc, %BeamLang.Span{file_id: file_id} = span) do
     source =
       cond do
-        file_id == doc.path -> doc.text
-        file_id == "<source>" -> doc.text
+        file_id == doc.path ->
+          doc.text
+
+        file_id == "<source>" ->
+          doc.text
+
         true ->
           case File.read(file_id) do
             {:ok, contents} -> contents
@@ -2304,6 +2685,7 @@ defmodule BeamLang.LSP.Server do
   end
 
   defp latest_change_text([]), do: ""
+
   defp latest_change_text(changes) when is_list(changes) do
     changes
     |> List.last()

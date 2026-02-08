@@ -13,35 +13,39 @@ defmodule BeamLang.LSP.E2ETest do
 
   defp start_server do
     mix_path = System.find_executable("mix")
-    port = Port.open({:spawn_executable, mix_path}, [
-      :binary,
-      :exit_status,
-      :use_stdio,
-      args: ["beamlang", "--lsp"],
-      cd: File.cwd!(),
-      env: [{~c"BEAMLANG_LSP_DEBUG", ~c"0"}]
-    ])
+
+    port =
+      Port.open({:spawn_executable, mix_path}, [
+        :binary,
+        :exit_status,
+        :use_stdio,
+        args: ["beamlang", "--lsp"],
+        cd: File.cwd!(),
+        env: [{~c"BEAMLANG_LSP_DEBUG", ~c"0"}]
+      ])
 
     port
   end
 
   defp send_request(port, id, method, params) do
-    msg = Jason.encode!(%{
-      "jsonrpc" => "2.0",
-      "id" => id,
-      "method" => method,
-      "params" => params
-    })
+    msg =
+      Jason.encode!(%{
+        "jsonrpc" => "2.0",
+        "id" => id,
+        "method" => method,
+        "params" => params
+      })
 
     send_raw(port, msg)
   end
 
   defp send_notification(port, method, params) do
-    msg = Jason.encode!(%{
-      "jsonrpc" => "2.0",
-      "method" => method,
-      "params" => params
-    })
+    msg =
+      Jason.encode!(%{
+        "jsonrpc" => "2.0",
+        "method" => method,
+        "params" => params
+      })
 
     send_raw(port, msg)
   end
@@ -60,6 +64,7 @@ defmodule BeamLang.LSP.E2ETest do
     receive do
       {^port, {:data, data}} ->
         buffer = buffer <> data
+
         case parse_lsp_message(buffer) do
           {:ok, msg, rest} ->
             if Map.get(msg, "id") == expected_id do
@@ -206,7 +211,8 @@ defmodule BeamLang.LSP.E2ETest do
     })
 
     {resp, _} = recv_response_by_id(port, 2)
-    assert resp["result"] != nil or resp["result"] == nil  # Just ensure no crash
+    # Just ensure no crash
+    assert resp["result"] != nil or resp["result"] == nil
 
     stop_server(port)
   end
@@ -279,8 +285,9 @@ defmodule BeamLang.LSP.E2ETest do
 
     if length(labels) > 0 do
       assert Enum.all?(labels, fn label ->
-        String.starts_with?(String.downcase(label), "st")
-      end), "Expected all labels to start with 'st', got: #{inspect(labels)}"
+               String.starts_with?(String.downcase(label), "st")
+             end),
+             "Expected all labels to start with 'st', got: #{inspect(labels)}"
     end
 
     stop_server(port)
@@ -537,6 +544,32 @@ defmodule BeamLang.LSP.E2ETest do
 
     assert diagnostics == []
     assert resp["result"] != nil
+
+    stop_server(port)
+  end
+
+  test "hover on method filters by receiver type" do
+    port = start_server()
+    initialize(port)
+
+    path = Path.expand("examples/modules/stdlib_methods.bl")
+    uri = "file://" <> path
+    source = File.read!(path)
+    open_document(port, uri, source)
+
+    # Hover `length` in `st->length()`
+    send_request(port, 20, "textDocument/hover", %{
+      "textDocument" => %{"uri" => uri},
+      "position" => %{"line" => 2, "character" => 21}
+    })
+
+    {resp, _} = recv_response_by_id(port, 20)
+    assert resp["result"] != nil
+
+    value = get_in(resp, ["result", "contents", "value"]) || ""
+    assert value =~ "String::length"
+    refute value =~ "Range::length"
+    refute value =~ "List::length"
 
     stop_server(port)
   end
