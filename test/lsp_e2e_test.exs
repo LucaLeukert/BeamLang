@@ -481,9 +481,15 @@ defmodule BeamLang.LSP.E2ETest do
     open_document(port, uri, source)
 
     # Hover inside `opts` in: `case!ok opts -> {`
+    lines = String.split(source, "\n", trim: false)
+    hover_line = Enum.find_index(lines, &String.contains?(&1, "case!ok opts -> {"))
+    assert is_integer(hover_line)
+    line_text = Enum.at(lines, hover_line)
+    {hover_character, _len} = :binary.match(line_text, "opts")
+
     send_request(port, 15, "textDocument/hover", %{
       "textDocument" => %{"uri" => uri},
-      "position" => %{"line" => 30, "character" => 17}
+      "position" => %{"line" => hover_line, "character" => hover_character}
     })
 
     {resp, _} = recv_response_by_id(port, 15)

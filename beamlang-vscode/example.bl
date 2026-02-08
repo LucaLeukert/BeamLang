@@ -5,10 +5,10 @@ import math.{add, subtract};
 import utils.*;
 import string as str;
 
-/* 
+/** 
  * Block comment
  * Multi-line
- */
+ **/
 
 // Type definitions with generics
 type Pair<T> {
