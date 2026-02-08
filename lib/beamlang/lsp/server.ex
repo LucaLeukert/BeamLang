@@ -1,11 +1,13 @@
 defmodule BeamLang.LSP.Server do
   @moduledoc false
 
-  @behaviour ElixirLsp.Server.Handler
+  use ElixirLsp.Router
 
   alias BeamLang.LSP.Protocol
-  alias ElixirLsp.Message
-  alias ElixirLsp.Server, as: LspServer
+  alias ElixirLsp.{HandlerContext, Message, Server, State, Types}
+
+  @request_timeout 30_000
+  @middlewares [ElixirLsp.Middleware.Recovery]
 
   @type document :: %{
           uri: binary(),
@@ -16,46 +18,32 @@ defmodule BeamLang.LSP.Server do
           index: map()
         }
 
-  @spec start() :: :ok
+  capabilities do
+    text_document_sync(open_close: true, change: 1)
+    hover_provider(true)
+    definition_provider(true)
+    completion_provider(resolve_provider: false)
+    code_action_provider(true)
+    document_symbol_provider(true)
+    workspace_symbol_provider(true)
+    signature_help_provider(trigger_characters: ["(", ","])
+    rename_provider(prepare_provider: true)
+    references_provider(true)
+    document_formatting_provider(true)
+  end
+
+  @spec start() :: no_return()
   def start do
     {:ok, pid} =
-      LspServer.start_link(
+      Server.start_link(
         handler: __MODULE__,
+        handler_arg: %{documents: %{}, lsp_state: State.new()},
+        middlewares: @middlewares,
+        request_timeout: @request_timeout,
         send: &IO.binwrite(:stdio, &1)
       )
 
     loop_stdio(pid)
-  end
-
-  @impl true
-  def init(_arg), do: {:ok, %{documents: %{}}}
-
-  @impl true
-  def handle_request(method, params, _id, state) do
-    try do
-      do_handle_request(method, params, state)
-    rescue
-      e ->
-        BeamLang.LSP.Debug.log(
-          "handle_request crashed: #{Exception.message(e)}\n#{Exception.format_stacktrace(__STACKTRACE__)}"
-        )
-
-        {:error, -32603, "Internal error: #{Exception.message(e)}", nil, state}
-    end
-  end
-
-  @impl true
-  def handle_notification(method, params, state) do
-    try do
-      {:ok, do_handle_notification(method, params, state)}
-    rescue
-      e ->
-        BeamLang.LSP.Debug.log(
-          "handle_notification crashed: #{Exception.message(e)}\n#{Exception.format_stacktrace(__STACKTRACE__)}"
-        )
-
-        {:ok, state}
-    end
   end
 
   defp loop_stdio(pid) do
@@ -68,14 +56,14 @@ defmodule BeamLang.LSP.Server do
 
       {:ok, payload} ->
         payload
-        |> ensure_jsonrpc_version()
+        |> Map.put_new("jsonrpc", "2.0")
         |> Message.from_map()
         |> case do
           {:ok, message} ->
             message
             |> ElixirLsp.encode()
             |> IO.iodata_to_binary()
-            |> then(&LspServer.feed(pid, &1))
+            |> then(&Server.feed(pid, &1))
 
           {:error, _reason} ->
             :ok
@@ -85,33 +73,25 @@ defmodule BeamLang.LSP.Server do
     end
   end
 
-  defp ensure_jsonrpc_version(map) when is_map(map), do: Map.put_new(map, "jsonrpc", "2.0")
+  @impl true
+  def init(nil), do: {:ok, %{documents: %{}, lsp_state: State.new()}}
+  def init(%{documents: _documents, lsp_state: %State{}} = state), do: {:ok, state}
+  def init(_arg), do: {:ok, %{documents: %{}, lsp_state: State.new()}}
 
-  defp do_handle_request(method, _params, state) when method in [:initialize, "initialize"] do
-    {:reply,
-     %{
-       "capabilities" => %{
-         "textDocumentSync" => %{"openClose" => true, "change" => 1},
-         "hoverProvider" => true,
-         "definitionProvider" => true,
-         "completionProvider" => %{"resolveProvider" => false},
-         "codeActionProvider" => true,
-         "documentSymbolProvider" => true,
-         "workspaceSymbolProvider" => true,
-         "signatureHelpProvider" => %{"triggerCharacters" => ["(", ","]},
-         "renameProvider" => %{"prepareProvider" => true},
-         "referencesProvider" => true,
-         "documentFormattingProvider" => true
-       }
-     }, state}
+  on_request :initialize do
+    _ = ctx
+    workspace_folders = Map.get(params || %{}, "workspaceFolders", [])
+    next_lsp_state = State.set_workspace_folders(state.lsp_state, workspace_folders)
+    {:reply, %{"capabilities" => server_capabilities()}, %{state | lsp_state: next_lsp_state}}
   end
 
-  defp do_handle_request(method, _params, state) when method in [:shutdown, "shutdown"] do
-    {:reply, nil, state}
+  on_request :shutdown do
+    _ = params
+    _ = state
+    HandlerContext.reply(ctx, nil)
   end
 
-  defp do_handle_request(method, params, state)
-       when method in [:text_document_hover, "textDocument/hover"] do
+  on_request :text_document_hover do
     hover =
       with %{"textDocument" => %{"uri" => uri}, "position" => position} <- params,
            doc when not is_nil(doc) <- Map.get(state.documents, uri) do
@@ -120,11 +100,10 @@ defmodule BeamLang.LSP.Server do
         _ -> nil
       end
 
-    {:reply, hover, state}
+    HandlerContext.reply(ctx, hover)
   end
 
-  defp do_handle_request(method, params, state)
-       when method in [:text_document_definition, "textDocument/definition"] do
+  on_request :text_document_definition do
     definition =
       with %{"textDocument" => %{"uri" => uri}, "position" => position} <- params,
            doc when not is_nil(doc) <- Map.get(state.documents, uri) do
@@ -133,11 +112,10 @@ defmodule BeamLang.LSP.Server do
         _ -> []
       end
 
-    {:reply, definition, state}
+    HandlerContext.reply(ctx, definition)
   end
 
-  defp do_handle_request(method, params, state)
-       when method in [:text_document_completion, "textDocument/completion"] do
+  on_request :text_document_completion do
     completion =
       with %{"textDocument" => %{"uri" => uri}, "position" => position} <- params,
            doc when not is_nil(doc) <- Map.get(state.documents, uri) do
@@ -146,11 +124,14 @@ defmodule BeamLang.LSP.Server do
         _ -> %{"isIncomplete" => false, "items" => []}
       end
 
-    {:reply, completion, state}
+    if HandlerContext.canceled?(ctx) do
+      HandlerContext.error(ctx, -32800, "Request canceled")
+    else
+      HandlerContext.reply(ctx, completion)
+    end
   end
 
-  defp do_handle_request(method, params, state)
-       when method in [:text_document_document_symbol, "textDocument/documentSymbol"] do
+  on_request :text_document_document_symbol do
     symbols =
       with %{"textDocument" => %{"uri" => uri}} <- params,
            doc when not is_nil(doc) <- Map.get(state.documents, uri) do
@@ -159,18 +140,16 @@ defmodule BeamLang.LSP.Server do
         _ -> []
       end
 
-    {:reply, symbols, state}
+    HandlerContext.reply(ctx, symbols)
   end
 
-  defp do_handle_request(method, params, state)
-       when method in [:workspace_symbol, "workspace/symbol"] do
+  on_request :workspace_symbol do
     %{"query" => query} = params
     symbols = workspace_symbols_for(state, query || "")
-    {:reply, symbols, state}
+    HandlerContext.reply(ctx, symbols)
   end
 
-  defp do_handle_request(method, params, state)
-       when method in [:text_document_signature_help, "textDocument/signatureHelp"] do
+  on_request :text_document_signature_help do
     signature =
       with %{"textDocument" => %{"uri" => uri}, "position" => position} <- params,
            doc when not is_nil(doc) <- Map.get(state.documents, uri) do
@@ -179,11 +158,10 @@ defmodule BeamLang.LSP.Server do
         _ -> nil
       end
 
-    {:reply, signature, state}
+    HandlerContext.reply(ctx, signature)
   end
 
-  defp do_handle_request(method, params, state)
-       when method in [:text_document_prepare_rename, "textDocument/prepareRename"] do
+  on_request :text_document_prepare_rename do
     result =
       with %{"textDocument" => %{"uri" => uri}, "position" => position} <- params,
            doc when not is_nil(doc) <- Map.get(state.documents, uri) do
@@ -192,11 +170,10 @@ defmodule BeamLang.LSP.Server do
         _ -> nil
       end
 
-    {:reply, result, state}
+    HandlerContext.reply(ctx, result)
   end
 
-  defp do_handle_request(method, params, state)
-       when method in [:text_document_rename, "textDocument/rename"] do
+  on_request :text_document_rename do
     result =
       with %{"textDocument" => %{"uri" => uri}, "position" => position, "newName" => new_name} <-
              params,
@@ -206,11 +183,10 @@ defmodule BeamLang.LSP.Server do
         _ -> nil
       end
 
-    {:reply, result, state}
+    HandlerContext.reply(ctx, result)
   end
 
-  defp do_handle_request(method, params, state)
-       when method in [:text_document_references, "textDocument/references"] do
+  on_request :text_document_references do
     result =
       with %{"textDocument" => %{"uri" => uri}, "position" => position} <- params,
            doc when not is_nil(doc) <- Map.get(state.documents, uri) do
@@ -219,11 +195,10 @@ defmodule BeamLang.LSP.Server do
         _ -> []
       end
 
-    {:reply, result, state}
+    HandlerContext.reply(ctx, result)
   end
 
-  defp do_handle_request(method, params, state)
-       when method in [:text_document_formatting, "textDocument/formatting"] do
+  on_request :text_document_formatting do
     result =
       with %{"textDocument" => %{"uri" => uri}} <- params,
            doc when not is_nil(doc) <- Map.get(state.documents, uri) do
@@ -232,11 +207,10 @@ defmodule BeamLang.LSP.Server do
         _ -> nil
       end
 
-    {:reply, result, state}
+    HandlerContext.reply(ctx, result)
   end
 
-  defp do_handle_request(method, params, state)
-       when method in [:text_document_code_action, "textDocument/codeAction"] do
+  on_request :text_document_code_action do
     result =
       with %{"textDocument" => %{"uri" => uri}} <- params,
            doc when not is_nil(doc) <- Map.get(state.documents, uri) do
@@ -245,53 +219,74 @@ defmodule BeamLang.LSP.Server do
         _ -> []
       end
 
-    {:reply, result, state}
+    HandlerContext.reply(ctx, result)
   end
 
-  defp do_handle_request(_method, _params, state) do
-    {:error, -32601, "Method not found", nil, state}
+  on_notification :initialized do
+    _ = params
+    _ = ctx
+    {:ok, state}
   end
 
-  defp do_handle_notification(method, _params, state)
-       when method in [:initialized, "initialized"] do
-    state
+  on_notification :workspace_did_change_workspace_folders do
+    _ = ctx
+
+    next_lsp_state =
+      State.apply_notification(state.lsp_state, :workspace_did_change_workspace_folders, params)
+
+    {:ok, %{state | lsp_state: next_lsp_state}}
   end
 
-  defp do_handle_notification(method, params, state)
-       when method in [:text_document_did_open, "textDocument/didOpen"] do
-    %{"textDocument" => %{"uri" => uri, "text" => text, "version" => _version}} = params
-    {doc, diagnostics} = build_document(uri, text)
-    publish_diagnostics(doc, diagnostics)
-    put_in(state[:documents][uri], doc)
-  end
-
-  defp do_handle_notification(method, params, state)
-       when method in [:text_document_did_change, "textDocument/didChange"] do
-    %{"textDocument" => %{"uri" => uri}, "contentChanges" => changes} = params
-    text = latest_change_text(changes)
-    {doc, diagnostics} = build_document(uri, text)
-    publish_diagnostics(doc, diagnostics)
-    put_in(state[:documents][uri], doc)
-  end
-
-  defp do_handle_notification(method, params, state)
-       when method in [:text_document_did_close, "textDocument/didClose"] do
+  on_notification :text_document_did_open do
+    next_lsp_state = State.apply_notification(state.lsp_state, :text_document_did_open, params)
     %{"textDocument" => %{"uri" => uri}} = params
 
-    LspServer.send_notification(self(), :text_document_publish_diagnostics, %{
+    case State.get_document(next_lsp_state, uri) do
+      %{text: text} ->
+        {doc, diagnostics} = build_document(uri, text)
+        publish_diagnostics(ctx, doc, diagnostics)
+
+        {:ok, %{state | lsp_state: next_lsp_state, documents: Map.put(state.documents, uri, doc)}}
+
+      _ ->
+        {:ok, %{state | lsp_state: next_lsp_state}}
+    end
+  end
+
+  on_notification :text_document_did_change do
+    next_lsp_state = State.apply_notification(state.lsp_state, :text_document_did_change, params)
+    %{"textDocument" => %{"uri" => uri}} = params
+
+    case State.get_document(next_lsp_state, uri) do
+      %{text: text} ->
+        {doc, diagnostics} = build_document(uri, text)
+        publish_diagnostics(ctx, doc, diagnostics)
+
+        {:ok, %{state | lsp_state: next_lsp_state, documents: Map.put(state.documents, uri, doc)}}
+
+      _ ->
+        {:ok, %{state | lsp_state: next_lsp_state}}
+    end
+  end
+
+  on_notification :text_document_did_close do
+    next_lsp_state = State.apply_notification(state.lsp_state, :text_document_did_close, params)
+    %{"textDocument" => %{"uri" => uri}} = params
+
+    HandlerContext.notify(ctx, :text_document_publish_diagnostics, %{
       "uri" => uri,
       "diagnostics" => []
     })
 
-    update_in(state[:documents], &Map.delete(&1, uri))
+    {:ok, %{state | lsp_state: next_lsp_state, documents: Map.delete(state.documents, uri)}}
   end
 
-  defp do_handle_notification(method, _params, state) when method in [:exit, "exit"] do
+  on_notification :exit do
+    _ = params
+    _ = ctx
     System.halt(0)
-    state
+    {:ok, state}
   end
-
-  defp do_handle_notification(_method, _params, state), do: state
 
   defp build_document(uri, text) do
     path = uri_to_path(uri)
@@ -350,13 +345,13 @@ defmodule BeamLang.LSP.Server do
     {doc, diagnostics}
   end
 
-  defp publish_diagnostics(doc, errors) do
+  defp publish_diagnostics(ctx, doc, errors) do
     diagnostics =
       errors
       |> Enum.filter(fn err -> err.span.file_id == doc.path or err.span.file_id == "<source>" end)
       |> Enum.map(&diagnostic_for(doc.text, &1))
 
-    LspServer.send_notification(self(), :text_document_publish_diagnostics, %{
+    HandlerContext.notify(ctx, :text_document_publish_diagnostics, %{
       "uri" => doc.uri,
       "diagnostics" => diagnostics
     })
@@ -367,18 +362,26 @@ defmodule BeamLang.LSP.Server do
     has_dot_method_fix_note = Enum.member?(error.notes || [], "fix:replace_dot_with_arrow")
     message = dot_method_hint || error.message
 
-    diagnostic = %{
-      "range" => range_for_span(source, error.span),
-      "severity" => 1,
-      "source" => "BeamLang",
-      "message" => message
-    }
+    diagnostic =
+      case typed_range_for_span(source, error.span) do
+        {:ok, typed_range} ->
+          {:ok, typed_diagnostic} =
+            Types.Diagnostic.new(typed_range, message, severity: 1, source: "BeamLang")
 
-    if has_dot_method_fix_note or is_binary(dot_method_hint) do
-      Map.put(diagnostic, "code", "BL001")
-    else
-      diagnostic
-    end
+          Types.Diagnostic.to_map(typed_diagnostic)
+
+        :error ->
+          %{
+            "range" => range_for_span(source, error.span),
+            "severity" => 1,
+            "source" => "BeamLang",
+            "message" => message
+          }
+      end
+
+    if has_dot_method_fix_note or is_binary(dot_method_hint),
+      do: Map.put(diagnostic, "code", "BL001"),
+      else: diagnostic
   end
 
   defp dot_method_hint_message(source, %BeamLang.Error{
@@ -818,24 +821,20 @@ defmodule BeamLang.LSP.Server do
 
     case dot_token_for_range(doc, range) do
       %BeamLang.Token{type: :dot, span: span} ->
-        [
-          %{
-            "title" => "Replace '.' with '->' for method call",
-            "kind" => "quickfix",
-            "isPreferred" => true,
-            "diagnostics" => related_dot_method_diagnostics(diagnostics),
-            "edit" => %{
-              "changes" => %{
-                doc.uri => [
-                  %{
-                    "range" => range_for_span(doc.text, span),
-                    "newText" => "->"
-                  }
-                ]
-              }
-            }
-          }
-        ]
+        with {:ok, typed_range} <- typed_range_for_span(doc.text, span),
+             {:ok, edit} <- Types.TextEdit.new(typed_range, "->"),
+             {:ok, ws_edit} <- Types.WorkspaceEdit.new(%{doc.uri => [edit]}),
+             {:ok, action} <-
+               Types.CodeAction.new("Replace '.' with '->' for method call",
+                 kind: "quickfix",
+                 diagnostics: related_dot_method_diagnostics(diagnostics),
+                 edit: ws_edit
+               ) do
+          [Types.CodeAction.to_map(action) |> Map.put("isPreferred", true)]
+        else
+          _ ->
+            []
+        end
 
       _ ->
         []
@@ -2775,6 +2774,19 @@ defmodule BeamLang.LSP.Server do
     }
   end
 
+  defp typed_range_for_span(source, span) do
+    range = range_for_span(source, span)
+
+    with %{"start" => start, "end" => ending} <- range,
+         {:ok, start_pos} <- Types.Position.new(start["line"], start["character"]),
+         {:ok, end_pos} <- Types.Position.new(ending["line"], ending["character"]),
+         {:ok, typed_range} <- Types.Range.new(start_pos, end_pos) do
+      {:ok, typed_range}
+    else
+      _ -> :error
+    end
+  end
+
   defp range_for_span_in_doc(doc, %BeamLang.Span{file_id: file_id} = span) do
     source =
       cond do
@@ -2853,25 +2865,17 @@ defmodule BeamLang.LSP.Server do
     line_start + byte_size(prefix)
   end
 
-  defp latest_change_text([]), do: ""
-
-  defp latest_change_text(changes) when is_list(changes) do
-    changes
-    |> List.last()
-    |> Map.get("text", "")
-  end
-
   defp uri_to_path("file://" <> rest) do
-    URI.decode(rest)
+    State.uri_to_path("file://" <> rest)
   end
 
-  defp uri_to_path(uri), do: uri
+  defp uri_to_path(uri), do: State.uri_to_path(uri) || uri
 
   defp path_to_uri(path) do
     if String.starts_with?(path, "file://") do
       path
     else
-      "file://" <> URI.encode(path, &(&1 == ?/ or URI.char_unreserved?(&1)))
+      State.path_to_uri(path)
     end
   end
 end
