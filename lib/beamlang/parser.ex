@@ -923,13 +923,32 @@ defmodule BeamLang.Parser do
           {:ok, BeamLang.AST.expr(), [Token.t()]} | {:error, BeamLang.Error.t()}
   defp parse_term(tokens) do
     with {:ok, expr, rest} <- parse_primary(tokens) do
-      with {:ok, expr, rest1} <- parse_field_access(expr, rest) do
-        with {:ok, expr, rest2} <- parse_method_call(expr, rest1) do
-          parse_try_operator(expr, rest2)
-        end
-      end
+      parse_postfix(expr, rest)
     end
   end
+
+  @spec parse_postfix(BeamLang.AST.expr(), [Token.t()]) ::
+          {:ok, BeamLang.AST.expr(), [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_postfix(expr, [%Token{type: :arrow} = arrow_tok, %Token{type: :identifier} = name_tok | rest]) do
+    field_span = BeamLang.Span.merge(expr_span(expr), arrow_tok.span)
+    field_span = BeamLang.Span.merge(field_span, name_tok.span)
+
+    case rest do
+      [%Token{type: :lparen} | rest1] ->
+        with {:ok, args, rest2} <- parse_args(rest1, []),
+             {:ok, rparen, rest3} <- expect(rest2, :rparen) do
+          call_span = BeamLang.Span.merge(field_span, rparen.span)
+          call = {:method_call, %{target: expr, name: name_tok.value, args: args, span: call_span}}
+          parse_postfix(call, rest3)
+        end
+
+      _ ->
+        field = {:field, %{target: expr, name: name_tok.value, span: field_span}}
+        parse_postfix(field, rest)
+    end
+  end
+
+  defp parse_postfix(expr, tokens), do: parse_try_operator(expr, tokens)
 
   @spec parse_try_operator(BeamLang.AST.expr(), [Token.t()]) ::
           {:ok, BeamLang.AST.expr(), [Token.t()]} | {:error, BeamLang.Error.t()}
@@ -1114,18 +1133,6 @@ defmodule BeamLang.Parser do
   end
 
   defp parse_field_access(expr, rest), do: {:ok, expr, rest}
-
-  @spec parse_method_call(BeamLang.AST.expr(), [Token.t()]) ::
-          {:ok, BeamLang.AST.expr(), [Token.t()]} | {:error, BeamLang.Error.t()}
-  defp parse_method_call({:field, %{target: target, name: name, span: span}}, [%Token{type: :lparen} | rest]) do
-    with {:ok, args, rest1} <- parse_args(rest, []),
-         {:ok, rparen, rest2} <- expect(rest1, :rparen) do
-      call_span = BeamLang.Span.merge(span, rparen.span)
-      {:ok, {:method_call, %{target: target, name: name, args: args, span: call_span}}, rest2}
-    end
-  end
-
-  defp parse_method_call(expr, rest), do: {:ok, expr, rest}
 
   @spec parse_call([Token.t()]) ::
           {:ok, BeamLang.AST.expr(), [Token.t()]} | {:error, BeamLang.Error.t()}

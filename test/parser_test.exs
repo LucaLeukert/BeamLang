@@ -555,6 +555,28 @@ defmodule BeamLang.ParserTest do
     assert {:return, %{expr: {:identifier, %{name: "len"}}}} = Enum.at(stmts, 3)
   end
 
+  test "parses chained method calls" do
+    source = """
+    fn main() -> number {
+        let value = list_new()->push(1)->push(2)->first()->unwrap(0);
+        return value;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{functions: [func]}} = ast
+    assert {:function, %{name: "main", body: {:block, %{stmts: [stmt, _]}}}} = func
+    assert {:let, %{name: "value", expr: expr}} = stmt
+
+    assert {:method_call, %{name: "unwrap", target: unwrap_target}} = expr
+    assert {:method_call, %{name: "first", target: first_target}} = unwrap_target
+    assert {:method_call, %{name: "push", target: push2_target}} = first_target
+    assert {:method_call, %{name: "push", target: push1_target}} = push2_target
+    assert {:call, %{name: "list_new", args: []}} = push1_target
+  end
+
   test "parses list literal syntax" do
     source = """
     fn main() -> number {

@@ -205,6 +205,17 @@ defmodule BeamLang.IntegrationTest do
     assert {:ok, 3} == BeamLang.run_source(source)
   end
 
+  test "supports chained method calls" do
+    source = """
+    fn main(args: [String]) -> number {
+        let value = list_new()->push(1)->push(2)->first()->unwrap(0);
+        return value;
+    }
+    """
+
+    assert {:ok, 1} == BeamLang.run_source(source)
+  end
+
   test "rejects non-i32 main" do
     source = """
     fn main(args: [String]) -> bool {

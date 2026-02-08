@@ -26,8 +26,10 @@ fn main(args: [String]) -> number {
     };
 
     let mut sum = 0;
-    for (i in 0..5) {
+    let mut i = 0;
+    while (i < 5) {
         sum = sum + i;
+        i = i + 1;
     }
 
     let values = list_new()->push(1)->push(2)->push(3);

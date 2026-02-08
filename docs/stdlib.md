@@ -156,6 +156,7 @@ let nested: [[number]] = [[1, 2], [3, 4]];
 ```beamlang
 let nums: [number] = [1, 2, 3, 4, 5];
 println(nums->length());    // 5
+println(nums->push(6)->push(7)->length()); // 7
 
 let doubled = nums->map(fn(x: number) -> number { return x * 2; });
 let evens = nums->filter(fn(x: number) -> bool { return x % 2 == 0; });

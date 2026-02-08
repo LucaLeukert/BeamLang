@@ -303,6 +303,7 @@ Rules:
 
 - A method function must have its first parameter named `self`.
 - The name `self` is reserved and cannot be used for other bindings (variables, patterns, loop variables, assignments).
+- Method calls can be chained: `list_new()->push(1)->push(2)->first()->unwrap(0)`.
 
 ## Comments
 
