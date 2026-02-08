@@ -3,8 +3,7 @@ defmodule BeamLang.LSP.Server do
 
   use ElixirLsp.Router
 
-  alias BeamLang.LSP.Protocol
-  alias ElixirLsp.{HandlerContext, Message, Server, State, Types}
+  alias ElixirLsp.{HandlerContext, State, Types}
 
   @request_timeout 30_000
   @middlewares [ElixirLsp.Middleware.Recovery]
@@ -34,43 +33,12 @@ defmodule BeamLang.LSP.Server do
 
   @spec start() :: no_return()
   def start do
-    {:ok, pid} =
-      Server.start_link(
-        handler: __MODULE__,
-        handler_arg: %{documents: %{}, lsp_state: State.new()},
-        middlewares: @middlewares,
-        request_timeout: @request_timeout,
-        send: &IO.binwrite(:stdio, &1)
-      )
-
-    loop_stdio(pid)
-  end
-
-  defp loop_stdio(pid) do
-    case Protocol.read_message() do
-      :eof ->
-        :ok
-
-      {:error, _reason} ->
-        loop_stdio(pid)
-
-      {:ok, payload} ->
-        payload
-        |> Map.put_new("jsonrpc", "2.0")
-        |> Message.from_map()
-        |> case do
-          {:ok, message} ->
-            message
-            |> ElixirLsp.encode()
-            |> IO.iodata_to_binary()
-            |> then(&Server.feed(pid, &1))
-
-          {:error, _reason} ->
-            :ok
-        end
-
-        loop_stdio(pid)
-    end
+    ElixirLsp.run_stdio(
+      handler: __MODULE__,
+      init: %{documents: %{}, lsp_state: State.new()},
+      middlewares: @middlewares,
+      request_timeout: @request_timeout
+    )
   end
 
   @impl true
@@ -79,15 +47,15 @@ defmodule BeamLang.LSP.Server do
   def init(_arg), do: {:ok, %{documents: %{}, lsp_state: State.new()}}
 
   on_request :initialize do
-    _ = ctx
+    _ctx = ctx
     workspace_folders = Map.get(params || %{}, "workspaceFolders", [])
     next_lsp_state = State.set_workspace_folders(state.lsp_state, workspace_folders)
     {:reply, %{"capabilities" => server_capabilities()}, %{state | lsp_state: next_lsp_state}}
   end
 
   on_request :shutdown do
-    _ = params
-    _ = state
+    _params = params
+    _state = state
     HandlerContext.reply(ctx, nil)
   end
 
@@ -223,13 +191,13 @@ defmodule BeamLang.LSP.Server do
   end
 
   on_notification :initialized do
-    _ = params
-    _ = ctx
+    _params = params
+    _ctx = ctx
     {:ok, state}
   end
 
   on_notification :workspace_did_change_workspace_folders do
-    _ = ctx
+    _ctx = ctx
 
     next_lsp_state =
       State.apply_notification(state.lsp_state, :workspace_did_change_workspace_folders, params)
@@ -282,8 +250,8 @@ defmodule BeamLang.LSP.Server do
   end
 
   on_notification :exit do
-    _ = params
-    _ = ctx
+    _params = params
+    _ctx = ctx
     System.halt(0)
     {:ok, state}
   end
