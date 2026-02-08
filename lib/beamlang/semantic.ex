@@ -34,7 +34,9 @@ defmodule BeamLang.Semantic do
   end
 
   # Convert error_def to type_def for type checking purposes
-  defp error_def_to_type_def({:error_def, %{name: name, fields: fields, exported: exported, span: span}}) do
+  defp error_def_to_type_def(
+         {:error_def, %{name: name, fields: fields, exported: exported, span: span}}
+       ) do
     {:type_def, %{name: name, params: [], fields: fields, exported: exported, span: span}}
   end
 
@@ -133,78 +135,8 @@ defmodule BeamLang.Semantic do
 
       {:return, %{expr: expr}} ->
         case type_of_expr(expr, func_table, type_table, env, expected_type) do
-          {:error, :unknown_function} ->
-            {:error,
-             [
-               BeamLang.Error.new(
-                 :type,
-                 "Unknown function in return expression.",
-                 expr_span(expr)
-               )
-             ]}
-
-          {:error, :wrong_arity} ->
-            {:error,
-             [
-               BeamLang.Error.new(
-                 :type,
-                 "Function called with wrong number of arguments.",
-                 expr_span(expr)
-               )
-             ]}
-
-          {:error, :unknown_variable} ->
-            {:error,
-             [
-               BeamLang.Error.new(
-                 :type,
-                 "Unknown variable in return expression.",
-                 expr_span(expr)
-               )
-             ]}
-
-          {:error, :unknown_type} ->
-            {:error,
-             [BeamLang.Error.new(:type, "Unknown type in return expression.", expr_span(expr))]}
-
-          {:error, :internal_function} ->
-            {:error,
-             [
-               BeamLang.Error.new(
-                 :type,
-                 "Internal function cannot be called outside its module.",
-                 expr_span(expr)
-               )
-             ]}
-
-          {:error, :missing_type_annotation} ->
-            {:error,
-             [
-               BeamLang.Error.new(
-                 :type,
-                 "Struct literal requires a type annotation.",
-                 expr_span(expr)
-               )
-             ]}
-
-          {:error, :not_a_struct} ->
-            {:error,
-             [BeamLang.Error.new(:type, "Field access requires a struct value.", expr_span(expr))]}
-
-          {:error, {:internal_field, name}} ->
-            {:error, [BeamLang.Error.new(:type, "Field '#{name}' is internal and cannot be accessed directly.", expr_span(expr))]}
-
-          {:error, {:unknown_field, name}} ->
-            {:error, [BeamLang.Error.new(:type, "Unknown field '#{name}'.", expr_span(expr))]}
-
-          {:error, {:struct, errors}} ->
-            {:error, errors}
-
-          {:error, {:match, errors}} ->
-            {:error, errors}
-
-          {:error, {:call, errors}} ->
-            {:error, errors}
+          {:error, reason} ->
+            {:error, expr_error(reason, expr, :return_expression)}
 
           {:ok, inferred} ->
             if type_compatible?(expected_type, inferred) do
@@ -566,7 +498,13 @@ defmodule BeamLang.Semantic do
     end
   end
 
-  defp type_of_expr({:struct, %{fields: fields, span: struct_span}}, func_table, type_table, env, expected) do
+  defp type_of_expr(
+         {:struct, %{fields: fields, span: struct_span}},
+         func_table,
+         type_table,
+         env,
+         expected
+       ) do
     case struct_type_info(expected) do
       {:ok, type_name, args} ->
         case fetch_type(type_table, type_name) do
@@ -604,16 +542,23 @@ defmodule BeamLang.Semantic do
     end
   end
 
-  defp type_of_expr({:enum_variant, %{enum_name: enum_name, variant: _variant, fields: fields, span: _span}}, func_table, type_table, env, _expected) do
+  defp type_of_expr(
+         {:enum_variant, %{enum_name: enum_name, variant: _variant, fields: fields, span: _span}},
+         func_table,
+         type_table,
+         env,
+         _expected
+       ) do
     # For now, infer enum variant type without full validation
     # Validate field expressions
-    field_errors = Enum.flat_map(fields, fn {_field_name, expr} ->
-      case type_of_expr(expr, func_table, type_table, env, nil) do
-        {:ok, _} -> []
-        {:error, {:match, errs}} -> errs
-        {:error, _} -> []
-      end
-    end)
+    field_errors =
+      Enum.flat_map(fields, fn {_field_name, expr} ->
+        case type_of_expr(expr, func_table, type_table, env, nil) do
+          {:ok, _} -> []
+          {:error, {:match, errs}} -> errs
+          {:error, _} -> []
+        end
+      end)
 
     if field_errors == [] do
       {:ok, {:named, enum_name}}
@@ -622,22 +567,31 @@ defmodule BeamLang.Semantic do
     end
   end
 
-  defp type_of_expr({:tuple, %{elements: elements, span: _span}}, func_table, type_table, env, expected) do
-    expected_types = case expected do
-      {:tuple, types} -> types
-      _ -> List.duplicate(nil, length(elements))
-    end
+  defp type_of_expr(
+         {:tuple, %{elements: elements, span: _span}},
+         func_table,
+         type_table,
+         env,
+         expected
+       ) do
+    expected_types =
+      case expected do
+        {:tuple, types} -> types
+        _ -> List.duplicate(nil, length(elements))
+      end
 
-    results = Enum.zip(elements, expected_types)
-              |> Enum.map(fn {elem, exp_type} ->
-                type_of_expr(elem, func_table, type_table, env, exp_type)
-              end)
+    results =
+      Enum.zip(elements, expected_types)
+      |> Enum.map(fn {elem, exp_type} ->
+        type_of_expr(elem, func_table, type_table, env, exp_type)
+      end)
 
-    errors = Enum.flat_map(results, fn
-      {:ok, _} -> []
-      {:error, {:match, errs}} -> errs
-      {:error, _} -> []
-    end)
+    errors =
+      Enum.flat_map(results, fn
+        {:ok, _} -> []
+        {:error, {:match, errs}} -> errs
+        {:error, _} -> []
+      end)
 
     if errors == [] do
       types = Enum.map(results, fn {:ok, t} -> t end)
@@ -757,7 +711,13 @@ defmodule BeamLang.Semantic do
     end
   end
 
-  defp type_of_expr({:list_literal, %{elements: elements, span: _span}}, func_table, type_table, env, expected) do
+  defp type_of_expr(
+         {:list_literal, %{elements: elements, span: _span}},
+         func_table,
+         type_table,
+         env,
+         expected
+       ) do
     elem_type =
       case expected do
         {:generic, {:named, "List"}, [t]} -> t
@@ -797,7 +757,9 @@ defmodule BeamLang.Semantic do
     if errors == [] do
       inferred_elem_type =
         case elements do
-          [] -> elem_type
+          [] ->
+            elem_type
+
           [first | _] ->
             case type_of_expr(first, func_table, type_table, env, nil) do
               {:ok, t} -> t
@@ -811,7 +773,13 @@ defmodule BeamLang.Semantic do
     end
   end
 
-  defp type_of_expr({:range, %{start: start_expr, end: end_expr, span: span}}, func_table, type_table, env, _expected) do
+  defp type_of_expr(
+         {:range, %{start: start_expr, end: end_expr, span: span}},
+         func_table,
+         type_table,
+         env,
+         _expected
+       ) do
     with {:ok, start_type} <- type_of_expr(start_expr, func_table, type_table, env, :number),
          {:ok, end_type} <- type_of_expr(end_expr, func_table, type_table, env, :number) do
       if start_type == :number and end_type == :number do
@@ -999,7 +967,13 @@ defmodule BeamLang.Semantic do
     end
   end
 
-  @spec check_operator_overload(atom(), BeamLang.AST.type_name(), BeamLang.AST.type_name(), map(), map()) ::
+  @spec check_operator_overload(
+          atom(),
+          BeamLang.AST.type_name(),
+          BeamLang.AST.type_name(),
+          map(),
+          map()
+        ) ::
           {:ok, BeamLang.AST.type_name(), binary()} | :no_overload
   defp check_operator_overload(op, left_type, right_type, type_table, func_table) do
     # Check if the type has an operator declaration in the type definition
@@ -1016,14 +990,17 @@ defmodule BeamLang.Semantic do
                 else
                   :no_overload
                 end
+
               _ ->
                 # No operator for this op, try naming convention
                 check_operator_by_convention(op, left_type, right_type, type_name, func_table)
             end
+
           _ ->
             # No operators map or empty, try naming convention
             check_operator_by_convention(op, left_type, right_type, type_name, func_table)
         end
+
       :error ->
         :no_overload
     end
@@ -1032,11 +1009,14 @@ defmodule BeamLang.Semantic do
   # Fallback: Look for operator function by naming convention: TypeName_op_opname
   defp check_operator_by_convention(op, left_type, right_type, type_name, func_table) do
     op_func_name = "#{type_name}_op_#{op}"
+
     case Map.fetch(func_table, op_func_name) do
       {:ok, func_info} ->
         params = func_info.params
+
         if length(params) == 2 do
           [param1_type, param2_type] = params
+
           if types_match?(param1_type, normalize_type(left_type)) and
                types_match?(param2_type, normalize_type(right_type)) do
             {:ok, func_info.return, op_func_name}
@@ -1046,6 +1026,7 @@ defmodule BeamLang.Semantic do
         else
           :no_overload
         end
+
       :error ->
         :no_overload
     end
@@ -1145,16 +1126,22 @@ defmodule BeamLang.Semantic do
                   end)
 
                 if Enum.all?(field_types, &parse_args_field_type?/1) do
-                  {:ok, %{type: type_arg, fields: field_order, field_types: field_types, field_annotations: field_annotations}}
+                  {:ok,
+                   %{
+                     type: type_arg,
+                     fields: field_order,
+                     field_types: field_types,
+                     field_annotations: field_annotations
+                   }}
                 else
                   {:error,
                    [
                      BeamLang.Error.new(
-                        :type,
-                        "parse_args only supports String, number, bool, and char fields.",
-                        span
-                      )
-                    ]}
+                       :type,
+                       "parse_args only supports String, number, bool, and char fields.",
+                       span
+                     )
+                   ]}
                 end
             end
 
@@ -1273,7 +1260,8 @@ defmodule BeamLang.Semantic do
                     end
 
                   {:ok, %{type: _field_type}} ->
-                    {:error, BeamLang.Error.new(:type, "Field '#{name}' is not callable.", call_span)}
+                    {:error,
+                     BeamLang.Error.new(:type, "Field '#{name}' is not callable.", call_span)}
 
                   :error ->
                     {:error, BeamLang.Error.new(:type, "Unknown field '#{name}'.", call_span)}
@@ -1558,104 +1546,8 @@ defmodule BeamLang.Semantic do
             end
 
           case type_of_expr(expr, func_table, type_table, acc_env, declared_type) do
-            {:error, :unknown_function} ->
-              {:cont,
-               {:ok, acc_env,
-                [
-                  BeamLang.Error.new(
-                    :type,
-                    "Unknown function in let expression.",
-                    expr_span(expr)
-                  )
-                  | errors
-                ]}}
-
-            {:error, :wrong_arity} ->
-              {:cont,
-               {:ok, acc_env,
-                [
-                  BeamLang.Error.new(
-                    :type,
-                    "Function called with wrong number of arguments.",
-                    expr_span(expr)
-                  )
-                  | errors
-                ]}}
-
-            {:error, :unknown_variable} ->
-              {:cont,
-               {:ok, acc_env,
-                [
-                  BeamLang.Error.new(
-                    :type,
-                    "Unknown variable in let expression.",
-                    expr_span(expr)
-                  )
-                  | errors
-                ]}}
-
-            {:error, :unknown_type} ->
-              {:cont,
-               {:ok, acc_env,
-                [
-                  BeamLang.Error.new(:type, "Unknown type in let expression.", expr_span(expr))
-                  | errors
-                ]}}
-
-            {:error, :internal_function} ->
-              {:cont,
-               {:ok, acc_env,
-                [
-                  BeamLang.Error.new(
-                    :type,
-                    "Internal function cannot be called outside its module.",
-                    expr_span(expr)
-                  )
-                  | errors
-                ]}}
-
-            {:error, :missing_type_annotation} ->
-              {:cont,
-               {:ok, acc_env,
-                [
-                  BeamLang.Error.new(
-                    :type,
-                    "Struct literal requires a type annotation.",
-                    expr_span(expr)
-                  )
-                  | errors
-                ]}}
-
-            {:error, :not_a_struct} ->
-              {:cont,
-               {:ok, acc_env,
-                [
-                  BeamLang.Error.new(
-                    :type,
-                    "Field access requires a struct value.",
-                    expr_span(expr)
-                  )
-                  | errors
-                ]}}
-
-            {:error, {:internal_field, field}} ->
-              {:cont,
-               {:ok, acc_env,
-                [BeamLang.Error.new(:type, "Field '#{field}' is internal and cannot be accessed directly.", expr_span(expr)) | errors]}}
-
-            {:error, {:unknown_field, field}} ->
-              {:cont,
-               {:ok, acc_env,
-                [BeamLang.Error.new(:type, "Unknown field '#{field}'.", expr_span(expr)) | errors]}}
-
-            {:error, {:struct, errs}} ->
-              {:cont, {:ok, acc_env, errs ++ errors}}
-
-            {:error, {:match, errs}} ->
-              {:cont, {:ok, acc_env, errs ++ errors}}
-
-            {:error, {:call, errs}} ->
-              {:cont, {:ok, acc_env, errs ++ errors}}
+            {:error, reason} ->
+              {:cont, {:ok, acc_env, expr_error(reason, expr, :let_expression) ++ errors}}
 
             {:ok, inferred} ->
               if Map.has_key?(acc_env, name) do
@@ -1694,82 +1586,8 @@ defmodule BeamLang.Semantic do
 
             {:ok, %{name: _name, type: declared, mutable: true, field: nil}} ->
               case type_of_expr(expr, func_table, type_table, acc_env, declared) do
-                {:error, :unknown_function} ->
-                  {:cont,
-                   {:ok, acc_env,
-                    [
-                      BeamLang.Error.new(
-                        :type,
-                        "Unknown function in assignment.",
-                        expr_span(expr)
-                      )
-                      | errors
-                    ]}}
-
-                {:error, :wrong_arity} ->
-                  {:cont,
-                   {:ok, acc_env,
-                    [
-                      BeamLang.Error.new(
-                        :type,
-                        "Function called with wrong number of arguments.",
-                        expr_span(expr)
-                      )
-                      | errors
-                    ]}}
-
-                {:error, :unknown_variable} ->
-                  {:cont,
-                   {:ok, acc_env,
-                    [
-                      BeamLang.Error.new(
-                        :type,
-                        "Unknown variable in assignment.",
-                        expr_span(expr)
-                      )
-                      | errors
-                    ]}}
-
-                {:error, :unknown_type} ->
-                  {:cont,
-                   {:ok, acc_env,
-                    [
-                      BeamLang.Error.new(:type, "Unknown type in assignment.", expr_span(expr))
-                      | errors
-                    ]}}
-
-                {:error, :internal_function} ->
-                  {:cont,
-                   {:ok, acc_env,
-                    [
-                      BeamLang.Error.new(
-                        :type,
-                        "Internal function cannot be called outside its module.",
-                        expr_span(expr)
-                      )
-                      | errors
-                    ]}}
-
-                {:error, :missing_type_annotation} ->
-                  {:cont,
-                   {:ok, acc_env,
-                    [
-                      BeamLang.Error.new(
-                        :type,
-                        "Struct literal requires a type annotation.",
-                        expr_span(expr)
-                      )
-                      | errors
-                    ]}}
-
-                {:error, {:struct, errs}} ->
-                  {:cont, {:ok, acc_env, errs ++ errors}}
-
-                {:error, {:match, errs}} ->
-                  {:cont, {:ok, acc_env, errs ++ errors}}
-
-                {:error, {:call, errs}} ->
-                  {:cont, {:ok, acc_env, errs ++ errors}}
+                {:error, reason} ->
+                  {:cont, {:ok, acc_env, expr_error(reason, expr, :assignment) ++ errors}}
 
                 {:ok, inferred} ->
                   if type_compatible?(declared, inferred) do
@@ -1788,95 +1606,26 @@ defmodule BeamLang.Semantic do
                   end
               end
 
-            {:ok, %{name: var_name, type: declared, mutable: true, field: field, span: field_span}} ->
+            {:ok,
+             %{name: var_name, type: declared, mutable: true, field: field, span: field_span}} ->
               is_self_access = var_name == "self"
               method_type = Map.get(acc_env, :__method_type__)
-              case resolve_field_type(declared, field, type_table, is_self_access, method_type, field_span) do
+
+              case resolve_field_type(
+                     declared,
+                     field,
+                     type_table,
+                     is_self_access,
+                     method_type,
+                     field_span
+                   ) do
                 {:error, err} ->
                   {:cont, {:ok, acc_env, [err | errors]}}
 
                 {:ok, field_type} ->
                   case type_of_expr(expr, func_table, type_table, acc_env, field_type) do
-                    {:error, :unknown_function} ->
-                      {:cont,
-                       {:ok, acc_env,
-                        [
-                          BeamLang.Error.new(
-                            :type,
-                            "Unknown function in assignment.",
-                            expr_span(expr)
-                          )
-                          | errors
-                        ]}}
-
-                    {:error, :wrong_arity} ->
-                      {:cont,
-                       {:ok, acc_env,
-                        [
-                          BeamLang.Error.new(
-                            :type,
-                            "Function called with wrong number of arguments.",
-                            expr_span(expr)
-                          )
-                          | errors
-                        ]}}
-
-                    {:error, :unknown_variable} ->
-                      {:cont,
-                       {:ok, acc_env,
-                        [
-                          BeamLang.Error.new(
-                            :type,
-                            "Unknown variable in assignment.",
-                            expr_span(expr)
-                          )
-                          | errors
-                        ]}}
-
-                    {:error, :unknown_type} ->
-                      {:cont,
-                       {:ok, acc_env,
-                        [
-                          BeamLang.Error.new(
-                            :type,
-                            "Unknown type in assignment.",
-                            expr_span(expr)
-                          )
-                          | errors
-                        ]}}
-
-                    {:error, :internal_function} ->
-                      {:cont,
-                       {:ok, acc_env,
-                        [
-                          BeamLang.Error.new(
-                            :type,
-                            "Internal function cannot be called outside its module.",
-                            expr_span(expr)
-                          )
-                          | errors
-                        ]}}
-
-                    {:error, :missing_type_annotation} ->
-                      {:cont,
-                       {:ok, acc_env,
-                        [
-                          BeamLang.Error.new(
-                            :type,
-                            "Struct literal requires a type annotation.",
-                            expr_span(expr)
-                          )
-                          | errors
-                        ]}}
-
-                    {:error, {:struct, errs}} ->
-                      {:cont, {:ok, acc_env, errs ++ errors}}
-
-                    {:error, {:match, errs}} ->
-                      {:cont, {:ok, acc_env, errs ++ errors}}
-
-                    {:error, {:call, errs}} ->
-                      {:cont, {:ok, acc_env, errs ++ errors}}
+                    {:error, reason} ->
+                      {:cont, {:ok, acc_env, expr_error(reason, expr, :assignment) ++ errors}}
 
                     {:ok, inferred} ->
                       if type_compatible?(field_type, inferred) do
@@ -1908,84 +1657,8 @@ defmodule BeamLang.Semantic do
 
         {:return, %{expr: expr}} ->
           case type_of_expr(expr, func_table, type_table, acc_env, return_type) do
-            {:error, :unknown_function} ->
-              {:cont,
-               {:ok, acc_env,
-                [
-                  BeamLang.Error.new(:type, "Unknown function in expression.", expr_span(expr))
-                  | errors
-                ]}}
-
-            {:error, :wrong_arity} ->
-              {:cont,
-               {:ok, acc_env,
-                [
-                  BeamLang.Error.new(
-                    :type,
-                    "Function called with wrong number of arguments.",
-                    expr_span(expr)
-                  )
-                  | errors
-                ]}}
-
-            {:error, :unknown_variable} ->
-              {:cont,
-               {:ok, acc_env,
-                [
-                  BeamLang.Error.new(:type, "Unknown variable in expression.", expr_span(expr))
-                  | errors
-                ]}}
-
-            {:error, :unknown_type} ->
-              {:cont,
-               {:ok, acc_env,
-                [
-                  BeamLang.Error.new(:type, "Unknown type in expression.", expr_span(expr))
-                  | errors
-                ]}}
-
-            {:error, :missing_type_annotation} ->
-              {:cont,
-               {:ok, acc_env,
-                [
-                  BeamLang.Error.new(
-                    :type,
-                    "Struct literal requires a type annotation.",
-                    expr_span(expr)
-                  )
-                  | errors
-                ]}}
-
-            {:error, :not_a_struct} ->
-              {:cont,
-               {:ok, acc_env,
-                [
-                  BeamLang.Error.new(
-                    :type,
-                    "Field access requires a struct value.",
-                    expr_span(expr)
-                  )
-                  | errors
-                ]}}
-
-            {:error, {:internal_field, field}} ->
-              {:cont,
-               {:ok, acc_env,
-                [BeamLang.Error.new(:type, "Field '#{field}' is internal and cannot be accessed directly.", expr_span(expr)) | errors]}}
-
-            {:error, {:unknown_field, field}} ->
-              {:cont,
-               {:ok, acc_env,
-                [BeamLang.Error.new(:type, "Unknown field '#{field}'.", expr_span(expr)) | errors]}}
-
-            {:error, {:struct, errs}} ->
-              {:cont, {:ok, acc_env, errs ++ errors}}
-
-            {:error, {:match, errs}} ->
-              {:cont, {:ok, acc_env, errs ++ errors}}
-
-            {:error, {:call, errs}} ->
-              {:cont, {:ok, acc_env, errs ++ errors}}
+            {:error, reason} ->
+              {:cont, {:ok, acc_env, expr_error(reason, expr) ++ errors}}
 
             {:ok, inferred} ->
               if return_type == nil or return_type == :void or
@@ -2007,96 +1680,8 @@ defmodule BeamLang.Semantic do
 
         {:expr, %{expr: expr}} ->
           case type_of_expr(expr, func_table, type_table, acc_env, nil) do
-            {:error, :unknown_function} ->
-              {:cont,
-               {:ok, acc_env,
-                [
-                  BeamLang.Error.new(:type, "Unknown function in expression.", expr_span(expr))
-                  | errors
-                ]}}
-
-            {:error, :wrong_arity} ->
-              {:cont,
-               {:ok, acc_env,
-                [
-                  BeamLang.Error.new(
-                    :type,
-                    "Function called with wrong number of arguments.",
-                    expr_span(expr)
-                  )
-                  | errors
-                ]}}
-
-            {:error, :unknown_variable} ->
-              {:cont,
-               {:ok, acc_env,
-                [
-                  BeamLang.Error.new(:type, "Unknown variable in expression.", expr_span(expr))
-                  | errors
-                ]}}
-
-            {:error, :unknown_type} ->
-              {:cont,
-               {:ok, acc_env,
-                [
-                  BeamLang.Error.new(:type, "Unknown type in expression.", expr_span(expr))
-                  | errors
-                ]}}
-
-            {:error, :internal_function} ->
-              {:cont,
-               {:ok, acc_env,
-                [
-                  BeamLang.Error.new(
-                    :type,
-                    "Internal function cannot be called outside its module.",
-                    expr_span(expr)
-                  )
-                  | errors
-                ]}}
-
-            {:error, :missing_type_annotation} ->
-              {:cont,
-               {:ok, acc_env,
-                [
-                  BeamLang.Error.new(
-                    :type,
-                    "Struct literal requires a type annotation.",
-                    expr_span(expr)
-                  )
-                  | errors
-                ]}}
-
-            {:error, :not_a_struct} ->
-              {:cont,
-               {:ok, acc_env,
-                [
-                  BeamLang.Error.new(
-                    :type,
-                    "Field access requires a struct value.",
-                    expr_span(expr)
-                  )
-                  | errors
-                ]}}
-
-            {:error, {:internal_field, field}} ->
-              {:cont,
-               {:ok, acc_env,
-                [BeamLang.Error.new(:type, "Field '#{field}' is internal and cannot be accessed directly.", expr_span(expr)) | errors]}}
-
-            {:error, {:unknown_field, field}} ->
-              {:cont,
-               {:ok, acc_env,
-                [BeamLang.Error.new(:type, "Unknown field '#{field}'.", expr_span(expr)) | errors]}}
-
-            {:error, {:struct, errs}} ->
-              {:cont, {:ok, acc_env, errs ++ errors}}
-
-            {:error, {:match, errs}} ->
-              {:cont, {:ok, acc_env, errs ++ errors}}
-
-            {:error, {:call, errs}} ->
-              {:cont, {:ok, acc_env, errs ++ errors}}
+            {:error, reason} ->
+              {:cont, {:ok, acc_env, expr_error(reason, expr) ++ errors}}
 
             {:ok, _} ->
               {:cont, {:ok, acc_env, errors}}
@@ -2166,9 +1751,11 @@ defmodule BeamLang.Semantic do
 
             {:ok, _inferred} ->
               # Add all bindings to env (immutable by default)
-              new_env = Enum.reduce(bindings, acc_env, fn name, env ->
-                Map.put(env, name, %{type: :any, mutable: false})
-              end)
+              new_env =
+                Enum.reduce(bindings, acc_env, fn name, env ->
+                  Map.put(env, name, %{type: :any, mutable: false})
+                end)
+
               {:cont, {:ok, new_env, errors}}
           end
       end
@@ -2239,24 +1826,36 @@ defmodule BeamLang.Semantic do
   defp build_type_table(types) do
     table =
       types
-      |> Enum.reduce(%{}, fn {:type_def, %{name: name, params: params, fields: fields} = td}, acc ->
+      |> Enum.reduce(%{}, fn {:type_def, %{name: name, params: params, fields: fields} = td},
+                             acc ->
         field_order = Enum.map(fields, & &1.name)
 
         field_map =
           Enum.reduce(fields, %{}, fn %{name: fname, type: ftype} = field, f_acc ->
             internal = Map.get(field, :internal, false)
             annotations = Map.get(field, :annotations, [])
-            Map.put(f_acc, fname, %{type: normalize_type(ftype), internal: internal, annotations: annotations})
+
+            Map.put(f_acc, fname, %{
+              type: normalize_type(ftype),
+              internal: internal,
+              annotations: annotations
+            })
           end)
 
         # Extract operator declarations from type definition
         operators = Map.get(td, :operators, [])
+
         operator_map =
           Enum.reduce(operators, %{}, fn %{op: op, type: op_type}, op_acc ->
             Map.put(op_acc, op, %{type: normalize_type(op_type)})
           end)
 
-        Map.put(acc, name, %{params: params, fields: field_map, field_order: field_order, operators: operator_map})
+        Map.put(acc, name, %{
+          params: params,
+          fields: field_map,
+          field_order: field_order,
+          operators: operator_map
+        })
       end)
 
     {:ok, table}
@@ -2316,7 +1915,15 @@ defmodule BeamLang.Semantic do
           BeamLang.Span.t()
         ) ::
           [BeamLang.Error.t()]
-  defp validate_struct_fields(fields, type_fields, func_table, type_table, env, type_name, struct_span) do
+  defp validate_struct_fields(
+         fields,
+         type_fields,
+         func_table,
+         type_table,
+         env,
+         type_name,
+         struct_span
+       ) do
     provided = Map.new(fields, fn %{name: name} -> {name, true} end)
 
     missing =
@@ -2409,41 +2016,8 @@ defmodule BeamLang.Semantic do
                   ]
                 end
 
-              {:error, :unknown_variable} ->
-                [
-                  BeamLang.Error.new(
-                    :type,
-                    "Unknown variable in field '#{name}'.",
-                    expr_span(expr)
-                  )
-                  | method_errors
-                ]
-
-              {:error, :unknown_function} ->
-                [
-                  BeamLang.Error.new(
-                    :type,
-                    "Unknown function in field '#{name}'.",
-                    expr_span(expr)
-                  )
-                  | method_errors
-                ]
-
-              {:error, :internal_function} ->
-                [
-                  BeamLang.Error.new(
-                    :type,
-                    "Internal function cannot be called outside its module.",
-                    expr_span(expr)
-                  )
-                  | method_errors
-                ]
-
-              {:error, _} ->
-                [
-                  BeamLang.Error.new(:type, "Invalid value for field '#{name}'.", expr_span(expr))
-                  | method_errors
-                ]
+              {:error, reason} ->
+                expr_error(reason, expr, {:field, name}) ++ method_errors
             end
         end
       end)
@@ -2664,7 +2238,8 @@ defmodule BeamLang.Semantic do
 
   # Enum pattern bindings
   defp pattern_bindings(
-         {:enum_pattern, %{enum_name: _enum_name, variant: _variant, fields: fields, span: _span}},
+         {:enum_pattern,
+          %{enum_name: _enum_name, variant: _variant, fields: fields, span: _span}},
          _match_type,
          type_table
        ) do
@@ -2683,10 +2258,11 @@ defmodule BeamLang.Semantic do
          type_table
        ) do
     # elements is a list of patterns like [{:pat_identifier, %{...}}, {:var_pattern, %{...}}]
-    element_types = case match_type do
-      {:tuple, types} -> types
-      _ -> List.duplicate(:any, length(elements))
-    end
+    element_types =
+      case match_type do
+        {:tuple, types} -> types
+        _ -> List.duplicate(:any, length(elements))
+      end
 
     elements
     |> Enum.zip(element_types)
@@ -2744,16 +2320,21 @@ defmodule BeamLang.Semantic do
   end
 
   @spec expr_error(any(), BeamLang.AST.expr()) :: [BeamLang.Error.t()]
-  defp expr_error(reason, expr) do
+  defp expr_error(reason, expr), do: expr_error(reason, expr, :expression)
+
+  @spec expr_error(any(), BeamLang.AST.expr(), atom() | {atom(), binary()}) :: [
+          BeamLang.Error.t()
+        ]
+  defp expr_error(reason, expr, context) do
     case reason do
       :unknown_function ->
-        [BeamLang.Error.new(:type, "Unknown function in expression.", expr_span(expr))]
+        [BeamLang.Error.new(:type, unknown_function_message(context), expr_span(expr))]
 
       :unknown_variable ->
-        [BeamLang.Error.new(:type, "Unknown variable in expression.", expr_span(expr))]
+        [BeamLang.Error.new(:type, unknown_variable_message(context), expr_span(expr))]
 
       :unknown_type ->
-        [BeamLang.Error.new(:type, "Unknown type in expression.", expr_span(expr))]
+        [BeamLang.Error.new(:type, unknown_type_message(context), expr_span(expr))]
 
       :internal_function ->
         [
@@ -2789,7 +2370,13 @@ defmodule BeamLang.Semantic do
         [BeamLang.Error.new(:type, "Field access requires a struct value.", expr_span(expr))]
 
       {:internal_field, field} ->
-        [BeamLang.Error.new(:type, "Field '#{field}' is internal and cannot be accessed directly.", expr_span(expr))]
+        [
+          BeamLang.Error.new(
+            :type,
+            "Field '#{field}' is internal and cannot be accessed directly.",
+            expr_span(expr)
+          )
+        ]
 
       {:unknown_field, field} ->
         [BeamLang.Error.new(:type, "Unknown field '#{field}'.", expr_span(expr))]
@@ -2819,6 +2406,24 @@ defmodule BeamLang.Semantic do
         [BeamLang.Error.new(:type, "Invalid expression.", expr_span(expr))]
     end
   end
+
+  defp unknown_function_message(:let_expression), do: "Unknown function in let expression."
+  defp unknown_function_message(:return_expression), do: "Unknown function in return expression."
+  defp unknown_function_message(:assignment), do: "Unknown function in assignment."
+  defp unknown_function_message({:field, field}), do: "Unknown function in field '#{field}'."
+  defp unknown_function_message(_), do: "Unknown function in expression."
+
+  defp unknown_variable_message(:let_expression), do: "Unknown variable in let expression."
+  defp unknown_variable_message(:return_expression), do: "Unknown variable in return expression."
+  defp unknown_variable_message(:assignment), do: "Unknown variable in assignment."
+  defp unknown_variable_message({:field, field}), do: "Unknown variable in field '#{field}'."
+  defp unknown_variable_message(_), do: "Unknown variable in expression."
+
+  defp unknown_type_message(:let_expression), do: "Unknown type in let expression."
+  defp unknown_type_message(:return_expression), do: "Unknown type in return expression."
+  defp unknown_type_message(:assignment), do: "Unknown type in assignment."
+  defp unknown_type_message({:field, field}), do: "Unknown type in field '#{field}'."
+  defp unknown_type_message(_), do: "Unknown type in expression."
 
   @spec pattern_span(BeamLang.AST.pattern()) :: BeamLang.Span.t()
   defp pattern_span({:integer, %{span: span}}), do: span
@@ -2890,7 +2495,9 @@ defmodule BeamLang.Semantic do
     end
   end
 
-  defp add_method_type_context(env, [%{pattern: _} | rest]), do: add_method_type_context(env, rest)
+  defp add_method_type_context(env, [%{pattern: _} | rest]),
+    do: add_method_type_context(env, rest)
+
   defp add_method_type_context(env, _params), do: env
 
   # Extract base type name from a type (handles generics like List<T>)
@@ -3113,6 +2720,7 @@ defmodule BeamLang.Semantic do
   defp do_type_compatible?({:type_var, _name}, _inferred), do: true
   defp do_type_compatible?(_expected, {:type_var, _name}), do: true
   defp do_type_compatible?(expected, inferred) when expected == inferred, do: true
+
   defp do_type_compatible?({:named, expected}, {:named, inferred}),
     do: compatible_named_type?(expected, inferred)
 
@@ -3157,8 +2765,10 @@ defmodule BeamLang.Semantic do
   end
 
   defp do_comparable_types?(left, right) when left == right, do: true
+
   defp do_comparable_types?({:named, left}, {:named, right}),
     do: compatible_named_type?(left, right)
+
   defp do_comparable_types?(_left, _right), do: false
 
   @spec types_match?(BeamLang.AST.type_name(), BeamLang.AST.type_name()) :: boolean()
@@ -3169,8 +2779,10 @@ defmodule BeamLang.Semantic do
   end
 
   defp do_types_match?(same, same), do: true
+
   defp do_types_match?({:named, left}, {:named, right}),
     do: compatible_named_type?(left, right)
+
   defp do_types_match?({:generic, base1, args1}, {:generic, base2, args2}) do
     do_types_match?(base1, base2) and length(args1) == length(args2) and
       Enum.zip(args1, args2) |> Enum.all?(fn {a, b} -> do_types_match?(a, b) end)
@@ -3264,12 +2876,12 @@ defmodule BeamLang.Semantic do
   end
 
   defp assignment_target(other, _env) when is_tuple(other) do
-    {:error,
-     BeamLang.Error.new(:type, "Invalid assignment target.", expr_span(other))}
+    {:error, BeamLang.Error.new(:type, "Invalid assignment target.", expr_span(other))}
   end
 
   defp assignment_target(_other, _env) do
-    {:error, BeamLang.Error.new(:type, "Invalid assignment target.", BeamLang.Span.new("<unknown>", 0, 0))}
+    {:error,
+     BeamLang.Error.new(:type, "Invalid assignment target.", BeamLang.Span.new("<unknown>", 0, 0))}
   end
 
   @spec resolve_field_type(
@@ -3405,7 +3017,8 @@ defmodule BeamLang.Semantic do
 
   defp annotate_program(
          {:program,
-          %{module: module, imports: imports, types: types, functions: functions, span: span} = prog},
+          %{module: module, imports: imports, types: types, functions: functions, span: span} =
+            prog},
          func_table,
          type_table
        ) do
@@ -3413,7 +3026,14 @@ defmodule BeamLang.Semantic do
     errors = Map.get(prog, :errors, [])
 
     {:program,
-     %{module: module, imports: imports, types: types, errors: errors, functions: functions, span: span}}
+     %{
+       module: module,
+       imports: imports,
+       types: types,
+       errors: errors,
+       functions: functions,
+       span: span
+     }}
   end
 
   defp annotate_function({:function, %{body: nil}} = func, _func_table, _type_table), do: func
@@ -3614,9 +3234,12 @@ defmodule BeamLang.Semantic do
        ) do
     {expr, _} = annotate_expr(expr, nil, env, func_table, type_table)
     bindings = destruct_pattern_bindings(pattern)
-    new_env = Enum.reduce(bindings, env, fn name, acc ->
-      Map.put(acc, name, %{type: :any, mutable: false})
-    end)
+
+    new_env =
+      Enum.reduce(bindings, env, fn name, acc ->
+        Map.put(acc, name, %{type: :any, mutable: false})
+      end)
+
     {{:let_destruct, %{info | expr: expr}}, new_env}
   end
 
@@ -3685,11 +3308,14 @@ defmodule BeamLang.Semantic do
 
     # Preserve operators from original info (may not exist)
     operators = Map.get(info, :operators, [])
-    updated_info = info
+
+    updated_info =
+      info
       |> Map.put(:fields, fields)
       |> Map.put(:type, struct_type)
       |> Map.put(:span, span)
       |> Map.put(:operators, operators)
+
     expr = {:struct, updated_info}
     {expr, struct_type || expected}
   end
@@ -3730,7 +3356,8 @@ defmodule BeamLang.Semantic do
         nil
       end
 
-    {{:call, %{name: name, args: args, span: span, type_args: type_args, type_info: type_info}}, nil}
+    {{:call, %{name: name, args: args, span: span, type_args: type_args, type_info: type_info}},
+     nil}
   end
 
   defp annotate_expr(
@@ -3821,7 +3448,9 @@ defmodule BeamLang.Semantic do
             {:ok, t} -> t
             _ -> nil
           end
-        t -> t
+
+        t ->
+          t
       end
 
     inferred_right_type =
@@ -3831,15 +3460,30 @@ defmodule BeamLang.Semantic do
             {:ok, t} -> t
             _ -> nil
           end
-        t -> t
+
+        t ->
+          t
       end
 
     # Check if operator is overloaded
     operator_info =
       if inferred_left_type != nil do
-        case check_operator_overload(op, inferred_left_type, inferred_right_type, type_table, func_table) do
+        case check_operator_overload(
+               op,
+               inferred_left_type,
+               inferred_right_type,
+               type_table,
+               func_table
+             ) do
           {:ok, result_type, func_name} ->
-            %{overloaded: true, left_type: inferred_left_type, right_type: inferred_right_type, result_type: result_type, func_name: func_name}
+            %{
+              overloaded: true,
+              left_type: inferred_left_type,
+              right_type: inferred_right_type,
+              result_type: result_type,
+              func_name: func_name
+            }
+
           :no_overload ->
             nil
         end
@@ -3847,7 +3491,8 @@ defmodule BeamLang.Semantic do
         nil
       end
 
-    {{:binary, %{op: op, left: left, right: right, span: span, operator_info: operator_info}}, nil}
+    {{:binary, %{op: op, left: left, right: right, span: span, operator_info: operator_info}},
+     nil}
   end
 
   defp annotate_expr(
@@ -3938,7 +3583,13 @@ defmodule BeamLang.Semantic do
     {{:res_err, %{expr: expr, span: span, type: inferred}}, inferred}
   end
 
-  defp annotate_expr({:list_literal, %{elements: elements, span: span}}, expected, env, func_table, type_table) do
+  defp annotate_expr(
+         {:list_literal, %{elements: elements, span: span}},
+         expected,
+         env,
+         func_table,
+         type_table
+       ) do
     elem_type =
       case normalize_type(expected) do
         {:generic, {:named, "List"}, [t]} -> t
