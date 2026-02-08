@@ -118,7 +118,7 @@ defmodule BeamLang.LSP.Server do
     definition =
       with %{"textDocument" => %{"uri" => uri}, "position" => position} <- params,
            doc when not is_nil(doc) <- Map.get(state.documents, uri) do
-        definition_for(doc, position)
+        definition_for(state, doc, position)
       else
         _ -> []
       end
@@ -425,12 +425,12 @@ defmodule BeamLang.LSP.Server do
     end
   end
 
-  defp definition_for(doc, %{"line" => line, "character" => character}) do
+  defp definition_for(state, doc, %{"line" => line, "character" => character}) do
     offset = position_to_offset(doc.text, line, character)
 
     with %BeamLang.Token{type: :identifier, value: name} = token <- identifier_at(doc, offset),
          lookup_name <- qualified_lookup_name(doc, token, name),
-         {:ok, %{span: span, path: path}} <- lookup_definition(doc, lookup_name, offset) do
+         {:ok, %{span: span, path: path}} <- lookup_definition(state.documents, doc, lookup_name, offset) do
       [
         %{
           "uri" => path_to_uri(path),
@@ -855,34 +855,151 @@ defmodule BeamLang.LSP.Server do
     end
   end
 
-  defp lookup_definition(doc, name, offset) do
+  defp lookup_definition(documents, doc, name, offset) do
     case lookup_local(doc, name, offset) do
       {:ok, info} ->
         {:ok, %{span: info.span, path: doc.path}}
 
       :error ->
-        case Map.get(doc.index[:functions] || %{}, name) do
-          nil ->
-            case Map.get(doc.index[:types] || %{}, name) do
-              nil ->
-                case Map.get(doc.index[:errors] || %{}, name) do
-                  nil ->
-                    case Map.get(doc.index[:methods] || %{}, name) do
-                      nil -> :error
-                      [info | _] -> {:ok, %{span: info.span, path: doc.path}}
-                    end
+        if qualified_name?(name) do
+          case lookup_qualified_definition(documents, doc, name) do
+            {:ok, _} = result -> result
+            :error -> lookup_definition_in_index(doc, name)
+          end
+        else
+          lookup_definition_in_index(doc, name)
+        end
+    end
+  end
 
-                  info -> {:ok, %{span: info.span, path: doc.path}}
+  defp lookup_definition_in_index(doc, name) do
+    case Map.get(doc.index[:functions] || %{}, name) do
+      nil ->
+        case Map.get(doc.index[:types] || %{}, name) do
+          nil ->
+            case Map.get(doc.index[:errors] || %{}, name) do
+              nil ->
+                case Map.get(doc.index[:methods] || %{}, name) do
+                  nil -> :error
+                  [info | _] -> {:ok, %{span: info.span, path: doc.path}}
                 end
 
-              info ->
-                {:ok, %{span: info.span, path: doc.path}}
+              info -> {:ok, %{span: info.span, path: doc.path}}
             end
 
           info ->
             {:ok, %{span: info.span, path: doc.path}}
         end
+
+      info ->
+        {:ok, %{span: info.span, path: doc.path}}
     end
+  end
+
+  defp lookup_qualified_definition(documents, doc, qualified_name) do
+    case split_qualified_name(qualified_name) do
+      {module_ref, symbol_name} ->
+        module_name = resolve_module_alias(doc, module_ref)
+        docs = Map.values(documents || %{})
+
+        target_doc =
+          find_module_document(docs, module_name) ||
+            load_module_document_from_disk(doc.path, module_name)
+
+        case target_doc do
+          nil ->
+            :error
+
+          target ->
+            case lookup_symbol_definition_in_doc(target, symbol_name) do
+              {:ok, span} -> {:ok, %{span: span, path: target.path}}
+              :error -> :error
+            end
+        end
+
+      nil ->
+        :error
+    end
+  end
+
+  defp lookup_symbol_definition_in_doc(doc, name) do
+    case Map.get(doc.index[:functions] || %{}, name) do
+      %{span: span} ->
+        {:ok, span}
+
+      _ ->
+        case Map.get(doc.index[:types] || %{}, name) do
+          %{span: span} ->
+            {:ok, span}
+
+          _ ->
+            case Map.get(doc.index[:errors] || %{}, name) do
+              %{span: span} ->
+                {:ok, span}
+
+              _ ->
+                case Map.get(doc.index[:methods] || %{}, name) do
+                  [%{span: span} | _] -> {:ok, span}
+                  _ -> :error
+                end
+            end
+        end
+    end
+  end
+
+  defp find_module_document(documents, module_name) do
+    Enum.find(documents, fn doc ->
+      module_name_from_path(doc.path) == module_name
+    end)
+  end
+
+  defp load_module_document_from_disk(current_path, module_name) do
+    module_path = Path.join(Path.dirname(current_path), module_name <> ".bl")
+
+    case File.read(module_path) do
+      {:ok, text} ->
+        {doc, _diagnostics} = build_document(path_to_uri(module_path), text)
+        doc
+
+      _ ->
+        nil
+    end
+  end
+
+  defp split_qualified_name(name) when is_binary(name) do
+    case String.split(name, "::", parts: 2) do
+      [module_name, symbol_name] when module_name != "" and symbol_name != "" ->
+        {module_name, symbol_name}
+
+      _ ->
+        nil
+    end
+  end
+
+  defp split_qualified_name(_), do: nil
+
+  defp qualified_name?(name) when is_binary(name), do: String.contains?(name, "::")
+  defp qualified_name?(_), do: false
+
+  defp resolve_module_alias(doc, module_ref) when is_binary(module_ref) do
+    case doc.ast do
+      {:program, %{imports: imports}} when is_list(imports) ->
+        Enum.find_value(imports, module_ref, fn
+          {:import, %{alias: ^module_ref, module: module_name}} -> module_name
+          _ -> nil
+        end)
+
+      _ ->
+        module_ref
+    end
+  end
+
+  defp resolve_module_alias(_doc, module_ref), do: module_ref
+
+  defp module_name_from_path(path) do
+    path
+    |> Path.basename()
+    |> Path.rootname()
   end
 
   defp symbol_matches(index, query) do

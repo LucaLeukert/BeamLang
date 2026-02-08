@@ -540,4 +540,43 @@ defmodule BeamLang.LSP.E2ETest do
 
     stop_server(port)
   end
+
+  test "definition jumps across module files for qualified refs" do
+    port = start_server()
+    initialize(port)
+
+    use_math_path = Path.expand("examples/modules/use_math.bl")
+    use_math_uri = "file://" <> use_math_path
+    use_math_source = File.read!(use_math_path)
+    open_document(port, use_math_uri, use_math_source)
+
+    math_ops_path = Path.expand("examples/modules/math_ops.bl")
+    math_ops_uri = "file://" <> math_ops_path
+    math_ops_source = File.read!(math_ops_path)
+    open_document(port, math_ops_uri, math_ops_source)
+
+    # On `add` in `math_ops::add(...)`
+    send_request(port, 18, "textDocument/definition", %{
+      "textDocument" => %{"uri" => use_math_uri},
+      "position" => %{"line" => 6, "character" => 22}
+    })
+
+    {resp_add, _} = recv_response_by_id(port, 18)
+    [add_loc | _] = resp_add["result"] || []
+    assert add_loc["uri"] == math_ops_uri
+    assert get_in(add_loc, ["range", "start", "line"]) == 5
+
+    # On `MathPair` in `math_ops::MathPair`
+    send_request(port, 19, "textDocument/definition", %{
+      "textDocument" => %{"uri" => use_math_uri},
+      "position" => %{"line" => 1, "character" => 27}
+    })
+
+    {resp_type, _} = recv_response_by_id(port, 19)
+    [type_loc | _] = resp_type["result"] || []
+    assert type_loc["uri"] == math_ops_uri
+    assert get_in(type_loc, ["range", "start", "line"]) == 0
+
+    stop_server(port)
+  end
 end
