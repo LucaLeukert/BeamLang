@@ -1817,10 +1817,17 @@ defmodule BeamLang.Semantic do
   defp param_name(%{pattern: _}), do: nil
 
   defp internal_call?(true, func_span, expr_span) do
-    func_span.file_id != expr_span.file_id
+    func_span.file_id != expr_span.file_id and
+      not (stdlib_file_id?(func_span.file_id) and stdlib_file_id?(expr_span.file_id))
   end
 
   defp internal_call?(_internal, _func_span, _expr_span), do: false
+
+  defp stdlib_file_id?(file_id) when is_binary(file_id) do
+    Regex.match?(~r/(^|[\/\\])stdlib[\/\\](core|ext)[\/\\]/, file_id)
+  end
+
+  defp stdlib_file_id?(_), do: false
 
   @spec build_type_table([BeamLang.AST.type_def()]) :: {:ok, map()}
   defp build_type_table(types) do

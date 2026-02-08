@@ -208,7 +208,7 @@ defmodule BeamLang.IntegrationTest do
   test "supports chained method calls" do
     source = """
     fn main(args: [String]) -> number {
-        let value = list_new()->push(1)->push(2)->first()->unwrap(0);
+        let value = [1, 2]->push(3)->first()->unwrap(0);
         return value;
     }
     """

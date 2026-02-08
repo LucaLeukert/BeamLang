@@ -20,6 +20,7 @@ The standard library is written in BeamLang (`.bl` files) and is loaded automati
 - Each `.bl` file is a module. The module name is the file name without `.bl`.
 - `export` exposes functions and types from a module.
 - `internal` marks functions that can only be called from within the same module file.
+  Exception: stdlib files (`stdlib/core/*`, `stdlib/ext/*`) may call each other's `internal` functions.
 
 Import forms:
 
@@ -465,7 +466,7 @@ The stdlib prefers `@external(erlang, ...)` for functions that map directly to E
 
 - The language does not have classes. Methods are just function fields in structs.
 - The stdlib is implemented in BeamLang and loaded as source, not hard-coded.
-- Internal stdlib functions are marked with `internal` and are not callable outside their module.
+- Internal stdlib functions are marked with `internal`, callable within stdlib source files, and not callable from user modules.
 
 ## Async (Proposed)
 
