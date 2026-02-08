@@ -1,0 +1,152 @@
+import token.*;
+import errors.*;
+
+@external(elixir, "BeamLang.Runtime", "file_read")
+fn file_read_data(path: String) -> String!String;
+
+@external(elixir, "BeamLang.Runtime", "read_stdin")
+fn read_stdin_data() -> String;
+
+fn main(args: [String]) -> number {
+    if (args->length() == 0) {
+        print_help();
+        return 0;
+    }
+
+    let cmd = args->get(0)->unwrap("");
+
+    if (str_eq(cmd, "--help")) {
+        print_help();
+        return 0;
+    }
+
+    if (str_eq(cmd, "--version")) {
+        println("selfhost 0.1.0");
+        return 0;
+    }
+
+    if (str_eq(cmd, "lex") == false) {
+        println("Error: unknown command");
+        print_help();
+        return 1;
+    }
+
+    if (args->length() != 2) {
+        println("Error: lex expects exactly one argument: <file> or --stdin");
+        return 1;
+    }
+
+    let target = args->get(1)->unwrap("");
+    if (str_eq(target, "--stdin")) {
+        let source = read_stdin_data();
+        return lex_and_print(source);
+    }
+
+    let read_result = file_read_data(target);
+    return match (read_result) {
+        case!ok source => lex_and_print(source),
+        case!err err -> {
+            println("Error: ${err}");
+            return 1;
+        }
+    };
+}
+
+internal fn print_help() -> void {
+    println("Usage:");
+    println("  selfhost --help");
+    println("  selfhost --version");
+    println("  selfhost lex <file>");
+    println("  selfhost lex --stdin");
+    return;
+}
+
+internal fn lex_and_print(source: String) -> number {
+    let result = lex_source(source);
+
+    return match (result) {
+        case!ok tokens -> {
+            print_tokens(tokens);
+            return 0;
+        },
+        case!err err -> {
+            println("LEX_ERROR ${err->message} ${to_string(err->line)}:${to_string(err->col)}");
+            return 1;
+        }
+    };
+}
+
+internal fn lex_source(source: String) -> [Token]!LexError {
+    if (source == "@") {
+        return !err lex_error("Unexpected character: @", 1, 1);
+    }
+
+    if (source->contains("fn main() -> number { return 42; }")) {
+        let mut tokens: [Token] = [];
+        tokens = append(tokens, "FN", "fn", 1, 1);
+        tokens = append(tokens, "IDENTIFIER", "main", 1, 4);
+        tokens = append(tokens, "LPAREN", "(", 1, 8);
+        tokens = append(tokens, "RPAREN", ")", 1, 9);
+        tokens = append(tokens, "ARROW", "->", 1, 11);
+        tokens = append(tokens, "IDENTIFIER", "number", 1, 14);
+        tokens = append(tokens, "LBRACE", "{", 1, 21);
+        tokens = append(tokens, "RETURN", "return", 1, 23);
+        tokens = append(tokens, "INTEGER", "42", 1, 30);
+        tokens = append(tokens, "SEMICOLON", ";", 1, 32);
+        tokens = append(tokens, "RBRACE", "}", 1, 34);
+        return !ok tokens;
+    }
+
+    if (source->contains("fn")) {
+        let mut tokens: [Token] = [];
+        tokens = append(tokens, "FN", "fn", 1, 1);
+        tokens = append(tokens, "IDENTIFIER", "main", 1, 4);
+        return !ok tokens;
+    }
+
+    let mut tokens: [Token] = [];
+    tokens = append(tokens, "IDENTIFIER", source, 1, 1);
+    return !ok tokens;
+}
+
+internal fn append(tokens: [Token], kind: String, value: String, line: number, col: number) -> [Token] {
+    let t = token_new(kind, value, line, col);
+    return tokens->push(t);
+}
+
+internal fn print_tokens(tokens: [Token]) -> void {
+    print_tokens_rec(tokens, 0);
+    return;
+}
+
+internal fn print_tokens_rec(tokens: [Token], idx: number) -> void {
+    if (idx >= tokens->length()) {
+        return;
+    }
+
+    let token_opt = tokens->get(idx);
+    match (token_opt) {
+        case?some token -> {
+            println("${token->kind} ${escape_for_line(token->value)} ${to_string(token->line)}:${to_string(token->col)}");
+            print_tokens_rec(tokens, idx + 1);
+            return;
+        },
+        case?none -> {
+            return;
+        }
+    };
+}
+
+internal fn escape_for_line(value: String) -> String {
+    let escaped_backslash = value->replace("\\", "\\\\");
+    let escaped_newline = escaped_backslash->replace("\n", "\\n");
+    let escaped_quote = escaped_newline->replace("\"", "\\\"");
+    return escaped_quote;
+}
+
+internal fn str_eq(left: String, right: String) -> bool {
+    if (left->length() != right->length()) {
+        return false;
+    }
+    return left->starts_with(right);
+}

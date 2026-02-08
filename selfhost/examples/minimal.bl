@@ -1,0 +1,4 @@
+fn main(args: [String]) -> number {
+    let value = 42;
+    return value;
+}

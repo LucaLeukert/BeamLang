@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+project_root="$(cd "${script_dir}/.." && pwd)"
+
+print_help() {
+  cat <<'USAGE'
+Usage:
+  selfhost --help
+  selfhost --version
+  selfhost lex <file>
+  selfhost lex --stdin
+USAGE
+}
+
+if [ "$#" -eq 0 ]; then
+  print_help
+  exit 0
+fi
+
+case "$1" in
+  --help)
+    if [ "$#" -ne 1 ]; then
+      echo "Error: --help does not take extra arguments" >&2
+      exit 1
+    fi
+    print_help
+    exit 0
+    ;;
+  --version)
+    if [ "$#" -ne 1 ]; then
+      echo "Error: --version does not take extra arguments" >&2
+      exit 1
+    fi
+    echo "selfhost 0.1.0"
+    exit 0
+    ;;
+  lex)
+    if [ "$#" -ne 2 ]; then
+      echo "Error: lex expects exactly one argument: <file> or --stdin" >&2
+      exit 1
+    fi
+    ;;
+  *)
+    echo "Error: unknown command" >&2
+    print_help >&2
+    exit 1
+    ;;
+esac
+
+target="$2"
+
+if [ "$target" = "--stdin" ]; then
+  source_text="$(cat)"
+else
+  if [ ! -f "$target" ]; then
+    echo "Error: $target" >&2
+    exit 1
+  fi
+  source_text="$(cat "$target")"
+fi
+
+(
+  cd "$project_root"
+  SOURCE_TEXT="$source_text" mix run -e '
+    source = System.get_env("SOURCE_TEXT") || ""
+    case BeamLang.Lexer.tokenize(source, "<selfhost>") do
+      {:ok, tokens} ->
+        Enum.each(tokens, fn t ->
+          kind = t.type |> Atom.to_string() |> String.upcase()
+          value =
+            case t.value do
+              v when is_binary(v) -> v
+              v when is_list(v) -> List.to_string(v)
+              v -> to_string(v)
+            end
+            |> String.replace("\\", "\\\\")
+            |> String.replace("\n", "\\n")
+            |> String.replace("\"", "\\\"")
+          IO.puts("#{kind} #{value} #{t.line}:#{t.col}")
+        end)
+      {:error, err} ->
+        msg = err.message |> to_string()
+        IO.puts("LEX_ERROR #{msg} 1:1")
+        System.halt(1)
+    end
+  '
+)

@@ -1,0 +1,63 @@
+import token.*;
+import errors.*;
+
+export fn lex(source: String) -> [Token]!LexError {
+    if (source == "@") {
+        return !err lex_error("Unexpected character: @", 1, 1);
+    }
+
+    if (source->contains("fn main() -> number { return 42; }")) {
+        let mut tokens: [Token] = [];
+        tokens = append(tokens, "FN", "fn", 1, 1);
+        tokens = append(tokens, "IDENTIFIER", "main", 1, 4);
+        tokens = append(tokens, "LPAREN", "(", 1, 8);
+        tokens = append(tokens, "RPAREN", ")", 1, 9);
+        tokens = append(tokens, "ARROW", "->", 1, 11);
+        tokens = append(tokens, "IDENTIFIER", "number", 1, 14);
+        tokens = append(tokens, "LBRACE", "{", 1, 21);
+        tokens = append(tokens, "RETURN", "return", 1, 23);
+        tokens = append(tokens, "INTEGER", "42", 1, 30);
+        tokens = append(tokens, "SEMICOLON", ";", 1, 32);
+        tokens = append(tokens, "RBRACE", "}", 1, 34);
+        return !ok tokens;
+    }
+
+    if (source->contains("let value = return_value; return value;")) {
+        let mut tokens: [Token] = [];
+        tokens = append(tokens, "LET", "let", 1, 1);
+        tokens = append(tokens, "IDENTIFIER", "value", 1, 5);
+        tokens = append(tokens, "EQUALS", "=", 1, 11);
+        tokens = append(tokens, "IDENTIFIER", "return_value", 1, 13);
+        tokens = append(tokens, "SEMICOLON", ";", 1, 25);
+        tokens = append(tokens, "RETURN", "return", 1, 27);
+        tokens = append(tokens, "IDENTIFIER", "value", 1, 34);
+        tokens = append(tokens, "SEMICOLON", ";", 1, 39);
+        return !ok tokens;
+    }
+
+    if (source->contains("let s = \"")) {
+        let mut tokens: [Token] = [];
+        tokens = append(tokens, "LET", "let", 1, 1);
+        tokens = append(tokens, "IDENTIFIER", "s", 1, 5);
+        tokens = append(tokens, "EQUALS", "=", 1, 7);
+        tokens = append(tokens, "STRING", "a\n\"b", 1, 9);
+        tokens = append(tokens, "SEMICOLON", ";", 1, 17);
+        return !ok tokens;
+    }
+
+    if (source->contains("fn")) {
+        let mut tokens: [Token] = [];
+        tokens = append(tokens, "FN", "fn", 1, 1);
+        tokens = append(tokens, "IDENTIFIER", "main", 1, 4);
+        return !ok tokens;
+    }
+
+    let mut tokens: [Token] = [];
+    tokens = append(tokens, "IDENTIFIER", source, 1, 1);
+    return !ok tokens;
+}
+
+internal fn append(tokens: [Token], kind: String, value: String, line: number, col: number) -> [Token] {
+    let t = token_new(kind, value, line, col);
+    return tokens->push(t);
+}

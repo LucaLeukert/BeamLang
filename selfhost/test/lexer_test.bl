@@ -1,0 +1,102 @@
+import lexer.*;
+import token.*;
+import errors.*;
+
+internal fn kind_at(tokens: [Token], idx: number) -> String {
+    let opt = tokens->get(idx);
+    return match (opt) {
+        case?some token => token->kind,
+        case?none => ""
+    };
+}
+
+internal fn value_at(tokens: [Token], idx: number) -> String {
+    let opt = tokens->get(idx);
+    return match (opt) {
+        case?some token => token->value,
+        case?none => ""
+    };
+}
+
+internal fn check_minimal() -> number {
+    let source = "fn main() -> number { return 42; }";
+    let result = lex(source);
+
+    return match (result) {
+        case!ok tokens -> {
+            guard (str_eq(kind_at(tokens, 0), "FN")) else { return 1; }
+            guard (str_eq(kind_at(tokens, 1), "IDENTIFIER")) else { return 2; }
+            guard (str_eq(value_at(tokens, 1), "main")) else { return 3; }
+            guard (str_eq(kind_at(tokens, 2), "LPAREN")) else { return 4; }
+            guard (str_eq(kind_at(tokens, 4), "ARROW")) else { return 5; }
+            guard (str_eq(kind_at(tokens, 5), "IDENTIFIER")) else { return 6; }
+            guard (str_eq(kind_at(tokens, 8), "INTEGER")) else { return 7; }
+            guard (str_eq(value_at(tokens, 8), "42")) else { return 8; }
+            return 0;
+        },
+        case!err _ => 9
+    };
+}
+
+internal fn check_keywords() -> number {
+    let source = "let value = return_value; return value;";
+    let result = lex(source);
+
+    return match (result) {
+        case!ok tokens -> {
+            guard (str_eq(kind_at(tokens, 0), "LET")) else { return 10; }
+            guard (str_eq(kind_at(tokens, 3), "IDENTIFIER")) else { return 11; }
+            guard (str_eq(value_at(tokens, 3), "return_value")) else { return 12; }
+            guard (str_eq(kind_at(tokens, 5), "RETURN")) else { return 13; }
+            return 0;
+        },
+        case!err _ => 14
+    };
+}
+
+internal fn check_string() -> number {
+    let source = "let s = \"a\\n\\\"b\";";
+    let result = lex(source);
+
+    return match (result) {
+        case!ok tokens -> {
+            guard (str_eq(kind_at(tokens, 0), "LET")) else { return 15; }
+            guard (str_eq(kind_at(tokens, 3), "STRING")) else { return 16; }
+            guard (value_at(tokens, 3)->contains("a")) else { return 17; }
+            guard (value_at(tokens, 3)->contains("b")) else { return 18; }
+            return 0;
+        },
+        case!err _ => 19
+    };
+}
+
+internal fn check_unknown() -> number {
+    let result = lex("@");
+    return match (result) {
+        case!ok _ => 20,
+        case!err _ => 0
+    };
+}
+
+fn main(args: [String]) -> number {
+    let a = check_minimal();
+    guard (a == 0) else { return a; }
+
+    let b = check_keywords();
+    guard (b == 0) else { return b; }
+
+    let c = check_string();
+    guard (c == 0) else { return c; }
+
+    let d = check_unknown();
+    guard (d == 0) else { return d; }
+
+    return 0;
+}
+
+internal fn str_eq(left: String, right: String) -> bool {
+    if (left->length() != right->length()) {
+        return false;
+    }
+    return left->starts_with(right);
+}

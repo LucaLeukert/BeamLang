@@ -1,0 +1,15 @@
+export type Token {
+    kind: String,
+    value: String,
+    line: number,
+    col: number
+}
+
+export fn token_new(kind: String, value: String, line: number, col: number) -> Token {
+    return {
+        kind = kind,
+        value = value,
+        line = line,
+        col = col
+    };
+}

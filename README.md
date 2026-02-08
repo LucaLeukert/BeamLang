@@ -89,6 +89,15 @@ Debug LSP logs: `./beamlang --lsp --lsp-debug`
 
 ---
 
+## Selfhost Bootstrap
+
+- Bootstrap workspace: `selfhost/`
+- Guide: `selfhost/README.md`
+- CLI wrapper: `./bin/selfhost`
+- Checks: `./bin/selfhost-check`
+
+---
+
 ## Design & docs
 
 - **[beamlang_design.md](beamlang_design.md)** — language spec, types, operators, stdlib, and implementation notes.
