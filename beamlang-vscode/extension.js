@@ -4,6 +4,8 @@ const { execFile } = require('child_process');
 const { LanguageClient, TransportKind } = require('vscode-languageclient/node');
 
 let client;
+let outputChannel;
+let traceOutputChannel;
 
 function activate(context) {
   const config = vscode.workspace.getConfiguration('beamlang');
@@ -11,6 +13,10 @@ function activate(context) {
   const serverArgs = config.get('lsp.serverArgs', ['--lsp']);
   const serverCwd = config.get('lsp.serverCwd', '');
   const debug = config.get('lsp.debug', false);
+
+  outputChannel = vscode.window.createOutputChannel('BeamLang');
+  traceOutputChannel = vscode.window.createOutputChannel('BeamLang LSP Trace');
+  context.subscriptions.push(outputChannel, traceOutputChannel);
 
   const serverOptions = {
     command: serverPath,
@@ -23,8 +29,17 @@ function activate(context) {
   };
 
   const clientOptions = {
-    documentSelector: [{ scheme: 'file', language: 'beamlang' }]
+    documentSelector: [{ scheme: 'file', language: 'beamlang' }],
+    outputChannel,
+    traceOutputChannel
   };
+
+  outputChannel.appendLine('[BeamLang] Starting language server...');
+  outputChannel.appendLine(`[BeamLang] command: ${serverPath} ${serverArgs.join(' ')}`);
+  outputChannel.appendLine(
+    `[BeamLang] cwd: ${serverCwd ? serverCwd : path.dirname(serverPath)}`
+  );
+  outputChannel.appendLine(`[BeamLang] debug: ${debug ? 'enabled' : 'disabled'}`);
 
   client = new LanguageClient(
     'beamlang',
