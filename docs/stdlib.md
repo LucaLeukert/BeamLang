@@ -541,6 +541,13 @@ export type FileEntry {
     size: number
 }
 
+export type Path {
+    segments: [String],
+    operator /: fn(Path, String) -> Path,
+    push: fn(Path, String) -> Path,
+    to_string: fn(Path) -> String
+}
+
 export type Clock {
     internal start_time: number,
     internal stop_time: number,
@@ -563,6 +570,8 @@ export type Clock {
 | `list_directory` | `fn(String) -> List<FileEntry>!IoError` | List directory entries |
 | `clock_new` | `fn() -> Clock` | Create a new stopwatch |
 | `clock_now` | `fn() -> number` | Current monotonic time in milliseconds |
+| `path_new` | `fn() -> Path` | Create an empty path |
+| `path_from_string` | `fn(String) -> Path` | Create a path from slash-separated text |
 
 #### Example
 
@@ -583,6 +592,9 @@ fn main(args: [String]) -> number {
     // ... do work ...
     let clock2 = clock->stop();
     println("Elapsed: ${to_string(clock2->elapsed())} ms");
+
+    let full = path_from_string("usr/local") / "bin" / "beamlang";
+    println(full->to_string()); // usr/local/bin/beamlang
 
     return 0;
 }

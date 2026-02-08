@@ -14,7 +14,10 @@ defmodule BeamLang.ParserTest do
     {:ok, ast} = Parser.parse(tokens)
 
     assert {:program, %{functions: [func]}} = ast
-    assert {:function, %{name: "main", return_type: :number, body: {:block, %{stmts: [stmt]}}}} = func
+
+    assert {:function, %{name: "main", return_type: :number, body: {:block, %{stmts: [stmt]}}}} =
+             func
+
     assert {:return, %{expr: {:integer, %{value: 42}}}} = stmt
   end
 
@@ -29,7 +32,10 @@ defmodule BeamLang.ParserTest do
     {:ok, ast} = Parser.parse(tokens)
 
     assert {:program, %{functions: [func]}} = ast
-    assert {:function, %{name: "main", return_type: :bool, body: {:block, %{stmts: [stmt]}}}} = func
+
+    assert {:function, %{name: "main", return_type: :bool, body: {:block, %{stmts: [stmt]}}}} =
+             func
+
     assert {:return, %{expr: {:bool, %{value: true}}}} = stmt
   end
 
@@ -48,10 +54,21 @@ defmodule BeamLang.ParserTest do
     {:ok, ast} = Parser.parse(tokens)
 
     assert {:program, %{functions: [main, helper]}} = ast
-    assert {:function, %{name: "main", return_type: :number, body: {:block, %{stmts: [stmt1]}}}} = main
+
+    assert {:function, %{name: "main", return_type: :number, body: {:block, %{stmts: [stmt1]}}}} =
+             main
+
     assert {:return, %{expr: {:call, %{name: "helper", args: [arg]}}}} = stmt1
     assert {:integer, %{value: 1}} = arg
-    assert {:function, %{name: "helper", return_type: :number, params: [_], body: {:block, %{stmts: [stmt2]}}}} = helper
+
+    assert {:function,
+            %{
+              name: "helper",
+              return_type: :number,
+              params: [_],
+              body: {:block, %{stmts: [stmt2]}}
+            }} = helper
+
     assert {:return, %{expr: {:integer, %{value: 1}}}} = stmt2
   end
 
@@ -71,11 +88,18 @@ defmodule BeamLang.ParserTest do
     {:ok, ast} = Parser.parse(tokens)
 
     assert {:program, %{functions: [main, helper]}} = ast
-    assert {:function, %{name: "main", return_type: :number, body: {:block, %{stmts: [s1, s2]}}}} = main
+
+    assert {:function, %{name: "main", return_type: :number, body: {:block, %{stmts: [s1, s2]}}}} =
+             main
+
     assert {:expr, %{expr: {:call, %{name: "helper", args: [arg]}}}} = s1
     assert {:integer, %{value: 1}} = arg
     assert {:return, %{expr: {:integer, %{value: 1}}}} = s2
-    assert {:function, %{name: "helper", return_type: :number, params: [_], body: {:block, %{stmts: [h1]}}}} = helper
+
+    assert {:function,
+            %{name: "helper", return_type: :number, params: [_], body: {:block, %{stmts: [h1]}}}} =
+             helper
+
     assert {:return, %{expr: {:integer, %{value: 2}}}} = h1
   end
 
@@ -91,7 +115,10 @@ defmodule BeamLang.ParserTest do
     {:ok, ast} = Parser.parse(tokens)
 
     assert {:program, %{functions: [func]}} = ast
-    assert {:function, %{name: "main", return_type: :number, body: {:block, %{stmts: [s1, s2]}}}} = func
+
+    assert {:function, %{name: "main", return_type: :number, body: {:block, %{stmts: [s1, s2]}}}} =
+             func
+
     assert {:let, %{name: "value", mutable: false, expr: {:integer, %{value: 3}}}} = s1
     assert {:return, %{expr: {:identifier, %{name: "value"}}}} = s2
   end
@@ -111,7 +138,10 @@ defmodule BeamLang.ParserTest do
     assert {:program, %{functions: [func]}} = ast
     assert {:function, %{body: {:block, %{stmts: [s1, s2, s3]}}}} = func
     assert {:let, %{name: "value", mutable: true}} = s1
-    assert {:assign, %{target: {:identifier, %{name: "value"}}, expr: {:integer, %{value: 2}}}} = s2
+
+    assert {:assign, %{target: {:identifier, %{name: "value"}}, expr: {:integer, %{value: 2}}}} =
+             s2
+
     assert {:return, %{expr: {:identifier, %{name: "value"}}}} = s3
   end
 
@@ -134,11 +164,27 @@ defmodule BeamLang.ParserTest do
     assert {:program, %{functions: [func]}} = ast
     assert {:function, %{body: {:block, %{stmts: [s1, s2, s3, s4, s5, s6, s7]}}}} = func
     assert {:let, %{name: "value", mutable: true}} = s1
-    assert {:compound_assign, %{target: {:identifier, %{name: "value"}}, op: :add, expr: {:integer, %{value: 2}}}} = s2
-    assert {:compound_assign, %{target: {:identifier, %{name: "value"}}, op: :sub, expr: {:integer, %{value: 1}}}} = s3
-    assert {:compound_assign, %{target: {:identifier, %{name: "value"}}, op: :mul, expr: {:integer, %{value: 3}}}} = s4
-    assert {:compound_assign, %{target: {:identifier, %{name: "value"}}, op: :div, expr: {:integer, %{value: 2}}}} = s5
-    assert {:compound_assign, %{target: {:identifier, %{name: "value"}}, op: :mod, expr: {:integer, %{value: 4}}}} = s6
+
+    assert {:compound_assign,
+            %{target: {:identifier, %{name: "value"}}, op: :add, expr: {:integer, %{value: 2}}}} =
+             s2
+
+    assert {:compound_assign,
+            %{target: {:identifier, %{name: "value"}}, op: :sub, expr: {:integer, %{value: 1}}}} =
+             s3
+
+    assert {:compound_assign,
+            %{target: {:identifier, %{name: "value"}}, op: :mul, expr: {:integer, %{value: 3}}}} =
+             s4
+
+    assert {:compound_assign,
+            %{target: {:identifier, %{name: "value"}}, op: :div, expr: {:integer, %{value: 2}}}} =
+             s5
+
+    assert {:compound_assign,
+            %{target: {:identifier, %{name: "value"}}, op: :mod, expr: {:integer, %{value: 4}}}} =
+             s6
+
     assert {:return, %{expr: {:identifier, %{name: "value"}}}} = s7
   end
 
@@ -218,7 +264,11 @@ defmodule BeamLang.ParserTest do
     {:ok, ast} = Parser.parse(tokens)
 
     assert {:program, %{functions: [func]}} = ast
-    assert {:function, %{name: "test", type_params: ["T"], params: [param], return_type: {:named, "T"}}} = func
+
+    assert {:function,
+            %{name: "test", type_params: ["T"], params: [param], return_type: {:named, "T"}}} =
+             func
+
     assert %{name: "opt", type: {:generic, {:named, "Optional"}, [{:named, "T"}]}} = param
   end
 
@@ -510,7 +560,10 @@ defmodule BeamLang.ParserTest do
 
     assert {:program, %{functions: [func]}} = ast
     assert {:function, %{body: {:block, %{stmts: [stmt, _]}}}} = func
-    assert {:let, %{expr: {:call, %{name: "parse_args", type_args: [type_arg], args: [_]}}}} = stmt
+
+    assert {:let, %{expr: {:call, %{name: "parse_args", type_args: [type_arg], args: [_]}}}} =
+             stmt
+
     assert {:named, "Args"} = type_arg
   end
 
@@ -552,7 +605,13 @@ defmodule BeamLang.ParserTest do
     assert {:program, %{functions: [func]}} = ast
     assert {:function, %{body: {:block, %{stmts: [s1, s2, _s3]}}}} = func
     assert {:let, %{name: "value", mutable: true}} = s1
-    assert {:if_stmt, %{then_block: {:block, %{stmts: [t1]}}, else_branch: {:else_block, %{block: {:block, %{stmts: [e1]}}}}}} = s2
+
+    assert {:if_stmt,
+            %{
+              then_block: {:block, %{stmts: [t1]}},
+              else_branch: {:else_block, %{block: {:block, %{stmts: [e1]}}}}
+            }} = s2
+
     assert {:assign, %{target: {:identifier, %{name: "value"}}}} = t1
     assert {:assign, %{target: {:identifier, %{name: "value"}}}} = e1
   end
@@ -608,13 +667,25 @@ defmodule BeamLang.ParserTest do
     assert length(stmts) == 4
 
     # let nums = list_new();
-    assert {:let, %{name: "nums", expr: {:call, %{name: "list_new", args: []}}}} = Enum.at(stmts, 0)
+    assert {:let, %{name: "nums", expr: {:call, %{name: "list_new", args: []}}}} =
+             Enum.at(stmts, 0)
 
     # let nums2 = nums->push(1);
-    assert {:let, %{name: "nums2", expr: {:method_call, %{target: {:identifier, %{name: "nums"}}, name: "push", args: [_]}}}} = Enum.at(stmts, 1)
+    assert {:let,
+            %{
+              name: "nums2",
+              expr:
+                {:method_call, %{target: {:identifier, %{name: "nums"}}, name: "push", args: [_]}}
+            }} = Enum.at(stmts, 1)
 
     # let len = nums2->length();
-    assert {:let, %{name: "len", expr: {:method_call, %{target: {:identifier, %{name: "nums2"}}, name: "length", args: []}}}} = Enum.at(stmts, 2)
+    assert {:let,
+            %{
+              name: "len",
+              expr:
+                {:method_call,
+                 %{target: {:identifier, %{name: "nums2"}}, name: "length", args: []}}
+            }} = Enum.at(stmts, 2)
 
     # return len;
     assert {:return, %{expr: {:identifier, %{name: "len"}}}} = Enum.at(stmts, 3)
@@ -659,11 +730,22 @@ defmodule BeamLang.ParserTest do
     assert length(stmts) == 3
 
     # let nums: [number] = [1, 2, 3];
-    assert {:let, %{name: "nums", type: {:generic, {:named, "List"}, [:number]}, expr: {:list_literal, %{elements: elems}}}} = Enum.at(stmts, 0)
+    assert {:let,
+            %{
+              name: "nums",
+              type: {:generic, {:named, "List"}, [:number]},
+              expr: {:list_literal, %{elements: elems}}
+            }} = Enum.at(stmts, 0)
+
     assert length(elems) == 3
 
     # let empty: [number] = [];
-    assert {:let, %{name: "empty", type: {:generic, {:named, "List"}, [:number]}, expr: {:list_literal, %{elements: []}}}} = Enum.at(stmts, 1)
+    assert {:let,
+            %{
+              name: "empty",
+              type: {:generic, {:named, "List"}, [:number]},
+              expr: {:list_literal, %{elements: []}}
+            }} = Enum.at(stmts, 1)
   end
 
   test "parses nested list type" do
@@ -677,7 +759,12 @@ defmodule BeamLang.ParserTest do
     {:ok, ast} = Parser.parse(tokens)
 
     assert {:program, %{functions: [func]}} = ast
-    assert {:function, %{name: "main", return_type: {:generic, {:named, "List"}, [{:generic, {:named, "List"}, [:number]}]}}} = func
+
+    assert {:function,
+            %{
+              name: "main",
+              return_type: {:generic, {:named, "List"}, [{:generic, {:named, "List"}, [:number]}]}
+            }} = func
   end
 
   test "parses main with args parameter" do
@@ -832,7 +919,8 @@ defmodule BeamLang.ParserTest do
 
     assert {:program, %{types: [type_def], functions: _}} = ast
     assert {:type_def, %{name: "Path", fields: fields, operators: operators}} = type_def
-    assert length(fields) == 1  # just path field
+    # just path field
+    assert length(fields) == 1
     assert length(operators) == 1
     [op_decl] = operators
     assert op_decl.op == :div
@@ -859,17 +947,54 @@ defmodule BeamLang.ParserTest do
 
     assert {:program, %{types: [type_def], functions: functions}} = ast
     assert {:type_def, %{name: "Vec2", fields: fields, operators: operators}} = type_def
-    assert length(fields) == 2  # x, y
+    # x, y
+    assert length(fields) == 2
     assert length(operators) == 1
     [op_decl] = operators
     assert op_decl.op == :add
 
     # Check that the struct literal has the operator binding
-    [{:function, %{body: {:block, %{stmts: [{:return, %{expr: {:struct, struct_info}}}]}}}}, _] = functions
+    [{:function, %{body: {:block, %{stmts: [{:return, %{expr: {:struct, struct_info}}}]}}}}, _] =
+      functions
+
     assert length(struct_info.operators) == 1
     [op] = struct_info.operators
     assert op.op == :add
     assert op.func == "vec2_add"
+  end
+
+  test "parses path type with segments and slash operator helpers" do
+    source = """
+    type Path {
+        segments: [String],
+        operator /: fn(Path, String) -> Path,
+        push: fn(Path, String) -> Path,
+        to_string: fn(Path) -> String
+    }
+
+    fn path_push(self: Path, segment: String) -> Path {
+        return { segments = [segment], operator / = path_push, push = path_push, to_string = path_to_string };
+    }
+
+    fn path_to_string(self: Path) -> String {
+        return self->segments->join("/");
+    }
+
+    fn main(args: [String]) -> number {
+        return 0;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{types: [type_def], functions: _}} = ast
+    assert {:type_def, %{name: "Path", fields: fields, operators: operators}} = type_def
+    assert length(fields) == 3
+    assert length(operators) == 1
+    [op_decl] = operators
+    assert op_decl.op == :div
+    assert op_decl.type == {:fn, [{:named, "Path"}, :String], {:named, "Path"}}
   end
 
   test "parses simple enum definition" do
@@ -918,7 +1043,10 @@ defmodule BeamLang.ParserTest do
     assert length(variants) == 3
     [circle, rectangle, point] = variants
     assert {:enum_variant, %{name: "Circle", fields: [%{name: "radius", type: :number}]}} = circle
-    assert {:enum_variant, %{name: "Rectangle", fields: [%{name: "width"}, %{name: "height"}]}} = rectangle
+
+    assert {:enum_variant, %{name: "Rectangle", fields: [%{name: "width"}, %{name: "height"}]}} =
+             rectangle
+
     assert {:enum_variant, %{name: "Point", fields: []}} = point
   end
 
@@ -1004,7 +1132,12 @@ defmodule BeamLang.ParserTest do
     assert {:program, %{functions: functions}} = ast
     get_x = Enum.find(functions, fn {:function, %{name: n}} -> n == "get_x" end)
     assert {:function, %{params: [param]}} = get_x
-    assert %{pattern: {:struct_pattern, %{name: "Point", fields: fields}}, type: {:named, "Point"}} = param
+
+    assert %{
+             pattern: {:struct_pattern, %{name: "Point", fields: fields}},
+             type: {:named, "Point"}
+           } = param
+
     assert [%{name: "x"}, %{name: "y"}] = fields
   end
 
@@ -1025,7 +1158,10 @@ defmodule BeamLang.ParserTest do
     assert {:program, %{functions: functions}} = ast
     first = Enum.find(functions, fn {:function, %{name: n}} -> n == "first" end)
     assert {:function, %{params: [param]}} = first
-    assert %{pattern: {:tuple_pattern, %{elements: elements}}, type: {:tuple, [:number, :String]}} = param
+
+    assert %{pattern: {:tuple_pattern, %{elements: elements}}, type: {:tuple, [:number, :String]}} =
+             param
+
     assert [pat_identifier: %{name: "a"}, pat_identifier: %{name: "b"}] = elements
   end
 
@@ -1085,14 +1221,19 @@ defmodule BeamLang.ParserTest do
     assert file_field != nil
     assert length(file_field.annotations) == 2
     assert Enum.any?(file_field.annotations, fn a -> a.name == "required" end)
-    assert Enum.any?(file_field.annotations, fn a -> a.name == "description" and a.args == ["Input file"] end)
+
+    assert Enum.any?(file_field.annotations, fn a ->
+             a.name == "description" and a.args == ["Input file"]
+           end)
 
     # Check count field annotations
     count_field = Enum.find(fields, fn f -> f.name == "count" end)
     assert count_field != nil
     assert length(count_field.annotations) == 3
     assert Enum.any?(count_field.annotations, fn a -> a.name == "short" and a.args == ["n"] end)
+
     assert Enum.any?(count_field.annotations, fn a -> a.name == "long" and a.args == ["count"] end)
+
     assert Enum.any?(count_field.annotations, fn a -> a.name == "default" and a.args == [10] end)
 
     # Check verbose field annotations

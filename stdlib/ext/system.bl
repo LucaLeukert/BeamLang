@@ -13,6 +13,13 @@ export type FileEntry {
     size: number
 }
 
+export type Path {
+    segments: [String],
+    operator /: fn(Path, String) -> Path,
+    push: fn(Path, String) -> Path,
+    to_string: fn(Path) -> String
+}
+
 export type Clock {
     internal start_time: number,
     internal stop_time: number,
@@ -56,6 +63,38 @@ internal fn make_io_error(msg: String) -> IoError {
     return err;
 }
 
+internal fn path_from_segments(segments: [String]) -> Path {
+    return {
+        segments = segments,
+        operator / = path_div_method,
+        push = path_push_method,
+        to_string = path_to_string_method
+    };
+}
+
+internal fn path_normalize_segment(segment: String) -> [String] {
+    let raw = segment->split("/");
+
+    return raw->filter(fn(item: String) -> bool {
+        let cleaned = item->trim();
+        return cleaned != "";
+    });
+}
+
+internal fn path_push_method(self: Path, segment: String) -> Path {
+    let normalized = path_normalize_segment(segment);
+    let next_segments = self->segments->concat(normalized);
+    return path_from_segments(next_segments);
+}
+
+internal fn path_div_method(self: Path, segment: String) -> Path {
+    return self->push(segment);
+}
+
+internal fn path_to_string_method(self: Path) -> String {
+    return self->segments->join("/");
+}
+
 internal fn clock_now_method(self: Clock) -> number {
     return clock_now_data();
 }
@@ -89,6 +128,18 @@ fn clock_new() -> Clock {
 /** Get current monotonic time in milliseconds **/
 fn clock_now() -> number {
     return clock_now_data();
+}
+
+/** Create an empty Path **/
+fn path_new() -> Path {
+    let empty: [String] = [];
+    return path_from_segments(empty);
+}
+
+/** Create a Path from a slash-separated string **/
+fn path_from_string(raw: String) -> Path {
+    let normalized = path_normalize_segment(raw);
+    return path_from_segments(normalized);
 }
 
 /** Read a file and return its contents as a Result **/
