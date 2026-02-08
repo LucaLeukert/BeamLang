@@ -257,14 +257,17 @@ defmodule BeamLang.Semantic do
         Map.put(acc, param.name, %{type: normalize_type(param.type), mutable: param_mutable})
       end)
 
+    # Match method rules for lambdas used as struct function fields.
+    param_env = add_method_type_context(param_env, params)
+
     return_type = normalize_type(return_type)
     lambda_env = Map.merge(env, param_env)
 
-    {:ok, _env, stmt_errors} =
+    {:ok, lambda_env_after, stmt_errors} =
       validate_statements(body, func_table, type_table, lambda_env, return_type)
 
     errors =
-      case typecheck_return(return_type, body, func_table, type_table, lambda_env) do
+      case typecheck_return(return_type, body, func_table, type_table, lambda_env_after) do
         :ok -> stmt_errors ++ lambda_errors
         {:error, errs} -> stmt_errors ++ errs ++ lambda_errors
       end

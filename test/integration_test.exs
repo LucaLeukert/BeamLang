@@ -216,6 +216,20 @@ defmodule BeamLang.IntegrationTest do
     assert {:ok, 1} == BeamLang.run_source(source)
   end
 
+  test "supports lambda return using local let binding" do
+    source = """
+    fn main(args: [String]) -> number {
+        let get_value = fn() -> number {
+            let value = 7;
+            return value;
+        };
+        return get_value();
+    }
+    """
+
+    assert {:ok, 7} == BeamLang.run_source(source)
+  end
+
   test "rejects non-i32 main" do
     source = """
     fn main(args: [String]) -> bool {
