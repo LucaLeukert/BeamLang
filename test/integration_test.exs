@@ -216,6 +216,40 @@ defmodule BeamLang.IntegrationTest do
     assert {:ok, 1} == BeamLang.run_source(source)
   end
 
+  test "runs list methods implemented in BeamLang stdlib" do
+    source = """
+    fn main(args: [String]) -> number {
+        let nums: [number] = [1, 2, 3];
+
+        let popped = nums->pop();
+        guard (popped->length() == 2) else { return 1; }
+        guard (popped->last()->unwrap(0) == 2) else { return 2; }
+
+        let mapped = nums->map(fn(x: number) -> number { return x * 2; });
+        guard (mapped->join(",") == "2,4,6") else { return 3; }
+
+        let filtered = nums->filter(fn(x: number) -> bool { return x > 1; });
+        guard (filtered->length() == 2) else { return 4; }
+        guard (filtered->first()->unwrap(0) == 2) else { return 5; }
+
+        let sum = nums->fold(0, fn(acc: number, x: number) -> number { return acc + x; });
+        guard (to_string(sum) == "6") else { return 6; }
+
+        nums->for_each(fn(x: number) -> void {
+            println(x);
+            return;
+        });
+
+        let joined = nums->join(",");
+        guard (joined == "1,2,3") else { return 7; }
+
+        return 0;
+    }
+    """
+
+    assert {:ok, 0} == BeamLang.run_source(source)
+  end
+
   test "supports lambda return using local let binding" do
     source = """
     fn main(args: [String]) -> number {

@@ -18,20 +18,11 @@ type List<T> {
 @external(erlang, "erlang", "length")
 fn list_length_data(data: any) -> number;
 
-@external(elixir, "BeamLang.Runtime", "list_get")
-fn list_get_data(data: any, index: number) -> any?;
+@external(erlang, "lists", "nth")
+fn list_nth_data(index: number, data: any) -> any;
 
 @external(elixir, "BeamLang.Runtime", "list_push")
 fn list_push_data(data: any, item: any) -> any;
-
-@external(elixir, "BeamLang.Runtime", "list_pop")
-fn list_pop_data(data: any) -> any;
-
-@external(elixir, "BeamLang.Runtime", "list_first")
-fn list_first_data(data: any) -> any?;
-
-@external(elixir, "BeamLang.Runtime", "list_last")
-fn list_last_data(data: any) -> any?;
 
 @external(erlang, "lists", "reverse")
 fn list_reverse_data(data: any) -> any;
@@ -41,21 +32,6 @@ fn list_concat_data(left: any, right: any) -> any;
 
 @external(elixir, "BeamLang.Runtime", "list_empty")
 fn list_empty_data() -> any;
-
-@external(elixir, "BeamLang.Runtime", "list_for_each")
-fn list_for_each_data(data: any, callback: fn(any) -> void) -> void;
-
-@external(elixir, "BeamLang.Runtime", "list_join")
-fn list_join_data(data: any, separator: String) -> String;
-
-@external(elixir, "BeamLang.Runtime", "list_map")
-fn list_map_data(data: any, mapper: fn(any) -> any) -> any;
-
-@external(elixir, "BeamLang.Runtime", "list_filter")
-fn list_filter_data(data: any, predicate: fn(any) -> bool) -> any;
-
-@external(elixir, "BeamLang.Runtime", "list_fold")
-fn list_fold_data(data: any, initial: any, folder: fn(any, any) -> any) -> any;
 
 internal fn list_new<T>() -> List<T> {
     return list_from_data(list_empty_data());
@@ -72,38 +48,79 @@ internal fn list_from_data<T>(data: any) -> List<T> {
             return list_length_data(self->data);
         },
         get = fn(self: List<T>, index: number) -> T? {
-            let raw = list_get_data(self->data, index);
-            return wrap_optional(raw);
+            return list_get_optional(self->data, index);
         },
         push = fn(self: List<T>, item: T) -> List<T> {
             let new_data = list_push_data(self->data, item);
             return list_from_data(new_data);
         },
         pop = fn(self: List<T>) -> List<T> {
-            let new_data = list_pop_data(self->data);
-            return list_from_data(new_data);
+            let len = self->length();
+            if (len <= 0) {
+                return self;
+            }
+            let mut acc: List<T> = list_new();
+            let mut idx = 0;
+            while (idx < len - 1) {
+                let item = list_get_unchecked(self->data, idx);
+                acc = acc->push(item);
+                idx = idx + 1;
+            }
+            return acc;
         },
         first = fn(self: List<T>) -> T? {
-            let raw = list_first_data(self->data);
-            return wrap_optional(raw);
+            return self->get(0);
         },
         last = fn(self: List<T>) -> T? {
-            let raw = list_last_data(self->data);
-            return wrap_optional(raw);
+            let len = self->length();
+            if (len <= 0) {
+                return optional_none();
+            }
+            return self->get(len - 1);
         },
         map = fn(self: List<T>, mapper: fn(T) -> any) -> List<any> {
-            let mapped = list_map_data(self->data, mapper);
-            return list_from_data(mapped);
+            let mut acc: List<any> = list_new();
+            let mut idx = 0;
+            let len = self->length();
+            while (idx < len) {
+                let item = list_get_unchecked(self->data, idx);
+                acc = acc->push(mapper(item));
+                idx = idx + 1;
+            }
+            return acc;
         },
         filter = fn(self: List<T>, predicate: fn(T) -> bool) -> List<T> {
-            let filtered = list_filter_data(self->data, predicate);
-            return list_from_data(filtered);
+            let mut acc: List<T> = list_new();
+            let mut idx = 0;
+            let len = self->length();
+            while (idx < len) {
+                let item = list_get_unchecked(self->data, idx);
+                if (predicate(item)) {
+                    acc = acc->push(item);
+                }
+                idx = idx + 1;
+            }
+            return acc;
         },
         fold = fn(self: List<T>, initial: any, folder: fn(any, T) -> any) -> any {
-            return list_fold_data(self->data, initial, folder);
+            let mut acc = initial;
+            let mut idx = 0;
+            let len = self->length();
+            while (idx < len) {
+                let item = list_get_unchecked(self->data, idx);
+                acc = folder(acc, item);
+                idx = idx + 1;
+            }
+            return acc;
         },
         for_each = fn(self: List<T>, callback: fn(T) -> void) -> void {
-            list_for_each_data(self->data, callback);
+            let mut idx = 0;
+            let len = self->length();
+            while (idx < len) {
+                let item = list_get_unchecked(self->data, idx);
+                callback(item);
+                idx = idx + 1;
+            }
             return;
         },
         reverse = fn(self: List<T>) -> List<T> {
@@ -115,8 +132,34 @@ internal fn list_from_data<T>(data: any) -> List<T> {
             return list_from_data(concatenated);
         },
         join = fn(self: List<T>, separator: String) -> String {
-            let result = list_join_data(self->data, separator);
+            let mut result = "";
+            let mut idx = 0;
+            let len = self->length();
+            while (idx < len) {
+                let item = list_get_unchecked(self->data, idx);
+                if (idx > 0) {
+                    result = result->concat(separator);
+                }
+                result = result->concat(to_string(item));
+                idx = idx + 1;
+            }
             return result;
         }
     };
+}
+
+internal fn list_get_optional<T>(data: any, index: number) -> T? {
+    if (index < 0) {
+        return optional_none();
+    }
+    let len = list_length_data(data);
+    if (index >= len) {
+        return optional_none();
+    }
+    let value = list_nth_data(index + 1, data);
+    return optional_some(value);
+}
+
+internal fn list_get_unchecked<T>(data: any, index: number) -> T {
+    return list_nth_data(index + 1, data);
 }
