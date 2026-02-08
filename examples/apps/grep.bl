@@ -99,8 +99,7 @@ fn print_matches_rec(lines: List<String>, pattern: String, ignore_case: bool, in
 
 // Process file content and search for pattern - recursive approach
 fn process_content(content: String, pattern: String, opts: Args) -> number {
-    let raw_lines = content->split("\n");
-    let lines = list_of(raw_lines);
+    let lines = content->split("\n");
     
     let match_count = count_matches_rec(lines, pattern, opts->ignore_case, opts->invert_match, 0, 0);
     

@@ -99,12 +99,12 @@ fn print_entries_rec(entries: List<FileEntry>, opts: Args, idx: number) -> void 
     }
     let entry_opt = entries->get(idx);
     match (entry_opt) {
-        case?some entry => {
+        case?some entry -> {
             if (should_show(entry->name, opts->show_hidden)) {
                 print_entry(entry, opts->long_format);
             }
         },
-        case?none => {}
+        case?none -> {}
     }
     print_entries_rec(entries, opts, idx + 1);
 }
@@ -123,11 +123,11 @@ fn ls_directory(opts: Args) -> number {
     let result = list_directory(path);
     
     return match (result) {
-        case!ok entries => {
+        case!ok entries -> {
             print_entries_rec(entries, opts, 0);
             0;
         },
-        case!err err => {
+        case!err err -> {
             println("ls: cannot open directory '${path}': ${err->message}");
             1;
         }
@@ -139,7 +139,7 @@ fn main(args: [String]) -> number {
     
     return match (parsed) {
         case!ok opts => ls_directory(opts),
-        case!err err => {
+        case!err err -> {
             println("ls: error parsing arguments: ${err->message}");
             1;
         }

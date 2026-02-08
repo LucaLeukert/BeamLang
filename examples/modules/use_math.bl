@@ -1,7 +1,8 @@
-import math.{Pair, add};
-import math as m;
-
 fn main(args: [String]) -> number {
-    let pair: Pair = { left = 2, right = 3 };
-    return m::add(pair->left, pair->right);
+    let test: math_ops::MathPair = {
+        left = 5,
+        right = 10
+    };
+    println("The sum of ${test->left} and ${test->right}");
+    return math_ops::add(test->left, test->right);
 }
