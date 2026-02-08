@@ -98,7 +98,7 @@ fn count_down(n: number) -> void {
     let mut counter: number = n;
     while (counter > 0) {
         println(counter);
-        counter = counter - 1;
+        counter -= 1;
     }
     return;
 }
@@ -107,7 +107,7 @@ fn count_down(n: number) -> void {
 fn infinite_demo() -> number {
     let mut i: number = 0;
     loop {
-        i = i + 1;
+        i += 1;
         if (i > 10) {
             break;
         }

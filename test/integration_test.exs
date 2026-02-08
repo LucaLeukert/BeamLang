@@ -75,6 +75,23 @@ defmodule BeamLang.IntegrationTest do
     assert {:ok, 3} == BeamLang.run_source(source)
   end
 
+  test "supports compound assignment operators" do
+    source = """
+    fn main(args: [String]) -> number {
+        let mut value = 10;
+        value += 2;
+        value *= 3;
+        value -= 5;
+        value %= 3;
+        value += 9;
+        value /= 5;
+        return value;
+    }
+    """
+
+    assert {:ok, 2.0} == BeamLang.run_source(source)
+  end
+
   test "propagates mutable assignments across if blocks" do
     source = """
     fn main(args: [String]) -> number {

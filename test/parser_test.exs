@@ -115,6 +115,33 @@ defmodule BeamLang.ParserTest do
     assert {:return, %{expr: {:identifier, %{name: "value"}}}} = s3
   end
 
+  test "parses compound assignment statements" do
+    source = """
+    fn main() -> number {
+        let mut value = 10;
+        value += 2;
+        value -= 1;
+        value *= 3;
+        value /= 2;
+        value %= 4;
+        return value;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{functions: [func]}} = ast
+    assert {:function, %{body: {:block, %{stmts: [s1, s2, s3, s4, s5, s6, s7]}}}} = func
+    assert {:let, %{name: "value", mutable: true}} = s1
+    assert {:compound_assign, %{target: {:identifier, %{name: "value"}}, op: :add, expr: {:integer, %{value: 2}}}} = s2
+    assert {:compound_assign, %{target: {:identifier, %{name: "value"}}, op: :sub, expr: {:integer, %{value: 1}}}} = s3
+    assert {:compound_assign, %{target: {:identifier, %{name: "value"}}, op: :mul, expr: {:integer, %{value: 3}}}} = s4
+    assert {:compound_assign, %{target: {:identifier, %{name: "value"}}, op: :div, expr: {:integer, %{value: 2}}}} = s5
+    assert {:compound_assign, %{target: {:identifier, %{name: "value"}}, op: :mod, expr: {:integer, %{value: 4}}}} = s6
+    assert {:return, %{expr: {:identifier, %{name: "value"}}}} = s7
+  end
+
   test "parses void return" do
     source = """
     fn main() -> void {

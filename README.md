@@ -83,6 +83,7 @@ Debug LSP logs: `./beamlang --lsp --lsp-debug`
 |----------|----------|
 | **Language tour** | `examples/language_tour.bl` |
 | **Hello world** | `examples/basics/hello.bl` |
+| **Compound assignment** | `examples/basics/compound_assignment.bl` |
 | **Modules** | `examples/modules/use_math.bl`, `examples/modules/math_ops.bl`, `examples/modules/stdlib_methods.bl` |
 | **Apps** | `examples/apps/cat.bl`, `examples/apps/standalone.bl` |
 | **LSP** | `examples/lsp/lsp_features.bl` |

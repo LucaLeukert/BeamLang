@@ -101,6 +101,29 @@ defmodule BeamLang.LexerTest do
     assert :equals in types
   end
 
+  test "tokenizes compound assignment operators" do
+    source = """
+    fn main(args: [String]) -> number {
+        let mut value = 10;
+        value += 1;
+        value -= 2;
+        value *= 3;
+        value /= 4;
+        value %= 5;
+        return value;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    types = Enum.map(tokens, & &1.type)
+
+    assert :plus_eq in types
+    assert :minus_eq in types
+    assert :star_eq in types
+    assert :slash_eq in types
+    assert :percent_eq in types
+  end
+
   test "tokenizes match and case" do
     source = """
     fn main() -> i32 {

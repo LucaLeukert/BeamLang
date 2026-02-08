@@ -256,6 +256,23 @@ fn process(x: number, mut y: number) -> number {
 
 Note: Erlang/BEAM is immutable by design. Mutable parameters are implemented via variable shadowing - each reassignment creates a new binding that shadows the previous one. The original value passed by the caller is never modified.
 
+### Compound Assignment
+
+Mutable variables and mutable struct fields support shorthand assignment operators:
+
+```beamlang
+fn adjust(mut value: number) -> number {
+    value += 2;
+    value -= 1;
+    value *= 3;
+    value /= 2;
+    value %= 4;
+    return value;
+}
+```
+
+Supported forms: `+=`, `-=`, `*=`, `/=`, `%=`.
+
 ### Generics in Functions
 
 Generic parameters are declared after the function name:
@@ -411,6 +428,7 @@ Match expressions must be exhaustive. Use `case _` or cover all variants (e.g. `
 ## Expressions
 
 - Binary operators: `+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `>`, `<=`, `>=`
+- Compound assignment operators: `+=`, `-=`, `*=`, `/=`, `%=`
 - `if` expressions:
 
 ```beamlang
