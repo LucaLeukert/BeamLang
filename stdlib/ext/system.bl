@@ -14,6 +14,7 @@ export type FileEntry {
 }
 
 export type Path {
+    internal is_absolute: bool,
     segments: [String],
     operator /: fn(Path, String) -> Path,
     push: fn(Path, String) -> Path,
@@ -63,8 +64,9 @@ internal fn make_io_error(msg: String) -> IoError {
     return err;
 }
 
-internal fn path_from_segments(segments: [String]) -> Path {
+internal fn path_from_parts(is_absolute: bool, segments: [String]) -> Path {
     return {
+        is_absolute = is_absolute,
         segments = segments,
         operator / = path_div_method,
         push = path_push_method,
@@ -84,7 +86,7 @@ internal fn path_normalize_segment(segment: String) -> [String] {
 internal fn path_push_method(self: Path, segment: String) -> Path {
     let normalized = path_normalize_segment(segment);
     let next_segments = self->segments->concat(normalized);
-    return path_from_segments(next_segments);
+    return path_from_parts(self->is_absolute, next_segments);
 }
 
 internal fn path_div_method(self: Path, segment: String) -> Path {
@@ -92,7 +94,13 @@ internal fn path_div_method(self: Path, segment: String) -> Path {
 }
 
 internal fn path_to_string_method(self: Path) -> String {
-    return self->segments->join("/");
+    let body = self->segments->join("/");
+
+    if (self->is_absolute) {
+        return "/"->concat(body);
+    }
+
+    return body;
 }
 
 internal fn clock_now_method(self: Clock) -> number {
@@ -133,18 +141,20 @@ fn clock_now() -> number {
 /** Create an empty Path **/
 fn path_new() -> Path {
     let empty: [String] = [];
-    return path_from_segments(empty);
+    return path_from_parts(false, empty);
 }
 
 /** Create a Path from a slash-separated string **/
 fn path_from_string(raw: String) -> Path {
+    let is_absolute = raw->starts_with("/");
     let normalized = path_normalize_segment(raw);
-    return path_from_segments(normalized);
+    return path_from_parts(is_absolute, normalized);
 }
 
 /** Read a file and return its contents as a Result **/
-fn read_file(path: String) -> String!IoError {
-    let result = file_read_data(path);
+fn read_file(path: Path) -> String!IoError {
+    let path_text = path->to_string();
+    let result = file_read_data(path_text);
     return match (result) {
         case!ok content => !ok content,
         case!err msg => !err make_io_error(msg)
@@ -152,8 +162,9 @@ fn read_file(path: String) -> String!IoError {
 }
 
 /** Write a file and return a Result **/
-fn write_file(path: String, contents: String) -> bool!IoError {
-    let result = file_write_data(path, contents);
+fn write_file(path: Path, contents: String) -> bool!IoError {
+    let path_text = path->to_string();
+    let result = file_write_data(path_text, contents);
     return match (result) {
         case!ok ok => !ok ok,
         case!err msg => !err make_io_error(msg)
@@ -161,8 +172,9 @@ fn write_file(path: String, contents: String) -> bool!IoError {
 }
 
 /** Check if a file exists **/
-fn file_exists(path: String) -> bool {
-    return file_exists_data(path);
+fn file_exists(path: Path) -> bool {
+    let path_text = path->to_string();
+    return file_exists_data(path_text);
 }
 
 /** Read all data from stdin **/
@@ -176,8 +188,9 @@ fn get_env(name: String) -> String? {
 }
 
 /** List the contents of a directory **/
-fn list_directory(path: String) -> List<FileEntry>!IoError {
-    let result = list_directory_data(path);
+fn list_directory(path: Path) -> List<FileEntry>!IoError {
+    let path_text = path->to_string();
+    let result = list_directory_data(path_text);
     return match (result) {
         case!ok entries => !ok entries,
         case!err msg => !err make_io_error(msg)

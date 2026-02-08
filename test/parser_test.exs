@@ -966,6 +966,7 @@ defmodule BeamLang.ParserTest do
   test "parses path type with segments and slash operator helpers" do
     source = """
     type Path {
+        internal is_absolute: bool,
         segments: [String],
         operator /: fn(Path, String) -> Path,
         push: fn(Path, String) -> Path,
@@ -990,7 +991,7 @@ defmodule BeamLang.ParserTest do
 
     assert {:program, %{types: [type_def], functions: _}} = ast
     assert {:type_def, %{name: "Path", fields: fields, operators: operators}} = type_def
-    assert length(fields) == 3
+    assert length(fields) == 4
     assert length(operators) == 1
     [op_decl] = operators
     assert op_decl.op == :div

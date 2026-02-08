@@ -542,6 +542,7 @@ export type FileEntry {
 }
 
 export type Path {
+    internal is_absolute: bool,
     segments: [String],
     operator /: fn(Path, String) -> Path,
     push: fn(Path, String) -> Path,
@@ -562,12 +563,12 @@ export type Clock {
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `read_file` | `fn(String) -> String!IoError` | Read file contents |
-| `write_file` | `fn(String, String) -> bool!IoError` | Write string to file |
-| `file_exists` | `fn(String) -> bool` | Check if a file exists |
+| `read_file` | `fn(Path) -> String!IoError` | Read file contents |
+| `write_file` | `fn(Path, String) -> bool!IoError` | Write string to file |
+| `file_exists` | `fn(Path) -> bool` | Check if a file exists |
 | `read_stdin` | `fn() -> String` | Read all data from stdin |
 | `get_env` | `fn(String) -> String?` | Get environment variable, or `?none` |
-| `list_directory` | `fn(String) -> List<FileEntry>!IoError` | List directory entries |
+| `list_directory` | `fn(Path) -> List<FileEntry>!IoError` | List directory entries |
 | `clock_new` | `fn() -> Clock` | Create a new stopwatch |
 | `clock_now` | `fn() -> number` | Current monotonic time in milliseconds |
 | `path_new` | `fn() -> Path` | Create an empty path |
@@ -579,7 +580,8 @@ export type Clock {
 import system.*;
 
 fn main(args: [String]) -> number {
-    let result = read_file("config.txt");
+    let config = path_from_string("config.txt");
+    let result = read_file(config);
     match (result) {
         case!ok content => println(content),
         case!err err => println("Error: ${err->message}")
