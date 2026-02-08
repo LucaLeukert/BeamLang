@@ -141,6 +141,22 @@ defmodule BeamLang.LexerTest do
     assert :break_kw in types
   end
 
+  test "tokenizes async and await keywords" do
+    source = """
+    fn main(args: [String]) -> number {
+        let task = async { return 41; };
+        let result = await(task, 1000);
+        return 0;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    types = Enum.map(tokens, & &1.type)
+
+    assert :async_kw in types
+    assert :await_kw in types
+  end
+
   test "ignores single-line comments" do
     source = """
     // This is a comment

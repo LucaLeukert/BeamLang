@@ -974,6 +974,14 @@ defmodule BeamLang.Parser do
     parse_if_expr(tokens)
   end
 
+  defp parse_primary([%Token{type: :async_kw} | _] = tokens) do
+    parse_async_expr(tokens)
+  end
+
+  defp parse_primary([%Token{type: :await_kw} | _] = tokens) do
+    parse_await_expr(tokens)
+  end
+
   defp parse_primary([%Token{type: :fn} | _] = tokens) do
     parse_lambda(tokens)
   end
@@ -1121,6 +1129,50 @@ defmodule BeamLang.Parser do
       span = BeamLang.Span.merge(fn_tok.span, return_span)
       span = BeamLang.Span.merge(span, rbrace.span)
       {:ok, {:lambda, %{params: params, return_type: return_type, body: body, span: span}}, rest9}
+    end
+  end
+
+  @spec parse_async_expr([Token.t()]) ::
+          {:ok, BeamLang.AST.expr(), [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_async_expr(tokens) do
+    with {:ok, async_tok, rest1} <- expect(tokens, :async_kw),
+         {:ok, _lbrace, rest2} <- expect(rest1, :lbrace),
+         {:ok, body, rest3} <- parse_block(rest2),
+         {:ok, rbrace_tok, rest4} <- expect(rest3, :rbrace) do
+      span = BeamLang.Span.merge(async_tok.span, rbrace_tok.span)
+      {:ok, {:async_expr, %{body: body, span: span, type_info: nil}}, rest4}
+    end
+  end
+
+  @spec parse_await_expr([Token.t()]) ::
+          {:ok, BeamLang.AST.expr(), [Token.t()]} | {:error, BeamLang.Error.t()}
+  defp parse_await_expr(tokens) do
+    with {:ok, await_tok, rest1} <- expect(tokens, :await_kw),
+         {:ok, _lparen, rest2} <- expect(rest1, :lparen),
+         {:ok, task_expr, rest3} <- parse_expression(rest2) do
+      case rest3 do
+        [%Token{type: :comma} | rest4] ->
+          with {:ok, timeout_expr, rest5} <- parse_expression(rest4),
+               {:ok, rparen_tok, rest6} <- expect(rest5, :rparen) do
+            span = BeamLang.Span.merge(await_tok.span, rparen_tok.span)
+
+            {:ok,
+             {:await_expr,
+              %{task: task_expr, timeout: timeout_expr, span: span, type_info: nil}}, rest6}
+          end
+
+        [%Token{type: :rparen} | _] ->
+          with {:ok, rparen_tok, rest4} <- expect(rest3, :rparen) do
+            span = BeamLang.Span.merge(await_tok.span, rparen_tok.span)
+            {:ok, {:await_expr, %{task: task_expr, timeout: nil, span: span, type_info: nil}}, rest4}
+          end
+
+        [%Token{} = tok | _] ->
+          {:error, error("Expected ',' or ')'.", tok)}
+
+        [] ->
+          {:error, BeamLang.Error.new(:parser, "Expected rparen, got end of input.", eof_span("<unknown>"))}
+      end
     end
   end
 
@@ -1915,6 +1967,8 @@ defmodule BeamLang.Parser do
   defp expr_span({:res_ok, %{span: span}}), do: span
   defp expr_span({:res_err, %{span: span}}), do: span
   defp expr_span({:lambda, %{span: span}}), do: span
+  defp expr_span({:async_expr, %{span: span}}), do: span
+  defp expr_span({:await_expr, %{span: span}}), do: span
   defp expr_span({:method_call, %{span: span}}), do: span
   defp expr_span({:list_literal, %{span: span}}), do: span
   defp expr_span({:range, %{span: span}}), do: span

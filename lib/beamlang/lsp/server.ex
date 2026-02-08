@@ -1596,6 +1596,8 @@ defmodule BeamLang.LSP.Server do
       %{"label" => "return", "kind" => 14},
       %{"label" => "if", "kind" => 14},
       %{"label" => "match", "kind" => 14},
+      %{"label" => "async", "kind" => 14},
+      %{"label" => "await", "kind" => 14},
       %{"label" => "while", "kind" => 14},
       %{"label" => "loop", "kind" => 14},
       %{"label" => "for", "kind" => 14},

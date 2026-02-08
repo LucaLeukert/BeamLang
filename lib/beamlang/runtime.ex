@@ -4,6 +4,8 @@ defmodule BeamLang.Runtime do
   """
 
   alias BeamLang.Codegen
+  @task_default_timeout_ms 5_000
+  @task_state_key :beamlang_task_state
 
   # Get the current BeamLang module (set during load_and_run)
   defp current_module, do: Process.get(:beamlang_module, :beamlang_program)
@@ -332,6 +334,137 @@ defmodule BeamLang.Runtime do
   def optional_raw_value(%{value: value}), do: value
   def optional_raw_value(_), do: nil
 
+  defp put_task_state(ref, state) when not is_nil(ref) do
+    Process.put({@task_state_key, ref}, state)
+    state
+  end
+
+  defp get_task_state(ref) when not is_nil(ref) do
+    Process.get({@task_state_key, ref})
+  end
+
+  defp fetch_task_state(task_value) do
+    with {:ok, raw_task} <- task_raw(task_value),
+         ref when not is_nil(ref) <- Map.get(raw_task, :ref),
+         state when not is_nil(state) <- get_task_state(ref) do
+      {:ok, ref, state}
+    else
+      :error -> {:error, "Expected Task value."}
+      nil -> {:error, "Task handle is no longer available."}
+      _ -> {:error, "Task handle is no longer available."}
+    end
+  end
+
+  defp task_raw(%{__beamlang_task__: true} = raw_task), do: {:ok, raw_task}
+
+  defp task_raw(%{data: data}) do
+    task_raw(data)
+  end
+
+  defp task_raw(_), do: :error
+
+  defp await_task_reply(task, timeout_ms) do
+    try do
+      {:ok, Task.await(task, timeout_ms)}
+    catch
+      :exit, reason -> {:exit, reason}
+    end
+  end
+
+  defp yield_task_reply(task, timeout_ms) do
+    try do
+      Task.yield(task, timeout_ms)
+    catch
+      :exit, reason -> {:exit, reason}
+    end
+  end
+
+  defp decode_task_payload({:ok, value}) do
+    {:succeeded, task_result_ok(unwrap_task_value(value))}
+  end
+
+  defp decode_task_payload({:error, {kind, message}}) do
+    {:failed, task_result_err(to_string(kind), to_string(message))}
+  end
+
+  defp decode_task_payload({:error, message}) do
+    {:failed, task_result_err("error", to_string(message))}
+  end
+
+  defp decode_task_payload(payload) do
+    {:succeeded, task_result_ok(unwrap_task_value(payload))}
+  end
+
+  defp unwrap_task_value({:__return__, value}), do: value
+  defp unwrap_task_value(value), do: value
+
+  defp task_result_ok(value) do
+    apply(current_module(), :result_ok, [value])
+  end
+
+  defp task_result_err(kind, message) do
+    apply(current_module(), :result_err, [task_error_struct(kind, message)])
+  end
+
+  defp task_optional_some(value) do
+    apply(current_module(), :optional_some, [value])
+  end
+
+  defp task_optional_none do
+    apply(current_module(), :optional_none, [])
+  end
+
+  defp cancelled_result do
+    task_result_err("cancelled", "Task was cancelled.")
+  end
+
+  defp task_error_struct(kind, message) do
+    %{
+      kind: stdlib_string_new(kind),
+      message: stdlib_string_new(message),
+      __beamlang_type__: ~c"TaskError"
+    }
+  end
+
+  defp maybe_refresh_task_state(ref, %{status: :running, result: nil} = state) do
+    case yield_task_reply(state.task, 0) do
+      nil ->
+        state
+
+      {:ok, payload} ->
+        {status, result} = decode_task_payload(payload)
+        updated = %{state | status: status, result: result}
+        put_task_state(ref, updated)
+        updated
+
+      {:exit, reason} ->
+        updated = %{state | status: :failed, result: task_result_err("exit", inspect(reason))}
+        put_task_state(ref, updated)
+        updated
+    end
+  end
+
+  defp maybe_refresh_task_state(_ref, state), do: state
+
+  defp normalize_task_timeout(timeout_ms) do
+    cond do
+      is_integer(timeout_ms) and timeout_ms >= 0 ->
+        timeout_ms
+
+      is_float(timeout_ms) and timeout_ms >= 0 ->
+        round(timeout_ms)
+
+      true ->
+        @task_default_timeout_ms
+    end
+  end
+
+  defp task_status_code(:running), do: 0
+  defp task_status_code(:succeeded), do: 1
+  defp task_status_code(:failed), do: 2
+  defp task_status_code(:cancelled), do: 3
+  defp task_status_code(_), do: 2
+
   @spec list_concat(list(), list()) :: list()
   def list_concat(left, right), do: left ++ right
 
@@ -368,6 +501,135 @@ defmodule BeamLang.Runtime do
   def list_for_each(list, callback) do
     Enum.each(list, callback)
     :ok
+  end
+
+  @spec task_async(function()) :: map()
+  def task_async(callback) when is_function(callback, 0) do
+    task =
+      Task.async(fn ->
+        try do
+          {:ok, callback.()}
+        rescue
+          e -> {:error, {:exception, Exception.message(e)}}
+        catch
+          kind, reason -> {:error, {kind, inspect(reason)}}
+        end
+      end)
+
+    ref = task.ref
+    put_task_state(ref, %{task: task, status: :running, result: nil})
+    %{__beamlang_task__: true, ref: ref, pid: task.pid, owner: self()}
+  end
+
+  @spec task_await(term(), term()) :: map()
+  def task_await(task_value, timeout_ms) do
+    case fetch_task_state(task_value) do
+      {:ok, _ref, %{result: result}} when not is_nil(result) ->
+        result
+
+      {:ok, ref, %{status: :cancelled} = state} ->
+        result = cancelled_result()
+        put_task_state(ref, %{state | result: result})
+        result
+
+      {:ok, ref, %{task: task} = state} ->
+        case await_task_reply(task, normalize_task_timeout(timeout_ms)) do
+          {:ok, payload} ->
+            {status, result} = decode_task_payload(payload)
+            put_task_state(ref, %{state | status: status, result: result})
+            result
+
+          {:exit, {:timeout, _}} ->
+            task_result_err("timeout", "Task await timed out.")
+
+          {:exit, reason} ->
+            result = task_result_err("exit", inspect(reason))
+            put_task_state(ref, %{state | status: :failed, result: result})
+            result
+        end
+
+      {:error, message} ->
+        task_result_err("invalid_task", message)
+    end
+  end
+
+  @spec task_poll(term()) :: map()
+  def task_poll(task_value) do
+    task_yield(task_value, 0)
+  end
+
+  @spec task_yield(term(), term()) :: map()
+  def task_yield(task_value, timeout_ms) do
+    case fetch_task_state(task_value) do
+      {:ok, _ref, %{result: result}} when not is_nil(result) ->
+        task_optional_some(result)
+
+      {:ok, ref, %{status: :cancelled} = state} ->
+        result = cancelled_result()
+        put_task_state(ref, %{state | result: result})
+        task_optional_some(result)
+
+      {:ok, ref, %{task: task} = state} ->
+        case yield_task_reply(task, normalize_task_timeout(timeout_ms)) do
+          nil ->
+            task_optional_none()
+
+          {:ok, payload} ->
+            {status, result} = decode_task_payload(payload)
+            put_task_state(ref, %{state | status: status, result: result})
+            task_optional_some(result)
+
+          {:exit, reason} ->
+            result = task_result_err("exit", inspect(reason))
+            put_task_state(ref, %{state | status: :failed, result: result})
+            task_optional_some(result)
+        end
+
+      {:error, message} ->
+        task_optional_some(task_result_err("invalid_task", message))
+    end
+  end
+
+  @spec task_cancel(term()) :: boolean()
+  def task_cancel(task_value) do
+    case fetch_task_state(task_value) do
+      {:ok, _ref, %{result: result}} when not is_nil(result) ->
+        false
+
+      {:ok, _ref, %{status: :cancelled}} ->
+        true
+
+      {:ok, ref, %{task: task} = state} ->
+        case Task.shutdown(task, :brutal_kill) do
+          nil ->
+            put_task_state(ref, %{state | status: :cancelled, result: cancelled_result()})
+            true
+
+          {:ok, payload} ->
+            {status, result} = decode_task_payload(payload)
+            put_task_state(ref, %{state | status: status, result: result})
+            false
+
+          {:exit, _reason} ->
+            put_task_state(ref, %{state | status: :cancelled, result: cancelled_result()})
+            true
+        end
+
+      {:error, _message} ->
+        false
+    end
+  end
+
+  @spec task_status(term()) :: number()
+  def task_status(task_value) do
+    case fetch_task_state(task_value) do
+      {:ok, ref, state} ->
+        state = maybe_refresh_task_state(ref, state)
+        task_status_code(state.status)
+
+      {:error, _message} ->
+        2
+    end
   end
 
   @spec println(term()) :: :ok

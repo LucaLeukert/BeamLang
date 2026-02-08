@@ -21,6 +21,8 @@ defmodule BeamLang.Lexer do
     "match" => :match,
     "case" => :case,
     "if" => :if_kw,
+    "async" => :async_kw,
+    "await" => :await_kw,
     "guard" => :guard,
     "else" => :else_kw,
     "for" => :for_kw,

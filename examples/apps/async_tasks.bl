@@ -1,0 +1,46 @@
+fn unwrap_or_zero(result: number!TaskError) -> number {
+    return match (result) {
+        case!ok value => value,
+        case!err err -> {
+            println("task error: ${err->kind} - ${err->message}");
+            0;
+        }
+    };
+}
+
+fn main(args: [String]) -> number {
+    let t1 = async { return 10; };
+    let t2 = async { return 20; };
+
+    let sum = unwrap_or_zero(await(t1)) + unwrap_or_zero(await(t2));
+    println("sum = ${sum}");
+
+    let slow = async {
+        loop {
+        }
+        return 99;
+    };
+
+    let timed = await(slow, 1);
+    match (timed) {
+        case!ok value => println("unexpected value: ${value}"),
+        case!err err => println("timeout path: ${err->kind}")
+    };
+
+    let pending = task_poll(slow);
+    match (pending) {
+        case?none => println("poll: still running"),
+        case?some _ => println("poll: completed")
+    };
+
+    let cancelled = task_cancel(slow);
+    println("cancelled = ${cancelled}");
+
+    let status = task_status(slow);
+    match (status) {
+        case TaskStatus::Cancelled => println("status: cancelled"),
+        case _ => println("status: not-cancelled")
+    };
+
+    return 0;
+}

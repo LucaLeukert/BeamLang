@@ -242,6 +242,44 @@ defmodule BeamLang.ParserTest do
     assert %{name: "self"} = param
   end
 
+  test "parses async expression" do
+    source = """
+    fn main(args: [String]) -> number {
+        let task = async {
+            return 7;
+        };
+        return 0;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{functions: [func]}} = ast
+    assert {:function, %{body: {:block, %{stmts: [stmt | _]}}}} = func
+    assert {:let, %{expr: {:async_expr, %{body: {:block, %{stmts: [inner_stmt]}}}}}} = stmt
+    assert {:return, %{expr: {:integer, %{value: 7}}}} = inner_stmt
+  end
+
+  test "parses await expression with and without timeout" do
+    source = """
+    fn main(args: [String]) -> number {
+        let task = async { return 1; };
+        let a = await(task);
+        let b = await(task, 1000);
+        return 0;
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{functions: [func]}} = ast
+    assert {:function, %{body: {:block, %{stmts: [_s1, s2, s3, _s4]}}}} = func
+    assert {:let, %{expr: {:await_expr, %{timeout: nil}}}} = s2
+    assert {:let, %{expr: {:await_expr, %{timeout: {:integer, %{value: 1000}}}}}} = s3
+  end
+
   test "parses method call" do
     source = """
     fn main() -> number {

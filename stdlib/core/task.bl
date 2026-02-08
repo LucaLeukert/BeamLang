@@ -1,0 +1,114 @@
+export error TaskError {
+    kind: String,
+    message: String
+}
+
+export enum TaskStatus {
+    Running,
+    Succeeded,
+    Failed,
+    Cancelled
+}
+
+export type Task<T> {
+    internal data: any,
+    await_result: fn(Task<T>) -> T!TaskError,
+    await_timeout: fn(Task<T>, number) -> T!TaskError,
+    poll: fn(Task<T>) -> (T!TaskError)?,
+    yield: fn(Task<T>, number) -> (T!TaskError)?,
+    cancel: fn(Task<T>) -> bool,
+    status: fn(Task<T>) -> TaskStatus
+}
+
+@external(elixir, "BeamLang.Runtime", "task_async")
+fn task_async_data(callback: fn() -> any) -> any;
+
+@external(elixir, "BeamLang.Runtime", "task_await")
+fn task_await_data(task: any, timeout_ms: number) -> any;
+
+@external(elixir, "BeamLang.Runtime", "task_poll")
+fn task_poll_data(task: any) -> any;
+
+@external(elixir, "BeamLang.Runtime", "task_yield")
+fn task_yield_data(task: any, timeout_ms: number) -> any;
+
+@external(elixir, "BeamLang.Runtime", "task_cancel")
+fn task_cancel_data(task: any) -> bool;
+
+@external(elixir, "BeamLang.Runtime", "task_status")
+fn task_status_data(task: any) -> number;
+
+fn task_spawn<T>(callback: fn() -> T) -> Task<T> {
+    let raw = task_async_data(callback);
+    return task_from_data(raw);
+}
+
+fn task_await<T>(task: Task<T>) -> T!TaskError {
+    return task->await_result();
+}
+
+fn task_await_timeout<T>(task: Task<T>, timeout_ms: number) -> T!TaskError {
+    return task->await_timeout(timeout_ms);
+}
+
+fn task_poll<T>(task: Task<T>) -> (T!TaskError)? {
+    return task->poll();
+}
+
+fn task_yield<T>(task: Task<T>, timeout_ms: number) -> (T!TaskError)? {
+    return task->yield(timeout_ms);
+}
+
+fn task_cancel<T>(task: Task<T>) -> bool {
+    return task->cancel();
+}
+
+fn task_status<T>(task: Task<T>) -> TaskStatus {
+    return task->status();
+}
+
+internal fn task_from_data<T>(data: any) -> Task<T> {
+    return {
+        data = data,
+        await_result = task_await_method,
+        await_timeout = task_await_timeout_method,
+        poll = task_poll_method,
+        yield = task_yield_method,
+        cancel = task_cancel_method,
+        status = task_status_method
+    };
+}
+
+internal fn task_await_method<T>(self: Task<T>) -> T!TaskError {
+    return task_await_data(self->data, 5000);
+}
+
+internal fn task_await_timeout_method<T>(self: Task<T>, timeout_ms: number) -> T!TaskError {
+    return task_await_data(self->data, timeout_ms);
+}
+
+internal fn task_poll_method<T>(self: Task<T>) -> (T!TaskError)? {
+    return task_poll_data(self->data);
+}
+
+internal fn task_yield_method<T>(self: Task<T>, timeout_ms: number) -> (T!TaskError)? {
+    return task_yield_data(self->data, timeout_ms);
+}
+
+internal fn task_cancel_method<T>(self: Task<T>) -> bool {
+    return task_cancel_data(self->data);
+}
+
+internal fn task_status_method<T>(self: Task<T>) -> TaskStatus {
+    let code = task_status_data(self->data);
+    return task_status_from_code(code);
+}
+
+internal fn task_status_from_code(code: number) -> TaskStatus {
+    return match (code) {
+        case 0 => TaskStatus::Running,
+        case 1 => TaskStatus::Succeeded,
+        case 2 => TaskStatus::Failed,
+        case _ => TaskStatus::Cancelled
+    };
+}

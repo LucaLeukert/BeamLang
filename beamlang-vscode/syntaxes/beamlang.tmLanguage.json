@@ -30,7 +30,7 @@
       "patterns": [
         {
           "name": "keyword.control.beamlang",
-          "match": "\\b(if|else|match|case|while|loop|for|in|break|continue|return|guard)\\b"
+          "match": "\\b(if|else|match|case|async|await|while|loop|for|in|break|continue|return|guard)\\b"
         },
         {
           "name": "keyword.other.beamlang",
@@ -54,7 +54,7 @@
         },
         {
           "name": "support.type.builtin.beamlang",
-          "match": "\\b(Optional|Result|List)\\b"
+          "match": "\\b(Optional|Result|Task|List)\\b"
         },
         {
           "name": "entity.name.type.beamlang",

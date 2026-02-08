@@ -4,6 +4,7 @@ defmodule BeamLang.Codegen do
   """
 
   @module_name :beamlang_program
+  @default_task_await_timeout 5_000
 
   @spec to_erlang_forms(BeamLang.AST.t()) :: list()
   def to_erlang_forms({:program, %{module: module, functions: functions}})
@@ -621,6 +622,29 @@ defmodule BeamLang.Codegen do
     {expr, _counter} = unwrap_return(expr, counter)
     clause = {:clause, line, params_form, [], [expr]}
     {:fun, line, {:clauses, [clause]}}
+  end
+
+  defp expr_form(line, {:async_expr, %{body: body}}, env) do
+    callback = {:fun, line, {:clauses, [{:clause, line, [], [], [block_expr_form(body, env)]}]}}
+
+    raw_task =
+      {:call, line,
+       {:remote, line, {:atom, line, :"Elixir.BeamLang.Runtime"}, {:atom, line, :task_async}},
+       [callback]}
+
+    {:call, line, {:atom, line, :task_from_data}, [raw_task]}
+  end
+
+  defp expr_form(line, {:await_expr, %{task: task, timeout: timeout}}, env) do
+    timeout_form =
+      case timeout do
+        nil -> {:integer, line, @default_task_await_timeout}
+        _ -> expr_form(line, timeout, env)
+      end
+
+    {:call, line,
+     {:remote, line, {:atom, line, :"Elixir.BeamLang.Runtime"}, {:atom, line, :task_await}},
+     [expr_form(line, task, env), timeout_form]}
   end
 
   defp expr_form(line, {:method_call, %{target: target, name: name, args: args}}, env) do

@@ -67,4 +67,62 @@ defmodule BeamLang.SemanticTest do
 
     assert {:ok, _} = Semantic.validate(merged, require_main: false)
   end
+
+  test "infers async expression as Task and await as Result" do
+    source = """
+    error TaskError {
+        kind: String,
+        message: String
+    }
+
+    fn main(args: [String]) -> number {
+        let task = async { return 41; };
+        let result: number!TaskError = await(task);
+        match (result) {
+            case!ok value => value,
+            case!err _ => 0
+        };
+        return 0;
+    }
+    """
+
+    ast = parse_program!(source, "/tmp/beamlang_async_ok.bl")
+    assert {:ok, _} = Semantic.validate(ast, require_main: true)
+  end
+
+  test "rejects await on non-task value" do
+    source = """
+    fn main(args: [String]) -> number {
+        let value = 42;
+        let result = await(value);
+        match (result) {
+            case!ok ok => ok,
+            case!err _ => 0
+        };
+        return 0;
+    }
+    """
+
+    ast = parse_program!(source, "/tmp/beamlang_await_non_task.bl")
+    assert {:error, errors} = Semantic.validate(ast, require_main: true)
+    assert Enum.any?(errors, fn err -> err.message =~ "await expects Task<T>" end)
+  end
+
+  test "rejects await with non-number timeout" do
+    source = """
+    fn main(args: [String]) -> number {
+        let task = async { return 1; };
+        let result = await(task, "bad");
+        match (result) {
+            case!ok ok => ok,
+            case!err _ => 0
+        };
+        return 0;
+    }
+    """
+
+    ast = parse_program!(source, "/tmp/beamlang_await_bad_timeout.bl")
+    assert {:error, errors} = Semantic.validate(ast, require_main: true)
+    assert Enum.any?(errors, fn err -> err.message =~ "await timeout must be number" end)
+  end
 end

@@ -6,7 +6,7 @@ This document covers the public API of every module in the BeamLang standard lib
 
 | Directory | Auto-imported | Modules |
 |-----------|---------------|---------|
-| `stdlib/core/` | Yes | `string`, `list`, `optional`, `result`, `map`, `range`, `math` |
+| `stdlib/core/` | Yes | `string`, `list`, `optional`, `result`, `task`, `map`, `range`, `math` |
 | `stdlib/ext/` | No (use `import`) | `system`, `network`, `args` |
 
 ---
@@ -263,6 +263,75 @@ match (result) {
     case!ok value => println(value),
     case!err msg => println(msg)
 };
+```
+
+---
+
+### Task
+
+Asynchronous computation backed by Elixir `Task`.
+
+#### Types
+
+```beamlang
+export error TaskError {
+    kind: String,
+    message: String
+}
+
+export enum TaskStatus {
+    Running,
+    Succeeded,
+    Failed,
+    Cancelled
+}
+
+export type Task<T> {
+    internal data: any,
+    await_result: fn(Task<T>) -> T!TaskError,
+    await_timeout: fn(Task<T>, number) -> T!TaskError,
+    poll: fn(Task<T>) -> (T!TaskError)?,
+    yield: fn(Task<T>, number) -> (T!TaskError)?,
+    cancel: fn(Task<T>) -> bool,
+    status: fn(Task<T>) -> TaskStatus
+}
+```
+
+#### Functions
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `task_spawn` | `fn<T>(fn() -> T) -> Task<T>` | Start a task from a callback |
+| `task_await` | `fn<T>(Task<T>) -> T!TaskError` | Wait using default timeout |
+| `task_await_timeout` | `fn<T>(Task<T>, number) -> T!TaskError` | Wait with explicit timeout (ms) |
+| `task_poll` | `fn<T>(Task<T>) -> (T!TaskError)?` | Non-blocking check (`?none` if running) |
+| `task_yield` | `fn<T>(Task<T>, number) -> (T!TaskError)?` | Timed non-blocking yield |
+| `task_cancel` | `fn<T>(Task<T>) -> bool` | Cancel a running task |
+| `task_status` | `fn<T>(Task<T>) -> TaskStatus` | Current status |
+
+#### Language Support
+
+| Syntax | Type |
+|--------|------|
+| `async { ... }` | `Task<T>` |
+| `await(task)` | `T!TaskError` |
+| `await(task, timeout_ms)` | `T!TaskError` |
+
+#### Example
+
+```beamlang
+fn main(args: [String]) -> number {
+    let task = async { return 42; };
+    let result = await(task, 1000);
+
+    return match (result) {
+        case!ok value => value,
+        case!err err => {
+            println("Task error: ${err->kind}");
+            0;
+        }
+    };
+}
 ```
 
 ---

@@ -468,13 +468,30 @@ The stdlib prefers `@external(erlang, ...)` for functions that map directly to E
 - The stdlib is implemented in BeamLang and loaded as source, not hard-coded.
 - Internal stdlib functions are marked with `internal`, callable within stdlib source files, and not callable from user modules.
 
-## Async (Proposed)
+## Async
 
-Not implemented yet. Proposed approach:
-- `Task<T>` type backed by a BEAM process
-- `spawn(fn() -> T)` returns `Task<T>`
-- `await(task: Task<T>) -> T` blocks until completion
-- `poll(task: Task<T>) -> T?` returns `?none` if not finished
+BeamLang supports first-class async tasks backed by Elixir `Task`.
 
-The runtime would spawn a process, send the result back to the parent,
-and store a mailbox reference inside `Task<T>`.
+- `async { ... }` creates a `Task<T>` from a block expression.
+- `await(task)` returns `T!TaskError` using a default timeout.
+- `await(task, timeout_ms)` returns `T!TaskError` with an explicit timeout.
+
+```beamlang
+let task = async {
+    return 42;
+};
+
+let result = await(task, 1000);
+match (result) {
+    case!ok value => println(value),
+    case!err err => println("Task failed: ${err->kind}")
+};
+```
+
+`Task` control functions are in core stdlib:
+- `task_spawn`, `task_await`, `task_await_timeout`
+- `task_poll`, `task_yield`, `task_cancel`, `task_status`
+
+`task_poll` and `task_yield` return optional results:
+- `?none` when the task is still running
+- `?some(T!TaskError)` when completed

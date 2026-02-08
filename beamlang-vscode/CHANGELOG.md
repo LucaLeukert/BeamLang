@@ -2,6 +2,12 @@
 
 All notable changes to the "beamlang" extension will be documented in this file.
 
+## [1.1.3] - 2026-02-08
+
+### Added
+- Syntax highlighting support for `async` and `await`
+- Updated language docs to include async task language support
+
 ## [1.1.2] - 2026-02-01
 
 ### Added

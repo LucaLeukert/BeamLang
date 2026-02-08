@@ -280,6 +280,39 @@ defmodule BeamLang.Semantic do
   end
 
   defp type_of_expr(
+         {:async_expr, %{body: body}},
+         func_table,
+         type_table,
+         env,
+         _expected
+       ) do
+    {inner_type, errors} = block_expr_type(body, func_table, type_table, env)
+    inner_type = if is_nil(inner_type), do: :void, else: inner_type
+
+    if errors == [] do
+      {:ok, {:generic, {:named, "Task"}, [inner_type]}}
+    else
+      {:error, {:match, errors}}
+    end
+  end
+
+  defp type_of_expr(
+         {:await_expr, %{task: task_expr, timeout: timeout_expr, span: span}},
+         func_table,
+         type_table,
+         env,
+         _expected
+       ) do
+    with {:ok, task_type} <- type_of_expr(task_expr, func_table, type_table, env, nil),
+         {:ok, inner_type} <- task_inner_type(task_type, span),
+         :ok <- validate_await_timeout(timeout_expr, func_table, type_table, env) do
+      {:ok, {:result, inner_type, {:named, "TaskError"}}}
+    else
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp type_of_expr(
          {:method_call, %{target: target, name: name, args: args, span: call_span}},
          func_table,
          type_table,
@@ -2714,9 +2747,14 @@ defmodule BeamLang.Semantic do
   defp expr_span({:res_ok, %{span: span}}), do: span
   defp expr_span({:res_err, %{span: span}}), do: span
   defp expr_span({:lambda, %{span: span}}), do: span
+  defp expr_span({:async_expr, %{span: span}}), do: span
+  defp expr_span({:await_expr, %{span: span}}), do: span
   defp expr_span({:method_call, %{span: span}}), do: span
   defp expr_span({:list_literal, %{span: span}}), do: span
   defp expr_span({:range, %{span: span}}), do: span
+  defp expr_span({:try_expr, %{span: span}}), do: span
+  defp expr_span({:tuple, %{span: span}}), do: span
+  defp expr_span({:enum_variant, %{span: span}}), do: span
 
   @spec type_compatible?(BeamLang.AST.type_name(), BeamLang.AST.type_name()) :: boolean()
   defp type_compatible?(expected, inferred) do
@@ -3024,6 +3062,48 @@ defmodule BeamLang.Semantic do
   defp struct_type_info({:named, name}) when is_binary(name), do: {:ok, name, []}
   defp struct_type_info({:generic, {:named, name}, args}), do: {:ok, name, args}
   defp struct_type_info(_type), do: :error
+
+  defp task_inner_type(task_type, span) do
+    case normalize_type(task_type) do
+      {:generic, {:named, "Task"}, [inner_type]} ->
+        {:ok, inner_type}
+
+      other ->
+        {:error,
+         {:match,
+          [
+            BeamLang.Error.new(
+              :type,
+              "await expects Task<T>, got #{type_label(other)}.",
+              span
+            )
+          ]}}
+    end
+  end
+
+  defp validate_await_timeout(nil, _func_table, _type_table, _env), do: :ok
+
+  defp validate_await_timeout(timeout_expr, func_table, type_table, env) do
+    case type_of_expr(timeout_expr, func_table, type_table, env, :number) do
+      {:ok, inferred} ->
+        if type_compatible?(:number, inferred) do
+          :ok
+        else
+          {:error,
+           {:match,
+            [
+              BeamLang.Error.new(
+                :type,
+                "await timeout must be number, got #{type_label(inferred)}.",
+                expr_span(timeout_expr)
+              )
+            ]}}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
 
   defp annotate_program(
          {:program,
@@ -3438,6 +3518,67 @@ defmodule BeamLang.Semantic do
        ) do
     {block, _} = annotate_block(block, env, func_table, type_table, expected)
     {{:block_expr, %{block: block, span: span}}, expected}
+  end
+
+  defp annotate_expr(
+         {:async_expr, %{body: body, span: span}},
+         expected,
+         env,
+         func_table,
+         type_table
+       ) do
+    inner_expected =
+      case normalize_type(expected) do
+        {:generic, {:named, "Task"}, [inner]} -> inner
+        _ -> nil
+      end
+
+    {body, _} = annotate_block(body, env, func_table, type_table, inner_expected)
+
+    inferred =
+      case type_of_expr({:async_expr, %{body: body}}, func_table, type_table, env, nil) do
+        {:ok, type} -> type
+        _ -> {:generic, {:named, "Task"}, [:any]}
+      end
+
+    {{:async_expr, %{body: body, span: span, type_info: %{task_type: inferred}}}, inferred}
+  end
+
+  defp annotate_expr(
+         {:await_expr, %{task: task, timeout: timeout, span: span}},
+         expected,
+         env,
+         func_table,
+         type_table
+       ) do
+    expected_task =
+      case normalize_type(expected) do
+        {:result, ok_type, {:named, "TaskError"}} -> {:generic, {:named, "Task"}, [ok_type]}
+        _ -> nil
+      end
+
+    {task, _} = annotate_expr(task, expected_task, env, func_table, type_table)
+
+    {timeout, _} =
+      case timeout do
+        nil -> {nil, nil}
+        _ -> annotate_expr(timeout, :number, env, func_table, type_table)
+      end
+
+    inferred =
+      case type_of_expr(
+             {:await_expr, %{task: task, timeout: timeout, span: span}},
+             func_table,
+             type_table,
+             env,
+             expected
+           ) do
+        {:ok, type} -> type
+        _ -> normalize_type(expected)
+      end
+
+    {{:await_expr, %{task: task, timeout: timeout, span: span, type_info: %{result_type: inferred}}},
+     inferred}
   end
 
   defp annotate_expr(

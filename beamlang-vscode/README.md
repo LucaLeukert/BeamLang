@@ -5,9 +5,9 @@ A Visual Studio Code extension that provides syntax highlighting and LSP-powered
 ## Features
 
 - **Syntax Highlighting** for all BeamLang language constructs:
-  - Keywords: `fn`, `type`, `let`, `import`, `export`, `internal`, `if`, `else`, `match`, `case`, `while`, `loop`, `for`, `return`, `guard`
+  - Keywords: `fn`, `type`, `let`, `import`, `export`, `internal`, `if`, `else`, `match`, `case`, `async`, `await`, `while`, `loop`, `for`, `return`, `guard`
   - Primitive types: `number`, `String`, `char`, `bool`, `void`, `any`
-  - Built-in types: `Optional`, `Result`, `List`
+  - Built-in types: `Optional`, `Result`, `Task`, `List`
   - Optional syntax: `T?`, `?some`, `?none`
   - Result syntax: `Ok!Err`, `!ok`, `!err`
   - Method call operator: `->`
@@ -88,6 +88,7 @@ This extension supports BeamLang as defined in the January 2026 design specifica
 - Struct types with methods
 - Pattern matching with guards
 - Optional and Result types
+- Async tasks (`async` / `await`)
 - List-based for loops
 - External function declarations
 

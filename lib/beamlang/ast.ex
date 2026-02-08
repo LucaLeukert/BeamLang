@@ -36,6 +36,14 @@ defmodule BeamLang.AST do
              }}
           | {:identifier, %{name: binary(), span: BeamLang.Span.t()}}
           | {:lambda, %{params: [func_param()], return_type: type_name(), body: block(), span: BeamLang.Span.t()}}
+          | {:async_expr, %{body: block(), span: BeamLang.Span.t(), type_info: map() | nil}}
+          | {:await_expr,
+             %{
+               task: expr(),
+               timeout: expr() | nil,
+               span: BeamLang.Span.t(),
+               type_info: map() | nil
+             }}
           | {:method_call, %{target: expr(), name: binary(), args: [expr()], span: BeamLang.Span.t(), target_type: type_name() | nil}}
           | {:struct, %{fields: [field_assign()], operators: [operator_binding()], type: type_name() | nil, span: BeamLang.Span.t()}}
           | {:field, %{target: expr(), name: binary(), span: BeamLang.Span.t()}}

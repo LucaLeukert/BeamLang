@@ -728,4 +728,142 @@ defmodule BeamLang.IntegrationTest do
 
     assert {:ok, 0} == BeamLang.run_source(source, ~w[hello world -- foo bar])
   end
+
+  test "async await roundtrip returns ok result" do
+    source = """
+    fn main(args: [String]) -> number {
+        let task = async {
+            return 42;
+        };
+
+        let result = await(task);
+        return match (result) {
+            case!ok value => value,
+            case!err _ => 0
+        };
+    }
+    """
+
+    assert {:ok, 42} == BeamLang.run_source(source)
+  end
+
+  test "await timeout returns TaskError result" do
+    source = """
+    fn main(args: [String]) -> number {
+        let task = async {
+            loop {
+            }
+            return 1;
+        };
+
+        let result = await(task, 1);
+        let cancelled = task_cancel(task);
+
+        guard (cancelled) else { return 1; }
+
+        return match (result) {
+            case!ok _ => 2,
+            case!err err => match (err->kind == "timeout") {
+                case true => 0,
+                case false => 3
+            }
+        };
+    }
+    """
+
+    assert {:ok, 0} == BeamLang.run_source(source)
+  end
+
+  test "task failure is returned as err result" do
+    source = """
+    fn main(args: [String]) -> number {
+        let task = async {
+            return 1 / 0;
+        };
+
+        let result = await(task, 100);
+
+        return match (result) {
+            case!ok _ => 1,
+            case!err err => match (err->kind == "error") {
+                case true => 0,
+                case false => match (err->kind == "exception") {
+                    case true => 0,
+                    case false => 2
+                }
+            }
+        };
+    }
+    """
+
+    assert {:ok, 0} == BeamLang.run_source(source)
+  end
+
+  test "poll and yield return none while running" do
+    source = """
+    fn main(args: [String]) -> number {
+        let task = async {
+            loop {
+            }
+            return 1;
+        };
+
+        let polled = task_poll(task);
+        let yielded = task_yield(task, 0);
+
+        let poll_ok = match (polled) {
+            case?none => true,
+            case?some _ => false
+        };
+
+        let yield_ok = match (yielded) {
+            case?none => true,
+            case?some _ => false
+        };
+
+        let cancelled = task_cancel(task);
+
+        guard (poll_ok) else { return 1; }
+        guard (yield_ok) else { return 2; }
+        guard (cancelled) else { return 3; }
+        return 0;
+    }
+    """
+
+    assert {:ok, 0} == BeamLang.run_source(source)
+  end
+
+  test "cancel updates task status to Cancelled" do
+    source = """
+    fn main(args: [String]) -> number {
+        let task = async {
+            loop {
+            }
+            return 1;
+        };
+
+        let before = task_status(task);
+        let cancelled = task_cancel(task);
+        let after = task_status(task);
+
+        guard (cancelled) else { return 1; }
+
+        let before_ok = match (before) {
+            case TaskStatus::Running => true,
+            case _ => false
+        };
+
+        let after_ok = match (after) {
+            case TaskStatus::Cancelled => true,
+            case _ => false
+        };
+
+        guard (before_ok) else { return 2; }
+        guard (after_ok) else { return 3; }
+        return 0;
+    }
+    """
+
+    assert {:ok, 0} == BeamLang.run_source(source)
+  end
 end
