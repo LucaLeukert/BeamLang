@@ -1,6 +1,8 @@
 defmodule BeamLang.LSP.Protocol do
   @moduledoc false
 
+  alias ElixirLsp.Message
+
   @spec read_message() :: {:ok, map()} | :eof
   def read_message do
     case read_headers(%{}) do
@@ -21,11 +23,7 @@ defmodule BeamLang.LSP.Protocol do
 
               body when is_binary(body) ->
                 BeamLang.LSP.Debug.log(fn -> "recv: " <> body end)
-
-                case Jason.decode(body) do
-                  {:ok, decoded} -> {:ok, decoded}
-                  {:error, _reason} -> {:error, :invalid_json}
-                end
+                decode_message(body)
 
               _ ->
                 :eof
@@ -55,10 +53,14 @@ defmodule BeamLang.LSP.Protocol do
 
   @spec send_message(map()) :: :ok
   def send_message(payload) when is_map(payload) do
-    json = Jason.encode!(payload)
-    BeamLang.LSP.Debug.log(fn -> "send: " <> json end)
-    IO.binwrite(:stdio, "Content-Length: #{byte_size(json)}\r\n\r\n")
-    IO.binwrite(:stdio, json)
+    payload
+    |> map_to_message()
+    |> ElixirLsp.encode()
+    |> then(&IO.iodata_to_binary/1)
+    |> then(fn framed ->
+      BeamLang.LSP.Debug.log(fn -> "send: " <> extract_body(framed) end)
+      IO.binwrite(:stdio, framed)
+    end)
   end
 
   defp read_headers(acc) do
@@ -81,7 +83,55 @@ defmodule BeamLang.LSP.Protocol do
 
           _ ->
             read_headers(acc)
-        end
+      end
+    end
+  end
+
+  defp decode_message(body) do
+    framed = ["Content-Length: ", Integer.to_string(byte_size(body)), "\r\n\r\n", body]
+
+    case ElixirLsp.recv(IO.iodata_to_binary(framed)) do
+      {:ok, [message], _rest_state} ->
+        {:ok, Message.to_map(message)}
+
+      {:ok, [message | _], _rest_state} ->
+        {:ok, Message.to_map(message)}
+
+      {:ok, [], _rest_state} ->
+        {:error, :invalid_json}
+
+      {:error, _reason, _rest_state} ->
+        {:error, :invalid_json}
+    end
+  end
+
+  defp map_to_message(%{"jsonrpc" => "2.0", "id" => id, "result" => result}) do
+    ElixirLsp.response(id, result)
+  end
+
+  defp map_to_message(%{"jsonrpc" => "2.0", "id" => id, "error" => %{"code" => code, "message" => message} = error}) do
+    ElixirLsp.error_response(id, code, message, Map.get(error, "data"))
+  end
+
+  defp map_to_message(%{"jsonrpc" => "2.0", "method" => method, "params" => params}) do
+    ElixirLsp.notification(method, params)
+  end
+
+  defp map_to_message(%{"jsonrpc" => "2.0", "method" => method}) do
+    ElixirLsp.notification(method, nil)
+  end
+
+  defp map_to_message(map) do
+    case Message.from_map(Map.put_new(map, "jsonrpc", "2.0")) do
+      {:ok, message} -> message
+      {:error, _reason} -> ElixirLsp.notification("window/logMessage", %{"type" => 1, "message" => "invalid outgoing LSP payload"})
+    end
+  end
+
+  defp extract_body(framed) when is_binary(framed) do
+    case :binary.split(framed, "\r\n\r\n") do
+      [_header, body] -> body
+      _ -> framed
     end
   end
 end

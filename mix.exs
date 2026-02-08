@@ -9,7 +9,8 @@ defmodule Beamlang.MixProject do
       start_permanent: Mix.env() == :prod,
       escript: [main_module: BeamLang.CLI, name: "beamlang"],
       deps: [
-        {:jason, "~> 1.4"}
+        {:jason, "~> 1.4"},
+        {:elixir_lsp, path: "/Users/lucaleukert/src/elixir-lsp"}
       ]
     ]
   end
