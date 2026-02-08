@@ -47,15 +47,12 @@ defmodule BeamLang.LSP.Server do
   def init(_arg), do: {:ok, %{documents: %{}, lsp_state: State.new()}}
 
   on_request :initialize do
-    _ctx = ctx
     workspace_folders = Map.get(params || %{}, "workspaceFolders", [])
     next_lsp_state = State.set_workspace_folders(state.lsp_state, workspace_folders)
     {:reply, %{"capabilities" => server_capabilities()}, %{state | lsp_state: next_lsp_state}}
   end
 
   on_request :shutdown do
-    _params = params
-    _state = state
     HandlerContext.reply(ctx, nil)
   end
 
@@ -191,14 +188,10 @@ defmodule BeamLang.LSP.Server do
   end
 
   on_notification :initialized do
-    _params = params
-    _ctx = ctx
     {:ok, state}
   end
 
   on_notification :workspace_did_change_workspace_folders do
-    _ctx = ctx
-
     next_lsp_state =
       State.apply_notification(state.lsp_state, :workspace_did_change_workspace_folders, params)
 
@@ -250,8 +243,6 @@ defmodule BeamLang.LSP.Server do
   end
 
   on_notification :exit do
-    _params = params
-    _ctx = ctx
     System.halt(0)
     {:ok, state}
   end
