@@ -415,11 +415,31 @@ defmodule BeamLang.Parser do
   end
 
   defp parse_expr_statement(tokens) do
-    with {:ok, expr, rest1} <- parse_expression(tokens),
-         {:ok, _semi, rest2} <- expect(rest1, :semicolon) do
-      span = BeamLang.Span.merge(expr_span(expr), semicolon_span(rest1, rest2))
-      {:ok, {:expr, %{expr: expr, span: span}}, rest2}
+    with {:ok, expr, rest1} <- parse_expression(tokens) do
+      case rest1 do
+        [%Token{type: :semicolon} = _semi | rest2] ->
+          span = BeamLang.Span.merge(expr_span(expr), semicolon_span(rest1, rest2))
+          {:ok, {:expr, %{expr: expr, span: span}}, rest2}
+
+        [%Token{type: :dot} = dot_tok, %Token{type: :identifier, value: method_name} | _] ->
+          {:error, dot_method_call_error(dot_tok, method_name)}
+
+        _ ->
+          expect(rest1, :semicolon)
+      end
     end
+  end
+
+  defp dot_method_call_error(%Token{} = dot_tok, method_name) do
+    BeamLang.Error.new(
+      :parser,
+      "BeamLang uses '->' for method calls, not '.'. Replace '.' with '->' (for example: receiver->#{method_name}(...) ).",
+      dot_tok.span
+    )
+    |> BeamLang.Error.with_notes([
+      "fix:replace_dot_with_arrow",
+      "Use '->' for method calls, e.g. \"/\"->concat(body);"
+    ])
   end
 
   @spec parse_match_statement([Token.t()]) ::

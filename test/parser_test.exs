@@ -253,6 +253,21 @@ defmodule BeamLang.ParserTest do
     assert error.kind == :parser
   end
 
+  test "reports helpful error for dot-style method calls" do
+    source = """
+    fn main() -> void {
+        let body = "x";
+        "/".concat(body);
+    }
+    """
+
+    {:ok, tokens} = Lexer.tokenize(source)
+    assert {:error, error} = Parser.parse(tokens)
+    assert error.kind == :parser
+    assert error.message =~ "uses '->' for method calls"
+    assert Enum.any?(error.notes, &(&1 == "fix:replace_dot_with_arrow"))
+  end
+
   test "parses generic function definition" do
     source = """
     fn test<T>(opt: Optional<T>) -> T {
