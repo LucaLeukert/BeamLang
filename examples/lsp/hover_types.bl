@@ -1,7 +1,0 @@
-fn main(args: [String]) -> number {
-    let code = match (args->first()) {
-        case?some filename => 1,
-        case?none => 2
-    };
-    return code;
-}

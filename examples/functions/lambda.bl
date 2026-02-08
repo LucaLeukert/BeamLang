@@ -1,7 +1,0 @@
-fn main(args: [String]) -> number {
-    let add_one = fn(x: number) -> number {
-        return x + 1;
-    };
-
-    return add_one(1);
-}

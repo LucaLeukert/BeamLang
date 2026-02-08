@@ -1,7 +1,0 @@
-fn main(args: [String]) -> number {
-    let name = "World";
-    let age = 42;
-    let message = "Hello ${name}! You are ${age} years old.";
-    println(message);
-    return 0;
-}

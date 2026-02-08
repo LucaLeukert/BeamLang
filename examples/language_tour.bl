@@ -1,0 +1,49 @@
+type User {
+    name: String,
+    age: number
+}
+
+fn maybe_name(id: number) -> String? {
+    if (id == 1) {
+        return?some "Ada";
+    }
+    return?none;
+}
+
+fn safe_div(a: number, b: number) -> number!String {
+    if (b == 0) {
+        return!err "division by zero";
+    }
+    return!ok a / b;
+}
+
+fn main(args: [String]) -> number {
+    let user: User = { name = "Beam", age = 1 };
+    println("Hello ${user->name}");
+
+    let add_one = fn(x: number) -> number {
+        return x + 1;
+    };
+
+    let mut sum = 0;
+    for (i in 0..5) {
+        sum = sum + i;
+    }
+
+    let values = list_new()->push(1)->push(2)->push(3);
+    let first = values->first()->unwrap(0);
+    let name = maybe_name(1)->unwrap("unknown");
+
+    println("name=${name} first=${first} sum=${sum}");
+
+    match (safe_div(add_one(sum), 2)) {
+        case!ok n -> {
+            println("result=${n}");
+            return 0;
+        },
+        case!err msg -> {
+            println(msg);
+            return 1;
+        }
+    }
+}

@@ -1,5 +1,0 @@
-fn main(args: [String]) -> number {
-    let t = typeof(10);
-    println(t);
-    return t->length();
-}

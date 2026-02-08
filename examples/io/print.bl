@@ -1,4 +1,0 @@
-fn main(args: [String]) -> number {
-    println("test");
-    return 0;
-}

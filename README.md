@@ -35,7 +35,7 @@ fn main(args: [String]) -> number {
 mix beamlang run examples/basics/hello.bl
 
 # With debug (print AST, don't run)
-mix beamlang run --print-ast --no-run examples/hello.bl
+mix beamlang run --print-ast --no-run examples/basics/hello.bl
 
 # Build a standalone binary
 mix beamlang compile examples/basics/hello.bl
@@ -78,14 +78,11 @@ Debug LSP logs: `./beamlang --lsp --lsp-debug`
 
 | Category | Examples |
 |----------|----------|
-| **Basics** | `examples/basics/hello.bl`, `args.bl`, `math.bl` |
-| **Types** | `optional.bl`, `result.bl`, `generic.bl`, `enum.bl`, `tuples.bl` |
-| **Functions** | `generic_fn.bl`, `lambda.bl`, `pattern_params.bl`, `self_method.bl` |
-| **Control flow** | `control_flow.bl`, `loops.bl`, `if_expr.bl`, `guard.bl` |
-| **Collections** | `list.bl`, `list_methods.bl`, `range_demo.bl` |
-| **Modules** | `use_math.bl`, `stdlib_methods.bl` |
-| **Apps** | `examples/apps/` — `cat`, `curl`, `grep`, `ls`, `standalone`, `wc` |
-| **LSP** | `examples/lsp/lsp_features.bl`, `hover_types.bl` |
+| **Language tour** | `examples/language_tour.bl` |
+| **Hello world** | `examples/basics/hello.bl` |
+| **Modules** | `examples/modules/use_math.bl`, `examples/modules/math_ops.bl`, `examples/modules/stdlib_methods.bl` |
+| **Apps** | `examples/apps/cat.bl`, `examples/apps/standalone.bl` |
+| **LSP** | `examples/lsp/lsp_features.bl` |
 
 ---
 

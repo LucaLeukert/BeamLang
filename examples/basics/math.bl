@@ -1,8 +1,0 @@
-export type Pair {
-    left: number,
-    right: number
-}
-
-export fn add(left: number, right: number) -> number {
-    return left + right;
-}

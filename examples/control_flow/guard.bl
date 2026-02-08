@@ -1,7 +1,0 @@
-fn main(args: [String]) -> number {
-    let value = 5;
-    guard (value > 0) else {
-        return 1;
-    }
-    return 0;
-}

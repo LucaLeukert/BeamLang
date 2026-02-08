@@ -1,9 +1,0 @@
-fn test<T>(opt: T?) -> T? {
-    return opt;
-}
-
-fn main(args: [String]) -> number {
-    let value = test(?some 1);
-    println("Hallo" + "Welt!");
-    return value->unwrap(0);
-}
