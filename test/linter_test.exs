@@ -44,4 +44,13 @@ defmodule BeamLang.LinterTest do
     assert diagnostic.col > 0
     assert diagnostic.message =~ "Use '=>'"
   end
+
+  test "lint flags return-only match branch blocks in cat example" do
+    source = File.read!("examples/apps/cat.bl")
+    assert {:ok, diagnostics} = Linter.lint(source, "examples/apps/cat.bl")
+
+    assert Enum.any?(diagnostics, fn diagnostic ->
+             diagnostic.rule == :return_only_match_branch_block
+           end)
+  end
 end

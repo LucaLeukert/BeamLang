@@ -60,10 +60,17 @@ defmodule BeamLang.Linter do
           {[fat_arrow | expr_tokens] ++ rewritten_rest,
            inner_diagnostics ++ [diagnostic] ++ rest_diagnostics}
         else
+          return_diagnostics =
+            if return_only_block?(rewritten_inner) and branch_separator?(remaining) do
+              [return_only_branch_diagnostic(arrow)]
+            else
+              []
+            end
+
           {rewritten_rest, rest_diagnostics} = do_rewrite_single_expression_branches(remaining)
 
           {[arrow, lbrace] ++ rewritten_inner ++ [closing] ++ rewritten_rest,
-           inner_diagnostics ++ rest_diagnostics}
+           inner_diagnostics ++ return_diagnostics ++ rest_diagnostics}
         end
 
       :error ->
@@ -83,6 +90,16 @@ defmodule BeamLang.Linter do
     %{
       rule: :single_expression_match_branch,
       message: "Use '=>' for single-expression match branches.",
+      line: tok.line,
+      col: tok.col,
+      span: tok.span
+    }
+  end
+
+  defp return_only_branch_diagnostic(%Token{} = tok) do
+    %{
+      rule: :return_only_match_branch_block,
+      message: "Avoid '-> { return ...; }' in match branches; return the match result instead.",
       line: tok.line,
       col: tok.col,
       span: tok.span
@@ -126,6 +143,19 @@ defmodule BeamLang.Linter do
     case Enum.reverse(tokens) do
       [%Token{type: :semicolon} | rest] -> Enum.reverse(rest)
       _ -> tokens
+    end
+  end
+
+  defp return_only_block?(tokens) do
+    case tokens do
+      [%Token{type: type} | _] when type in [:return, :return_kw] ->
+        case top_level_token_indices(tokens, :semicolon) do
+          [semicolon_idx] -> semicolon_idx == length(tokens) - 1
+          _ -> false
+        end
+
+      _ ->
+        false
     end
   end
 
