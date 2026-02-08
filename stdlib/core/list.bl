@@ -44,108 +44,134 @@ internal fn list_of<T>(items: [T]) -> List<T> {
 internal fn list_from_data<T>(data: any) -> List<T> {
     return {
         data = data,
-        length = fn(self: List<T>) -> number {
-            return list_length_data(self->data);
-        },
-        get = fn(self: List<T>, index: number) -> T? {
-            return list_get_optional(self->data, index);
-        },
-        push = fn(self: List<T>, item: T) -> List<T> {
-            let new_data = list_push_data(self->data, item);
-            return list_from_data(new_data);
-        },
-        pop = fn(self: List<T>) -> List<T> {
-            let len = self->length();
-            if (len <= 0) {
-                return self;
-            }
-            let mut acc: List<T> = list_new();
-            let mut idx = 0;
-            while (idx < len - 1) {
-                let item = list_get_unchecked(self->data, idx);
-                acc = acc->push(item);
-                idx = idx + 1;
-            }
-            return acc;
-        },
-        first = fn(self: List<T>) -> T? {
-            return self->get(0);
-        },
-        last = fn(self: List<T>) -> T? {
-            let len = self->length();
-            if (len <= 0) {
-                return optional_none();
-            }
-            return self->get(len - 1);
-        },
-        map = fn(self: List<T>, mapper: fn(T) -> any) -> List<any> {
-            let mut acc: List<any> = list_new();
-            let mut idx = 0;
-            let len = self->length();
-            while (idx < len) {
-                let item = list_get_unchecked(self->data, idx);
-                acc = acc->push(mapper(item));
-                idx = idx + 1;
-            }
-            return acc;
-        },
-        filter = fn(self: List<T>, predicate: fn(T) -> bool) -> List<T> {
-            let mut acc: List<T> = list_new();
-            let mut idx = 0;
-            let len = self->length();
-            while (idx < len) {
-                let item = list_get_unchecked(self->data, idx);
-                if (predicate(item)) {
-                    acc = acc->push(item);
-                }
-                idx = idx + 1;
-            }
-            return acc;
-        },
-        fold = fn(self: List<T>, initial: any, folder: fn(any, T) -> any) -> any {
-            let mut acc = initial;
-            let mut idx = 0;
-            let len = self->length();
-            while (idx < len) {
-                let item = list_get_unchecked(self->data, idx);
-                acc = folder(acc, item);
-                idx = idx + 1;
-            }
-            return acc;
-        },
-        for_each = fn(self: List<T>, callback: fn(T) -> void) -> void {
-            let mut idx = 0;
-            let len = self->length();
-            while (idx < len) {
-                let item = list_get_unchecked(self->data, idx);
-                callback(item);
-                idx = idx + 1;
-            }
-            return;
-        },
-        reverse = fn(self: List<T>) -> List<T> {
-            let reversed = list_reverse_data(self->data);
-            return list_from_data(reversed);
-        },
-        concat = fn(self: List<T>, other: List<T>) -> List<T> {
-            let concatenated = list_concat_data(self->data, other->data);
-            return list_from_data(concatenated);
-        },
-        join = fn(self: List<T>, separator: String) -> String {
-            let mut result = "";
-            let mut idx = 0;
-            let len = self->length();
-            while (idx < len) {
-                let item = list_get_unchecked(self->data, idx);
-                if (idx > 0) {
-                    result = result->concat(separator);
-                }
-                result = result->concat(to_string(item));
-                idx = idx + 1;
-            }
-            return result;
-        }
+        length = list_length_method,
+        get = list_get_method,
+        push = list_push_method,
+        pop = list_pop_method,
+        first = list_first_method,
+        last = list_last_method,
+        map = list_map_method,
+        filter = list_filter_method,
+        fold = list_fold_method,
+        for_each = list_for_each_method,
+        reverse = list_reverse_method,
+        concat = list_concat_method,
+        join = list_join_method
     };
+}
+
+internal fn list_length_method<T>(self: List<T>) -> number {
+    return list_length_data(self->data);
+}
+
+internal fn list_get_method<T>(self: List<T>, index: number) -> T? {
+    return list_get_optional(self->data, index);
+}
+
+internal fn list_push_method<T>(self: List<T>, item: T) -> List<T> {
+    let new_data = list_push_data(self->data, item);
+    return list_from_data(new_data);
+}
+
+internal fn list_pop_method<T>(self: List<T>) -> List<T> {
+    let len = self->length();
+    if (len <= 0) {
+        return self;
+    }
+    let mut acc: List<T> = list_new();
+    let mut idx = 0;
+    while (idx < len - 1) {
+        let item = list_get_unchecked(self->data, idx);
+        acc = acc->push(item);
+        idx = idx + 1;
+    }
+    return acc;
+}
+
+internal fn list_first_method<T>(self: List<T>) -> T? {
+    return self->get(0);
+}
+
+internal fn list_last_method<T>(self: List<T>) -> T? {
+    let len = self->length();
+    if (len <= 0) {
+        return optional_none();
+    }
+    return self->get(len - 1);
+}
+
+internal fn list_map_method<T, U>(self: List<T>, mapper: fn(T) -> U) -> List<U> {
+    let mut acc: List<U> = list_new();
+    let mut idx = 0;
+    let len = self->length();
+    while (idx < len) {
+        let item = list_get_unchecked(self->data, idx);
+        acc = acc->push(mapper(item));
+        idx = idx + 1;
+    }
+    return acc;
+}
+
+internal fn list_filter_method<T>(self: List<T>, predicate: fn(T) -> bool) -> List<T> {
+    let mut acc: List<T> = list_new();
+    let mut idx = 0;
+    let len = self->length();
+    while (idx < len) {
+        let item = list_get_unchecked(self->data, idx);
+        if (predicate(item)) {
+            acc = acc->push(item);
+        }
+        idx = idx + 1;
+    }
+    return acc;
+}
+
+internal fn list_fold_method<T, U>(self: List<T>, initial: U, folder: fn(U, T) -> U) -> U {
+    let mut acc = initial;
+    let mut idx = 0;
+    let len = self->length();
+    while (idx < len) {
+        let item = list_get_unchecked(self->data, idx);
+        acc = folder(acc, item);
+        idx = idx + 1;
+    }
+    return acc;
+}
+
+internal fn list_for_each_method<T>(self: List<T>, callback: fn(T) -> void) -> void {
+    let mut idx = 0;
+    let len = self->length();
+    while (idx < len) {
+        let item = list_get_unchecked(self->data, idx);
+        callback(item);
+        idx = idx + 1;
+    }
+    return;
+}
+
+internal fn list_reverse_method<T>(self: List<T>) -> List<T> {
+    let reversed = list_reverse_data(self->data);
+    return list_from_data(reversed);
+}
+
+internal fn list_concat_method<T>(self: List<T>, other: List<T>) -> List<T> {
+    let concatenated = list_concat_data(self->data, other->data);
+    return list_from_data(concatenated);
+}
+
+internal fn list_join_method<T>(self: List<T>, separator: String) -> String {
+    let mut result = "";
+    let mut idx = 0;
+    let len = self->length();
+    while (idx < len) {
+        let item = list_get_unchecked(self->data, idx);
+        if (idx > 0) {
+            result = result->concat(separator);
+        }
+        result = result->concat(to_string(item));
+        idx = idx + 1;
+    }
+    return result;
 }
 
 internal fn list_get_optional<T>(data: any, index: number) -> T? {
