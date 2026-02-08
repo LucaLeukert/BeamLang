@@ -142,6 +142,20 @@ defmodule BeamLang.IntegrationTest do
     assert error.message == "main must return number, got void."
   end
 
+  test "main return type error keeps source file span" do
+    source = """
+    fn main(args: [String]) -> void {
+        return;
+    }
+    """
+
+    filename = "/tmp/main_return_span.beam"
+    assert {:error, [error]} = BeamLang.compile_source(source, filename)
+    assert error.message == "main must return number, got void."
+    assert error.span.file_id == filename
+    assert error.span.end >= error.span.start
+  end
+
   test "supports struct literal with type annotation" do
     source = """
     type User {

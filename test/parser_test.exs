@@ -1092,4 +1092,37 @@ defmodule BeamLang.ParserTest do
     value_field = Enum.find(fields, fn f -> f.name == "value" end)
     assert value_field.annotations == []
   end
+
+  test "tracks tuple span from parentheses" do
+    source = """
+    fn main(args: [String]) -> number {
+      let pair = ();
+      return 0;
+    }
+    """
+
+    filename = "/tmp/tuple_span.beam"
+    {:ok, tokens} = Lexer.tokenize(source, filename)
+    {:ok, ast} = Parser.parse(tokens)
+
+    assert {:program, %{functions: [{:function, %{body: {:block, %{stmts: [stmt | _]}}}}]}} = ast
+    assert {:let, %{expr: {:tuple, %{span: span}}}} = stmt
+    assert span.file_id == filename
+    assert span.end >= span.start
+  end
+
+  test "tracks match case eof error span at case token" do
+    source = """
+    fn main(args: [String]) -> number {
+      return match (1) {
+        case 1
+    """
+
+    filename = "/tmp/match_case_eof.beam"
+    {:ok, tokens} = Lexer.tokenize(source, filename)
+    assert {:error, error} = Parser.parse(tokens)
+    assert error.message == "Unexpected end of input in match cases."
+    assert error.span.file_id == filename
+    assert error.span.end >= error.span.start
+  end
 end

@@ -44,7 +44,12 @@ defmodule BeamLang.Semantic do
            name == "main" and body != nil
          end) do
       nil ->
-        span = BeamLang.Span.new("<source>", 0, 0)
+        span =
+          case functions do
+            [{:function, %{span: first_span}} | _] -> first_span
+            _ -> BeamLang.Span.new("<unknown>", 0, 0)
+          end
+
         {:error, [BeamLang.Error.new(:type, "Missing required function 'main'.", span)]}
 
       {:function, %{params: params, span: span}} ->
@@ -229,22 +234,22 @@ defmodule BeamLang.Semantic do
     end
   end
 
-  @spec require_main_number(binary(), BeamLang.AST.type_name()) ::
+  @spec require_main_number(binary(), BeamLang.AST.type_name(), BeamLang.Span.t()) ::
           :ok | {:error, [BeamLang.Error.t()]}
-  defp require_main_number("main", :number), do: :ok
+  defp require_main_number("main", :number, _span), do: :ok
 
-  defp require_main_number("main", other),
+  defp require_main_number("main", other, span),
     do:
       {:error,
        [
          BeamLang.Error.new(
            :type,
            "main must return number, got #{type_label(other)}.",
-           BeamLang.Span.new("<source>", 0, 0)
+           span
          )
        ]}
 
-  defp require_main_number(_name, _type), do: :ok
+  defp require_main_number(_name, _type, _span), do: :ok
 
   @spec type_of_expr(BeamLang.AST.expr(), map(), map(), map(), BeamLang.AST.type_name() | nil) ::
           {:ok, BeamLang.AST.type_name()}
@@ -340,7 +345,7 @@ defmodule BeamLang.Semantic do
   end
 
   defp type_of_expr(
-         {:method_call, %{target: target, name: name, args: args}},
+         {:method_call, %{target: target, name: name, args: args, span: call_span}},
          func_table,
          type_table,
          env,
@@ -354,7 +359,8 @@ defmodule BeamLang.Semantic do
                args,
                func_table,
                type_table,
-               env
+               env,
+               call_span
              ) do
           {:ok, type} -> {:ok, type}
           {:error, {:match, errors}} -> {:error, {:match, errors}}
@@ -560,10 +566,10 @@ defmodule BeamLang.Semantic do
     end
   end
 
-  defp type_of_expr({:struct, %{fields: fields}}, func_table, type_table, env, expected) do
+  defp type_of_expr({:struct, %{fields: fields, span: struct_span}}, func_table, type_table, env, expected) do
     case struct_type_info(expected) do
       {:ok, type_name, args} ->
-        case Map.fetch(type_table, type_name) do
+        case fetch_type(type_table, type_name) do
           {:ok, %{params: params, fields: field_map}} ->
             case type_arg_map(params, args) do
               {:ok, param_map} ->
@@ -576,7 +582,8 @@ defmodule BeamLang.Semantic do
                     func_table,
                     type_table,
                     env,
-                    type_name
+                    type_name,
+                    struct_span
                   )
 
                 if errors == [], do: {:ok, expected}, else: {:error, {:struct, errors}}
@@ -833,7 +840,7 @@ defmodule BeamLang.Semantic do
             method_type = Map.get(env, :__method_type__)
             is_same_type_method = method_type != nil and method_type == type_name
 
-            case Map.fetch(type_table, type_name) do
+            case fetch_type(type_table, type_name) do
               {:ok, %{params: params, fields: field_map}} ->
                 case type_arg_map(params, args) do
                   {:ok, param_map} ->
@@ -937,11 +944,7 @@ defmodule BeamLang.Semantic do
               {:error,
                {:match,
                 [
-                  BeamLang.Error.new(
-                    :type,
-                    "Match expression must have at least one case.",
-                    BeamLang.Span.new("<source>", 0, 0)
-                  )
+                  BeamLang.Error.new(:type, "Match expression must have at least one case.", span)
                 ]}}
 
             _ ->
@@ -1002,7 +1005,7 @@ defmodule BeamLang.Semantic do
     # Check if the type has an operator declaration in the type definition
     case get_type_name(left_type) do
       {:ok, type_name} ->
-        case Map.fetch(type_table, type_name) do
+        case fetch_type(type_table, type_name) do
           {:ok, %{operators: operators}} when map_size(operators) > 0 ->
             case Map.fetch(operators, op) do
               {:ok, %{type: {:fn, [param1, param2], return_type}}} ->
@@ -1114,7 +1117,7 @@ defmodule BeamLang.Semantic do
   defp parse_args_type_info([type_arg], type_table, span) do
     case struct_type_info(type_arg) do
       {:ok, type_name, type_args} ->
-        case Map.fetch(type_table, type_name) do
+        case fetch_type(type_table, type_name) do
           {:ok, %{params: params, fields: fields, field_order: field_order}} ->
             case type_arg_map(params, type_args) do
               :error ->
@@ -1210,16 +1213,16 @@ defmodule BeamLang.Semantic do
   defp parse_args_field_type?({:named, "char"}), do: true
   defp parse_args_field_type?(_), do: false
 
-  defp method_call_type(target_type, name, args, func_table, type_table, env) do
+  defp method_call_type(target_type, name, args, func_table, type_table, env, call_span) do
     error_span =
       case args do
         [first | _] -> expr_span(first)
-        _ -> BeamLang.Span.new("<source>", 0, 0)
+        _ -> call_span
       end
 
     case struct_type_info(target_type) do
       {:ok, type_name, type_args} ->
-        case Map.fetch(type_table, type_name) do
+        case fetch_type(type_table, type_name) do
           {:ok, %{params: params, fields: field_map}} ->
             case type_arg_map(params, type_args) do
               {:ok, param_map} ->
@@ -1270,71 +1273,36 @@ defmodule BeamLang.Semantic do
                     end
 
                   {:ok, %{type: _field_type}} ->
-                    {:error,
-                     BeamLang.Error.new(
-                       :type,
-                       "Field '#{name}' is not callable.",
-                       BeamLang.Span.new("<source>", 0, 0)
-                     )}
+                    {:error, BeamLang.Error.new(:type, "Field '#{name}' is not callable.", call_span)}
 
                   :error ->
-                    {:error,
-                     BeamLang.Error.new(
-                       :type,
-                       "Unknown field '#{name}'.",
-                       BeamLang.Span.new("<source>", 0, 0)
-                     )}
+                    {:error, BeamLang.Error.new(:type, "Unknown field '#{name}'.", call_span)}
                 end
 
               :error ->
-                {:error,
-                 BeamLang.Error.new(
-                   :type,
-                   "Unknown type in method call.",
-                   BeamLang.Span.new("<source>", 0, 0)
-                 )}
+                {:error, BeamLang.Error.new(:type, "Unknown type in method call.", call_span)}
             end
 
           :error ->
-            {:error,
-             BeamLang.Error.new(
-               :type,
-               "Unknown type in method call.",
-               BeamLang.Span.new("<source>", 0, 0)
-             )}
+            {:error, BeamLang.Error.new(:type, "Unknown type in method call.", call_span)}
         end
 
       :missing ->
-        {:error,
-         BeamLang.Error.new(
-           :type,
-           "Method call requires a struct value.",
-           BeamLang.Span.new("<source>", 0, 0)
-         )}
+        {:error, BeamLang.Error.new(:type, "Method call requires a struct value.", call_span)}
 
       :error ->
-        {:error,
-         BeamLang.Error.new(
-           :type,
-           "Method call requires a struct value.",
-           BeamLang.Span.new("<source>", 0, 0)
-         )}
+        {:error, BeamLang.Error.new(:type, "Method call requires a struct value.", call_span)}
     end
   end
 
   @spec validate_function(BeamLang.AST.func(), map(), map()) :: [BeamLang.Error.t()]
-  defp validate_function(
-         {:function,
-          %{
-            name: name,
-            type_params: type_params,
-            params: params,
-            return_type: return_type,
-            body: body
-          }},
-         func_table,
-         type_table
-       ) do
+  defp validate_function({:function, info}, func_table, type_table) do
+    name = info.name
+    type_params = Map.get(info, :type_params, [])
+    params = info.params
+    return_type = info.return_type
+    body = info.body
+
     errors = validate_param_names(params)
 
     {param_env, param_errors} =
@@ -1384,7 +1352,7 @@ defmodule BeamLang.Semantic do
       end
 
     errors =
-      case require_main_number(name, return_type) do
+      case require_main_number(name, return_type, info.span) do
         :ok -> errors
         {:error, errs} -> errors ++ errs
       end
@@ -1820,10 +1788,10 @@ defmodule BeamLang.Semantic do
                   end
               end
 
-            {:ok, %{name: var_name, type: declared, mutable: true, field: field}} ->
+            {:ok, %{name: var_name, type: declared, mutable: true, field: field, span: field_span}} ->
               is_self_access = var_name == "self"
               method_type = Map.get(acc_env, :__method_type__)
-              case resolve_field_type(declared, field, type_table, is_self_access, method_type) do
+              case resolve_field_type(declared, field, type_table, is_self_access, method_type, field_span) do
                 {:error, err} ->
                   {:cont, {:ok, acc_env, [err | errors]}}
 
@@ -2228,16 +2196,14 @@ defmodule BeamLang.Semantic do
   @spec build_function_table([BeamLang.AST.func()]) :: {:ok, map()}
   defp build_function_table(functions) do
     table =
-      Enum.reduce(functions, %{}, fn {:function,
-                                      %{
-                                        name: name,
-                                        type_params: type_params,
-                                        params: params,
-                                        return_type: return_type,
-                                        internal: internal,
-                                        span: span
-                                      }},
-                                     acc ->
+      Enum.reduce(functions, %{}, fn {:function, func}, acc ->
+        name = func.name
+        type_params = Map.get(func, :type_params, [])
+        params = func.params
+        return_type = func.return_type
+        internal = Map.get(func, :internal, false)
+        span = func.span
+
         param_types =
           params
           |> Enum.map(&normalize_type(&1.type))
@@ -2296,6 +2262,33 @@ defmodule BeamLang.Semantic do
     {:ok, table}
   end
 
+  # Resolve unqualified imported type names when there is a unique qualified match.
+  defp fetch_type(type_table, type_name) when is_binary(type_name) do
+    case Map.fetch(type_table, type_name) do
+      {:ok, _} = found ->
+        found
+
+      :error ->
+        if String.contains?(type_name, "::") do
+          :error
+        else
+          suffix = "::" <> type_name
+
+          matches =
+            type_table
+            |> Map.keys()
+            |> Enum.filter(&String.ends_with?(&1, suffix))
+
+          case matches do
+            [qualified_name] -> Map.fetch(type_table, qualified_name)
+            _ -> :error
+          end
+        end
+    end
+  end
+
+  defp fetch_type(_type_table, _type_name), do: :error
+
   @spec collect_function_errors([BeamLang.AST.func()], map(), map()) :: [BeamLang.Error.t()]
   defp collect_function_errors(functions, func_table, type_table) do
     functions
@@ -2319,10 +2312,11 @@ defmodule BeamLang.Semantic do
           map(),
           map(),
           map(),
-          binary()
+          binary(),
+          BeamLang.Span.t()
         ) ::
           [BeamLang.Error.t()]
-  defp validate_struct_fields(fields, type_fields, func_table, type_table, env, type_name) do
+  defp validate_struct_fields(fields, type_fields, func_table, type_table, env, type_name, struct_span) do
     provided = Map.new(fields, fn %{name: name} -> {name, true} end)
 
     missing =
@@ -2332,11 +2326,7 @@ defmodule BeamLang.Semantic do
 
     missing_errors =
       Enum.map(missing, fn field ->
-        BeamLang.Error.new(
-          :type,
-          "Missing field '#{field}' for #{type_name}.",
-          BeamLang.Span.new("<source>", 0, 0)
-        )
+        BeamLang.Error.new(:type, "Missing field '#{field}' for #{type_name}.", struct_span)
       end)
 
     field_errors =
@@ -2618,7 +2608,7 @@ defmodule BeamLang.Semantic do
        ) do
     case struct_type_info(match_type) do
       {:ok, ^name, args} ->
-        case Map.fetch(type_table, name) do
+        case fetch_type(type_table, name) do
           {:ok, %{params: params, fields: field_map}} ->
             case type_arg_map(params, args) do
               {:ok, param_map} ->
@@ -2983,7 +2973,7 @@ defmodule BeamLang.Semantic do
        ) do
     {:ok, _env, if_errors} =
       validate_statements(
-        {:block, %{stmts: [if_stmt], span: BeamLang.Span.new("<source>", 0, 0)}},
+        {:block, %{stmts: [if_stmt], span: stmt_span(if_stmt)}},
         func_table,
         type_table,
         env,
@@ -3123,6 +3113,8 @@ defmodule BeamLang.Semantic do
   defp do_type_compatible?({:type_var, _name}, _inferred), do: true
   defp do_type_compatible?(_expected, {:type_var, _name}), do: true
   defp do_type_compatible?(expected, inferred) when expected == inferred, do: true
+  defp do_type_compatible?({:named, expected}, {:named, inferred}),
+    do: compatible_named_type?(expected, inferred)
 
   defp do_type_compatible?({:optional, expected_inner}, {:optional, inferred_inner}),
     do: type_compatible?(expected_inner, inferred_inner)
@@ -3165,6 +3157,8 @@ defmodule BeamLang.Semantic do
   end
 
   defp do_comparable_types?(left, right) when left == right, do: true
+  defp do_comparable_types?({:named, left}, {:named, right}),
+    do: compatible_named_type?(left, right)
   defp do_comparable_types?(_left, _right), do: false
 
   @spec types_match?(BeamLang.AST.type_name(), BeamLang.AST.type_name()) :: boolean()
@@ -3175,12 +3169,29 @@ defmodule BeamLang.Semantic do
   end
 
   defp do_types_match?(same, same), do: true
-  defp do_types_match?({:named, name}, {:named, name}), do: true
+  defp do_types_match?({:named, left}, {:named, right}),
+    do: compatible_named_type?(left, right)
   defp do_types_match?({:generic, base1, args1}, {:generic, base2, args2}) do
     do_types_match?(base1, base2) and length(args1) == length(args2) and
       Enum.zip(args1, args2) |> Enum.all?(fn {a, b} -> do_types_match?(a, b) end)
   end
+
   defp do_types_match?(_type1, _type2), do: false
+
+  defp compatible_named_type?(left, right) when left == right, do: true
+
+  defp compatible_named_type?(left, right) do
+    cond do
+      String.contains?(left, "::") and not String.contains?(right, "::") ->
+        String.ends_with?(left, "::" <> right)
+
+      String.contains?(right, "::") and not String.contains?(left, "::") ->
+        String.ends_with?(right, "::" <> left)
+
+      true ->
+        false
+    end
+  end
 
   @spec arithmetic_type(atom(), BeamLang.AST.type_name(), BeamLang.AST.type_name()) ::
           {:ok, BeamLang.AST.type_name()} | {:error, :invalid_binary_op}
@@ -3217,7 +3228,8 @@ defmodule BeamLang.Semantic do
              name: binary(),
              type: BeamLang.AST.type_name(),
              mutable: boolean(),
-             field: binary() | nil
+             field: binary() | nil,
+             span: BeamLang.Span.t()
            }}
           | {:error, BeamLang.Error.t()}
   defp assignment_target({:identifier, %{name: name, span: span}}, env) do
@@ -3226,7 +3238,7 @@ defmodule BeamLang.Semantic do
     else
       case Map.fetch(env, name) do
         {:ok, %{type: type, mutable: mutable}} ->
-          {:ok, %{name: name, type: type, mutable: mutable, field: nil}}
+          {:ok, %{name: name, type: type, mutable: mutable, field: nil, span: span}}
 
         :error ->
           {:error, BeamLang.Error.new(:type, "Unknown variable in assignment.", span)}
@@ -3239,7 +3251,7 @@ defmodule BeamLang.Semantic do
       {:identifier, %{name: name}} ->
         case Map.fetch(env, name) do
           {:ok, %{type: type, mutable: mutable}} ->
-            {:ok, %{name: name, type: type, mutable: mutable, field: field}}
+            {:ok, %{name: name, type: type, mutable: mutable, field: field, span: span}}
 
           :error ->
             {:error, BeamLang.Error.new(:type, "Unknown variable in assignment.", span)}
@@ -3251,21 +3263,32 @@ defmodule BeamLang.Semantic do
     end
   end
 
-  defp assignment_target(_other, _env) do
+  defp assignment_target(other, _env) when is_tuple(other) do
     {:error,
-     BeamLang.Error.new(:type, "Invalid assignment target.", BeamLang.Span.new("<source>", 0, 0))}
+     BeamLang.Error.new(:type, "Invalid assignment target.", expr_span(other))}
   end
 
-  @spec resolve_field_type(BeamLang.AST.type_name(), binary(), map(), boolean(), binary() | nil) ::
+  defp assignment_target(_other, _env) do
+    {:error, BeamLang.Error.new(:type, "Invalid assignment target.", BeamLang.Span.new("<unknown>", 0, 0))}
+  end
+
+  @spec resolve_field_type(
+          BeamLang.AST.type_name(),
+          binary(),
+          map(),
+          boolean(),
+          binary() | nil,
+          BeamLang.Span.t()
+        ) ::
           {:ok, BeamLang.AST.type_name()} | {:error, BeamLang.Error.t()}
-  defp resolve_field_type(type, field, type_table, is_self_access, method_type) do
+  defp resolve_field_type(type, field, type_table, is_self_access, method_type, span) do
     case struct_type_info(type) do
       {:ok, type_name, args} ->
         # Allow internal field access if accessing via self OR within a method of the same type
         is_same_type_method = method_type != nil and method_type == type_name
         can_access_internal = is_self_access or is_same_type_method
 
-        case Map.fetch(type_table, type_name) do
+        case fetch_type(type_table, type_name) do
           {:ok, %{params: params, fields: field_map}} ->
             case type_arg_map(params, args) do
               {:ok, param_map} ->
@@ -3277,7 +3300,7 @@ defmodule BeamLang.Semantic do
                      BeamLang.Error.new(
                        :type,
                        "Field '#{field}' is internal and cannot be accessed directly.",
-                       BeamLang.Span.new("<source>", 0, 0)
+                       span
                      )}
 
                   {:ok, %{type: field_type, internal: _}} ->
@@ -3288,40 +3311,25 @@ defmodule BeamLang.Semantic do
                      BeamLang.Error.new(
                        :type,
                        "Unknown field '#{field}'.",
-                       BeamLang.Span.new("<source>", 0, 0)
+                       span
                      )}
                 end
 
               :error ->
-                {:error,
-                 BeamLang.Error.new(
-                   :type,
-                   "Unknown type '#{type_name}'.",
-                   BeamLang.Span.new("<source>", 0, 0)
-                 )}
+                {:error, BeamLang.Error.new(:type, "Unknown type '#{type_name}'.", span)}
             end
 
           :error ->
-            {:error,
-             BeamLang.Error.new(
-               :type,
-               "Unknown type '#{type_name}'.",
-               BeamLang.Span.new("<source>", 0, 0)
-             )}
+            {:error, BeamLang.Error.new(:type, "Unknown type '#{type_name}'.", span)}
         end
 
       :error ->
-        {:error,
-         BeamLang.Error.new(
-           :type,
-           "Field access requires a struct value.",
-           BeamLang.Span.new("<source>", 0, 0)
-         )}
+        {:error, BeamLang.Error.new(:type, "Field access requires a struct value.", span)}
     end
   end
 
   @spec block_span([BeamLang.AST.stmt()]) :: BeamLang.Span.t()
-  defp block_span([]), do: BeamLang.Span.new("<source>", 0, 0)
+  defp block_span([]), do: BeamLang.Span.new("<unknown>", 0, 0)
 
   defp block_span([first | _] = stmts) do
     first_span = stmt_span(first)
@@ -3330,6 +3338,7 @@ defmodule BeamLang.Semantic do
   end
 
   @spec block_span(BeamLang.AST.block()) :: BeamLang.Span.t()
+  defp block_span({:block, %{span: span}}), do: span
   defp block_span({:block, %{stmts: stmts}}), do: block_span(stmts)
 
   @spec guard_has_return?(BeamLang.AST.block()) :: boolean()
@@ -3649,7 +3658,7 @@ defmodule BeamLang.Semantic do
     {field_types, struct_type} =
       case struct_type_info(expected) do
         {:ok, name, args} ->
-          case Map.fetch(type_table, name) do
+          case fetch_type(type_table, name) do
             {:ok, %{params: params, fields: field_map}} ->
               case type_arg_map(params, args) do
                 {:ok, param_map} ->

@@ -421,11 +421,17 @@ defmodule BeamLang do
                   {:cont, {:ok, %{acc | modules: [{mod, bin} | acc.modules]}}}
 
                 {:error, reason} ->
+                  span =
+                    case resolved do
+                      {:program, %{span: resolved_span}} -> resolved_span
+                      _ -> BeamLang.Span.new(module_name, 0, 0)
+                    end
+
                   err =
                     BeamLang.Error.new(
                       :type,
                       "BEAM compile failed: #{inspect(reason)}",
-                      BeamLang.Span.new("<source>", 0, 0)
+                      span
                     )
 
                   {:halt, {:error, [err]}}

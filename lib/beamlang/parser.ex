@@ -24,7 +24,7 @@ defmodule BeamLang.Parser do
   @spec parse_decls([Token.t()], [BeamLang.AST.import()], [BeamLang.AST.type_def()], [BeamLang.AST.enum_def()], [BeamLang.AST.error_def()], [BeamLang.AST.func()]) ::
           {:ok, BeamLang.AST.t(), [Token.t()]} | {:error, BeamLang.Error.t()}
   defp parse_decls([], [], [], [], [], []) do
-    {:error, BeamLang.Error.new(:parser, "Expected at least one declaration.", eof_span("<source>"))}
+    {:error, BeamLang.Error.new(:parser, "Expected at least one declaration.", eof_span("<unknown>"))}
   end
 
   defp parse_decls([], imports, types, enums, errors, functions) do
@@ -33,7 +33,7 @@ defmodule BeamLang.Parser do
     enums = Enum.reverse(enums)
     errors = Enum.reverse(errors)
     functions = Enum.reverse(functions)
-    span = program_span(imports, types, functions)
+    span = program_span(imports, types, enums, errors, functions)
     {:ok, {:program, %{module: nil, imports: imports, types: types, enums: enums, errors: errors, functions: functions, span: span}}, []}
   end
 
@@ -990,12 +990,12 @@ defmodule BeamLang.Parser do
     end
   end
 
-  defp parse_primary([%Token{type: :lparen} | rest]) do
+  defp parse_primary([%Token{type: :lparen} = lparen_tok | rest]) do
     # Could be tuple expression or grouped expression
     case rest do
-      [%Token{type: :rparen} | rest2] ->
+      [%Token{type: :rparen} = rparen_tok | rest2] ->
         # Empty tuple ()
-        span = BeamLang.Span.new("<source>", 0, 0)
+        span = BeamLang.Span.merge(lparen_tok.span, rparen_tok.span)
         {:ok, {:tuple, %{elements: [], span: span}}, rest2}
 
       _ ->
@@ -1353,7 +1353,7 @@ defmodule BeamLang.Parser do
     with {:ok, case_tok, rest1} <- expect(tokens, :case),
          {:ok, pattern, rest2} <- parse_case_pattern(rest1),
          {:ok, guard, rest3} <- parse_optional_guard(rest2),
-         {:ok, arrow_type, _arrow_tok, rest4} <- parse_match_arrow(rest3, []) do
+         {:ok, arrow_type, _arrow_tok, rest4} <- parse_match_arrow(rest3, case_tok.span) do
       body_result =
         case {arrow_type, rest4} do
           {:arrow, [%Token{type: :lbrace} | _]} ->
@@ -1383,22 +1383,22 @@ defmodule BeamLang.Parser do
     end
   end
 
-  @spec parse_match_arrow([Token.t()], [BeamLang.AST.expr()]) ::
+  @spec parse_match_arrow([Token.t()], BeamLang.Span.t()) ::
           {:ok, :fat_arrow | :arrow, Token.t(), [Token.t()]} | {:error, BeamLang.Error.t()}
-  defp parse_match_arrow([%Token{type: :fat_arrow} = tok | rest], _acc) do
+  defp parse_match_arrow([%Token{type: :fat_arrow} = tok | rest], _case_span) do
     {:ok, :fat_arrow, tok, rest}
   end
 
-  defp parse_match_arrow([%Token{type: :arrow} = tok | rest], _acc) do
+  defp parse_match_arrow([%Token{type: :arrow} = tok | rest], _case_span) do
     {:ok, :arrow, tok, rest}
   end
 
-  defp parse_match_arrow([%Token{} = tok | _], _acc) do
+  defp parse_match_arrow([%Token{} = tok | _], _case_span) do
     {:error, error("Expected '=>' or '->' in match case.", tok)}
   end
 
-  defp parse_match_arrow([], _acc) do
-    {:error, BeamLang.Error.new(:parser, "Unexpected end of input in match cases.", BeamLang.Span.new("<source>", 0, 0))}
+  defp parse_match_arrow([], case_span) do
+    {:error, BeamLang.Error.new(:parser, "Unexpected end of input in match cases.", case_span)}
   end
 
   @spec parse_case_pattern([Token.t()]) ::
@@ -1870,7 +1870,7 @@ defmodule BeamLang.Parser do
 
   @spec expect([Token.t()], atom()) :: {:ok, Token.t(), [Token.t()]} | {:error, BeamLang.Error.t()}
   defp expect([], type) do
-    {:error, BeamLang.Error.new(:parser, "Expected #{type}, got end of input.", eof_span("<source>"))}
+    {:error, BeamLang.Error.new(:parser, "Expected #{type}, got end of input.", eof_span("<unknown>"))}
   end
 
   @spec unexpected([Token.t()]) :: BeamLang.Error.t()
@@ -1880,7 +1880,7 @@ defmodule BeamLang.Parser do
 
   @spec unexpected([Token.t()]) :: BeamLang.Error.t()
   defp unexpected([]) do
-    BeamLang.Error.new(:parser, "Unexpected end of input.", eof_span("<source>"))
+    BeamLang.Error.new(:parser, "Unexpected end of input.", eof_span("<unknown>"))
   end
 
   @spec error(binary(), Token.t()) :: BeamLang.Error.t()
@@ -1944,7 +1944,7 @@ defmodule BeamLang.Parser do
   defp semicolon_span(_before, [%Token{type: :semicolon} = tok | _]), do: tok.span
 
   @spec block_span([BeamLang.AST.stmt()]) :: BeamLang.Span.t()
-  defp block_span([]), do: BeamLang.Span.new("<source>", 0, 0)
+  defp block_span([]), do: BeamLang.Span.new("<unknown>", 0, 0)
 
   defp block_span([first | _] = stmts) do
     first_span = stmt_span(first)
@@ -1953,21 +1953,30 @@ defmodule BeamLang.Parser do
   end
 
   @spec block_span(BeamLang.AST.block()) :: BeamLang.Span.t()
+  defp block_span({:block, %{span: span}}), do: span
   defp block_span({:block, %{stmts: stmts}}), do: block_span(stmts)
 
-  @spec program_span([BeamLang.AST.import()], [BeamLang.AST.type_def()], [BeamLang.AST.func()]) :: BeamLang.Span.t()
-  defp program_span(imports, types, funcs) do
+  @spec program_span(
+          [BeamLang.AST.import()],
+          [BeamLang.AST.type_def()],
+          [BeamLang.AST.enum_def()],
+          [BeamLang.AST.error_def()],
+          [BeamLang.AST.func()]
+        ) :: BeamLang.Span.t()
+  defp program_span(imports, types, enums, errors, funcs) do
     spans =
-      (imports ++ types ++ funcs)
+      (imports ++ types ++ enums ++ errors ++ funcs)
       |> Enum.map(fn
         {:import, %{span: span}} -> span
         {:type_def, %{span: span}} -> span
+        {:enum_def, %{span: span}} -> span
+        {:error_def, %{span: span}} -> span
         {:function, %{span: span}} -> span
       end)
 
     case spans do
       [first | _] -> BeamLang.Span.merge(first, List.last(spans))
-      [] -> BeamLang.Span.new("<source>", 0, 0)
+      [] -> BeamLang.Span.new("<unknown>", 0, 0)
     end
   end
 
