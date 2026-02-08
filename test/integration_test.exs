@@ -757,7 +757,7 @@ defmodule BeamLang.IntegrationTest do
         };
 
         let result = await(task, 1);
-        let cancelled = task_cancel(task);
+        let cancelled = task->cancel();
 
         guard (cancelled) else { return 1; }
 
@@ -808,8 +808,8 @@ defmodule BeamLang.IntegrationTest do
             return 1;
         };
 
-        let polled = task_poll(task);
-        let yielded = task_yield(task, 0);
+        let polled = task->poll();
+        let yielded = task->yield(0);
 
         let poll_ok = match (polled) {
             case?none => true,
@@ -821,7 +821,7 @@ defmodule BeamLang.IntegrationTest do
             case?some _ => false
         };
 
-        let cancelled = task_cancel(task);
+        let cancelled = task->cancel();
 
         guard (poll_ok) else { return 1; }
         guard (yield_ok) else { return 2; }
@@ -842,9 +842,9 @@ defmodule BeamLang.IntegrationTest do
             return 1;
         };
 
-        let before = task_status(task);
-        let cancelled = task_cancel(task);
-        let after = task_status(task);
+        let before = task->status();
+        let cancelled = task->cancel();
+        let after = task->status();
 
         guard (cancelled) else { return 1; }
 

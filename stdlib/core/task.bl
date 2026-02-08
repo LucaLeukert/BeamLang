@@ -43,30 +43,6 @@ fn task_spawn<T>(callback: fn() -> T) -> Task<T> {
     return task_from_data(raw);
 }
 
-fn task_await<T>(task: Task<T>) -> T!TaskError {
-    return task->await_result();
-}
-
-fn task_await_timeout<T>(task: Task<T>, timeout_ms: number) -> T!TaskError {
-    return task->await_timeout(timeout_ms);
-}
-
-fn task_poll<T>(task: Task<T>) -> (T!TaskError)? {
-    return task->poll();
-}
-
-fn task_yield<T>(task: Task<T>, timeout_ms: number) -> (T!TaskError)? {
-    return task->yield(timeout_ms);
-}
-
-fn task_cancel<T>(task: Task<T>) -> bool {
-    return task->cancel();
-}
-
-fn task_status<T>(task: Task<T>) -> TaskStatus {
-    return task->status();
-}
-
 internal fn task_from_data<T>(data: any) -> Task<T> {
     return {
         data = data,

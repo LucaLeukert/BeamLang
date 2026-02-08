@@ -27,20 +27,25 @@ fn main(args: [String]) -> number {
         case!err err => println("timeout path: ${err->kind}")
     };
 
-    let pending = task_poll(slow);
+    let pending = slow->poll();
     match (pending) {
         case?none => println("poll: still running"),
         case?some _ => println("poll: completed")
     };
 
-    let cancelled = task_cancel(slow);
+    let cancelled = slow->cancel();
     println("cancelled = ${cancelled}");
 
-    let status = task_status(slow);
+    let status = slow->status();
     match (status) {
         case TaskStatus::Cancelled => println("status: cancelled"),
         case _ => println("status: not-cancelled")
     };
+
+    let inline = task_spawn(fn() -> number {
+        return 42;
+    });
+    println("inline task result: ${unwrap_or_zero(inline->await_result())}");
 
     return 0;
 }

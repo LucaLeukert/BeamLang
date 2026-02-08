@@ -428,7 +428,7 @@ Line two ${value}""";
 
 The stdlib is organized into two directories under `stdlib/`:
 
-- **`stdlib/core/`** — Always auto-imported. Contains fundamental types and data structures: `string`, `list`, `range`, `result`, `optional`, `map`, `math`.
+- **`stdlib/core/`** — Always auto-imported. Contains fundamental types and data structures: `string`, `list`, `range`, `result`, `optional`, `task`, `map`, `math`.
 - **`stdlib/ext/`** — Requires explicit `import`. Contains modules for IO, networking, and argument parsing: `system`, `network`, `args`.
 
 ```beamlang
@@ -488,10 +488,13 @@ match (result) {
 };
 ```
 
-`Task` control functions are in core stdlib:
-- `task_spawn`, `task_await`, `task_await_timeout`
-- `task_poll`, `task_yield`, `task_cancel`, `task_status`
+Task creation is available as a core function:
+- `task_spawn`
 
-`task_poll` and `task_yield` return optional results:
+Task control is method-based on `Task<T>`:
+- `await_result`, `await_timeout`
+- `poll`, `yield`, `cancel`, `status`
+
+`task->poll()` and `task->yield(timeout_ms)` return optional results:
 - `?none` when the task is still running
 - `?some(T!TaskError)` when completed

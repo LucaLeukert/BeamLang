@@ -302,12 +302,17 @@ export type Task<T> {
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `task_spawn` | `fn<T>(fn() -> T) -> Task<T>` | Start a task from a callback |
-| `task_await` | `fn<T>(Task<T>) -> T!TaskError` | Wait using default timeout |
-| `task_await_timeout` | `fn<T>(Task<T>, number) -> T!TaskError` | Wait with explicit timeout (ms) |
-| `task_poll` | `fn<T>(Task<T>) -> (T!TaskError)?` | Non-blocking check (`?none` if running) |
-| `task_yield` | `fn<T>(Task<T>, number) -> (T!TaskError)?` | Timed non-blocking yield |
-| `task_cancel` | `fn<T>(Task<T>) -> bool` | Cancel a running task |
-| `task_status` | `fn<T>(Task<T>) -> TaskStatus` | Current status |
+
+#### Methods
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `await_result` | `fn(Task<T>) -> T!TaskError` | Wait using default timeout |
+| `await_timeout` | `fn(Task<T>, number) -> T!TaskError` | Wait with explicit timeout (ms) |
+| `poll` | `fn(Task<T>) -> (T!TaskError)?` | Non-blocking check (`?none` if running) |
+| `yield` | `fn(Task<T>, number) -> (T!TaskError)?` | Timed non-blocking yield |
+| `cancel` | `fn(Task<T>) -> bool` | Cancel a running task |
+| `status` | `fn(Task<T>) -> TaskStatus` | Current status |
 
 #### Language Support
 
@@ -322,7 +327,7 @@ export type Task<T> {
 ```beamlang
 fn main(args: [String]) -> number {
     let task = async { return 42; };
-    let result = await(task, 1000);
+    let result = task->await_timeout(1000);
 
     return match (result) {
         case!ok value => value,
