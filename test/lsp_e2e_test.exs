@@ -487,4 +487,27 @@ defmodule BeamLang.LSP.E2ETest do
 
     stop_server(port)
   end
+
+  test "document symbols works for module import files" do
+    port = start_server()
+    initialize(port)
+
+    path = Path.expand("examples/modules/use_math.bl")
+    uri = "file://" <> path
+    source = File.read!(path)
+    open_document(port, uri, source)
+
+    send_request(port, 16, "textDocument/documentSymbol", %{
+      "textDocument" => %{"uri" => uri}
+    })
+
+    {resp, _} = recv_response_by_id(port, 16)
+    symbols = resp["result"]
+    assert is_list(symbols)
+
+    names = Enum.map(symbols, & &1["name"])
+    assert "main" in names
+
+    stop_server(port)
+  end
 end

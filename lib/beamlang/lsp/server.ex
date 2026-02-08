@@ -931,7 +931,13 @@ defmodule BeamLang.LSP.Server do
   end
 
   defp index_functions(functions) do
-    Enum.reduce(functions, %{}, fn {:function, %{name: name, params: params, return_type: return_type, span: span, type_params: type_params} = func}, acc ->
+    Enum.reduce(functions, %{}, fn {:function, func}, acc ->
+      name = func.name
+      params = func.params
+      return_type = func.return_type
+      span = func.span
+      type_params = Map.get(func, :type_params, [])
+
       info = %{
         params: params,
         return_type: return_type,
