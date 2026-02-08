@@ -13,6 +13,7 @@ The standard library is written in BeamLang (`.bl` files) and is loaded automati
 ## Tooling
 
 - The CLI can run as a Language Server Protocol (LSP) server using `beamlang --lsp`.
+- The CLI includes `beamlang lint` for token-level lint checks (currently includes single-expression `match` branch style).
 - The BeamLang VS Code extension launches the CLI LSP server for diagnostics, hover, go-to definition, and completion.
 
 ## Files, Modules, Imports

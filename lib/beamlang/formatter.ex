@@ -46,7 +46,7 @@ defmodule BeamLang.Formatter do
   defp format_tokens(tokens, _source) do
     tokens
     |> strip_eof()
-    |> rewrite_single_expression_branches()
+    |> BeamLang.Linter.autocorrect_tokens()
     |> do_format(0, :line_start, [])
     |> IO.iodata_to_binary()
     |> ensure_trailing_newline()
@@ -84,7 +84,8 @@ defmodule BeamLang.Formatter do
 
       # Top-level declarations get a blank line separator
       [%BeamLang.Token{type: type} | _]
-      when new_indent == 0 and type in [:fn, :fn_kw, :type_kw, :error_kw, :export_kw, :export, :import_kw, :import] ->
+      when new_indent == 0 and
+             type in [:fn, :fn_kw, :type_kw, :error_kw, :export_kw, :export, :import_kw, :import] ->
         do_format(rest, new_indent, :line_start, ["\n\n" | acc])
 
       _ ->
@@ -112,7 +113,17 @@ defmodule BeamLang.Formatter do
 
     case rest do
       [%BeamLang.Token{type: type} | _]
-      when indent == 0 and type in [:fn, :fn_kw, :type_kw, :error_kw, :export_kw, :export, :internal_kw, :internal] ->
+      when indent == 0 and
+             type in [
+               :fn,
+               :fn_kw,
+               :type_kw,
+               :error_kw,
+               :export_kw,
+               :export,
+               :internal_kw,
+               :internal
+             ] ->
         # Separate top-level import/export statements from declarations.
         do_format(rest, indent, :line_start, ["\n\n" | acc])
 
@@ -221,10 +232,35 @@ defmodule BeamLang.Formatter do
 
   # ---- Binary operators: spaces around ----------------------------------
   defp do_format([%BeamLang.Token{type: type} = tok | rest], indent, state, acc)
-       when type in [:eq, :neq, :lte, :gte, :lt, :gt, :plus, :minus, :star, :slash, :modulo,
-                     :percent, :and_kw, :or_kw, :and_op, :or_op, :double_eq, :not_eq,
-                     :eq_eq, :not_eq, :plus_eq, :minus_eq, :star_eq, :slash_eq,
-                     :concat, :assign, :equals] do
+       when type in [
+              :eq,
+              :neq,
+              :lte,
+              :gte,
+              :lt,
+              :gt,
+              :plus,
+              :minus,
+              :star,
+              :slash,
+              :modulo,
+              :percent,
+              :and_kw,
+              :or_kw,
+              :and_op,
+              :or_op,
+              :double_eq,
+              :not_eq,
+              :eq_eq,
+              :not_eq,
+              :plus_eq,
+              :minus_eq,
+              :star_eq,
+              :slash_eq,
+              :concat,
+              :assign,
+              :equals
+            ] do
     acc =
       case state do
         :line_start -> [indent_str(indent) | acc]
@@ -288,8 +324,12 @@ defmodule BeamLang.Formatter do
   defp do_format([%BeamLang.Token{type: :at} = tok | rest], indent, state, acc) do
     acc =
       case state do
-        :line_start -> [indent_str(indent) | acc]
-        :after_open -> acc
+        :line_start ->
+          [indent_str(indent) | acc]
+
+        :after_open ->
+          acc
+
         :after_token ->
           if indent > 0 do
             # Keep field annotations one-per-line in type bodies.
@@ -304,7 +344,12 @@ defmodule BeamLang.Formatter do
   end
 
   # Field name after annotation call should start on a new line.
-  defp do_format([%BeamLang.Token{type: :identifier} = tok | rest], indent, :after_token, [")" | _] = acc)
+  defp do_format(
+         [%BeamLang.Token{type: :identifier} = tok | rest],
+         indent,
+         :after_token,
+         [")" | _] = acc
+       )
        when indent > 0 do
     if decorator_on_current_line?(acc) do
       acc = emit_newline_indent(acc, indent)
@@ -331,138 +376,6 @@ defmodule BeamLang.Formatter do
   end
 
   # ---- Helpers -----------------------------------------------------------
-
-  defp rewrite_single_expression_branches(tokens) do
-    do_rewrite_single_expression_branches(tokens, [])
-  end
-
-  defp do_rewrite_single_expression_branches([], acc), do: Enum.reverse(acc)
-
-  defp do_rewrite_single_expression_branches(
-         [%BeamLang.Token{type: :arrow} = arrow, %BeamLang.Token{type: :lbrace} = lbrace | rest],
-         acc
-       ) do
-    case take_brace_contents(rest, 1, []) do
-      {:ok, inner, closing, remaining} ->
-        rewritten_inner = rewrite_single_expression_branches(inner)
-
-        if single_expression_block?(rewritten_inner) and branch_separator?(remaining) do
-          expr_tokens = strip_trailing_top_level_semicolon(rewritten_inner)
-          fat_arrow = %{arrow | type: :fat_arrow, value: "=>"}
-          segment = [fat_arrow | expr_tokens]
-          do_rewrite_single_expression_branches(remaining, Enum.reduce(segment, acc, &[&1 | &2]))
-        else
-          segment = [arrow, lbrace] ++ rewritten_inner ++ [closing]
-          do_rewrite_single_expression_branches(remaining, Enum.reduce(segment, acc, &[&1 | &2]))
-        end
-
-      :error ->
-        do_rewrite_single_expression_branches([lbrace | rest], [arrow | acc])
-    end
-  end
-
-  defp do_rewrite_single_expression_branches([tok | rest], acc) do
-    do_rewrite_single_expression_branches(rest, [tok | acc])
-  end
-
-  defp take_brace_contents([], _depth, _inner), do: :error
-
-  defp take_brace_contents([%BeamLang.Token{type: :lbrace} = tok | rest], depth, inner) do
-    take_brace_contents(rest, depth + 1, [tok | inner])
-  end
-
-  defp take_brace_contents([%BeamLang.Token{type: :rbrace} = tok | rest], 1, inner) do
-    {:ok, Enum.reverse(inner), tok, rest}
-  end
-
-  defp take_brace_contents([%BeamLang.Token{type: :rbrace} = tok | rest], depth, inner) do
-    take_brace_contents(rest, depth - 1, [tok | inner])
-  end
-
-  defp take_brace_contents([tok | rest], depth, inner) do
-    take_brace_contents(rest, depth, [tok | inner])
-  end
-
-  defp single_expression_block?(tokens) do
-    top_level_semicolons =
-      tokens
-      |> top_level_token_indices(:semicolon)
-
-    case top_level_semicolons do
-      [semicolon_idx] ->
-        semicolon_idx == length(tokens) - 1 and
-          top_level_statement_keyword_count(tokens) == 0
-
-      _ ->
-        false
-    end
-  end
-
-  defp strip_trailing_top_level_semicolon(tokens) do
-    case Enum.reverse(tokens) do
-      [%BeamLang.Token{type: :semicolon} | rest] -> Enum.reverse(rest)
-      _ -> tokens
-    end
-  end
-
-  defp top_level_token_indices(tokens, type) do
-    {_stack, _idx, indices} =
-      Enum.reduce(tokens, {[], 0, []}, fn tok, {stack, idx, indices} ->
-        new_stack =
-          case tok.type do
-            t when t in [:lparen, :lbracket, :lbrace] -> [tok.type | stack]
-            :rparen -> drop_matching(stack, :lparen)
-            :rbracket -> drop_matching(stack, :lbracket)
-            :rbrace -> drop_matching(stack, :lbrace)
-            _ -> stack
-          end
-
-        new_indices =
-          if stack == [] and tok.type == type do
-            [idx | indices]
-          else
-            indices
-          end
-
-        {new_stack, idx + 1, new_indices}
-      end)
-
-    Enum.reverse(indices)
-  end
-
-  defp top_level_statement_keyword_count(tokens) do
-    statement_keywords = [:let, :let_kw, :return, :return_kw, :if, :if_kw, :while, :while_kw, :for, :for_kw, :loop, :loop_kw, :guard, :guard_kw]
-
-    {stack, count} =
-      Enum.reduce(tokens, {[], 0}, fn tok, {stack, count} ->
-        new_stack =
-          case tok.type do
-            t when t in [:lparen, :lbracket, :lbrace] -> [tok.type | stack]
-            :rparen -> drop_matching(stack, :lparen)
-            :rbracket -> drop_matching(stack, :lbracket)
-            :rbrace -> drop_matching(stack, :lbrace)
-            _ -> stack
-          end
-
-        new_count =
-          if stack == [] and tok.type in statement_keywords do
-            count + 1
-          else
-            count
-          end
-
-        {new_stack, new_count}
-      end)
-
-    if stack == [], do: count, else: count
-  end
-
-  defp drop_matching([expected | rest], expected), do: rest
-  defp drop_matching(stack, _expected), do: stack
-
-  defp branch_separator?([%BeamLang.Token{type: type} | _]) when type in [:comma, :rbrace], do: true
-  defp branch_separator?([]), do: true
-  defp branch_separator?(_), do: false
 
   defp identifier_like_text?(text) when is_binary(text) do
     String.match?(text, ~r/^[A-Za-z_][A-Za-z0-9_]*$/)
@@ -494,7 +407,8 @@ defmodule BeamLang.Formatter do
   defp generic_close_context?(acc, rest) do
     case acc do
       [prev | _] when is_binary(prev) ->
-        (identifier_like_text?(prev) or prev in ["]", ")", ">"]) and generic_close_delimiter?(rest)
+        (identifier_like_text?(prev) or prev in ["]", ")", ">"]) and
+          generic_close_delimiter?(rest)
 
       _ ->
         false
@@ -502,7 +416,19 @@ defmodule BeamLang.Formatter do
   end
 
   defp generic_close_delimiter?([%BeamLang.Token{type: type} | _])
-       when type in [:lparen, :comma, :rparen, :semicolon, :arrow, :fat_arrow, :equals, :assign, :lbrace, :rbrace, :colon] do
+       when type in [
+              :lparen,
+              :comma,
+              :rparen,
+              :semicolon,
+              :arrow,
+              :fat_arrow,
+              :equals,
+              :assign,
+              :lbrace,
+              :rbrace,
+              :colon
+            ] do
     true
   end
 
@@ -656,6 +582,7 @@ defmodule BeamLang.Formatter do
   end
 
   defp ensure_trailing_newline(""), do: "\n"
+
   defp ensure_trailing_newline(text) do
     if String.ends_with?(text, "\n") do
       text

@@ -21,6 +21,12 @@ defmodule BeamLang.CLITest do
     assert args == ["file.bl", "--print-ast"]
   end
 
+  test "parse_command recognizes lint subcommand" do
+    {command, args} = BeamLang.CLI.parse_command(["lint", "file.bl"])
+    assert command == :lint
+    assert args == ["file.bl"]
+  end
+
   test "parse_args supports compile subcommand ordering" do
     {opts, rest} = BeamLang.CLI.parse_args(["file.bl", "--print-ast"], :compile)
     assert opts[:print_ast]

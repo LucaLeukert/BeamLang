@@ -7,6 +7,7 @@ defmodule Mix.Tasks.Beamlang do
   Usage:
     mix beamlang run [--print-tokens] [--print-ast] [--print-forms] [--emit-beam PATH] [--no-run] path/to/file.bl
     mix beamlang compile path/to/file.bl [--print-tokens] [--print-ast] [--print-forms] [--emit-beam PATH]
+    mix beamlang lint [path/to/file.or.dir]
     mix beamlang --lsp
     mix beamlang --lsp --lsp-debug
   """

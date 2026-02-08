@@ -20,22 +20,25 @@ defmodule BeamLang.CLI do
         :run -> run_command(rest, opts)
         :compile -> compile_command(rest, opts)
         :format -> format_command(rest, opts)
+        :lint -> lint_command(rest)
       end
     end
   end
 
-  @spec parse_command([binary()]) :: {:run | :compile | :format, [binary()]}
+  @spec parse_command([binary()]) :: {:run | :compile | :format | :lint, [binary()]}
   def parse_command(["run" | rest]) when is_list(rest), do: {:run, rest}
   def parse_command(["compile" | rest]) when is_list(rest), do: {:compile, rest}
   def parse_command(["format" | rest]) when is_list(rest), do: {:format, rest}
   def parse_command(["fmt" | rest]) when is_list(rest), do: {:format, rest}
+  def parse_command(["lint" | rest]) when is_list(rest), do: {:lint, rest}
   def parse_command(args) when is_list(args), do: {:run, args}
 
-  @spec parse_args([binary()], :run | :compile | :format) :: {keyword(), [binary()]}
+  @spec parse_args([binary()], :run | :compile | :format | :lint) :: {keyword(), [binary()]}
   def parse_args(args, command \\ :run) when is_list(args) do
     case command do
       :compile -> parse_compile_args(args)
       :format -> parse_format_args(args)
+      :lint -> {[], args}
       :run -> parse_run_args(args)
     end
   end
@@ -94,6 +97,7 @@ defmodule BeamLang.CLI do
 
   # Split args at the .bl file: opts before, program args after
   defp do_normalize_with_bl_split([], opt_acc), do: {opt_acc, []}
+
   defp do_normalize_with_bl_split([arg | rest], opt_acc) do
     if String.ends_with?(arg, ".bl") do
       # Found the .bl file, everything after is program args
@@ -141,9 +145,11 @@ defmodule BeamLang.CLI do
 
     check_mode = opts[:check] || false
     write_mode = opts[:write] || false
-    had_changes = Enum.reduce(files, false, fn file, changed ->
-      format_single_file(file, check_mode, write_mode) or changed
-    end)
+
+    had_changes =
+      Enum.reduce(files, false, fn file, changed ->
+        format_single_file(file, check_mode, write_mode) or changed
+      end)
 
     if check_mode and had_changes do
       System.halt(1)
@@ -178,6 +184,61 @@ defmodule BeamLang.CLI do
       {:error, message} ->
         IO.puts(:stderr, "Error formatting #{path}: #{message}")
         false
+    end
+  end
+
+  defp lint_command(rest) do
+    files =
+      case rest do
+        [] ->
+          Path.wildcard("**/*.bl")
+
+        paths ->
+          Enum.flat_map(paths, fn path ->
+            if File.dir?(path) do
+              Path.wildcard(Path.join(path, "**/*.bl"))
+            else
+              [path]
+            end
+          end)
+      end
+
+    if files == [] do
+      IO.puts(:stderr, "No .bl files found")
+      System.halt(1)
+    end
+
+    findings =
+      Enum.reduce(files, 0, fn file, acc ->
+        acc + lint_single_file(file)
+      end)
+
+    if findings > 0 do
+      System.halt(1)
+    end
+
+    :ok
+  end
+
+  defp lint_single_file(path) do
+    case File.read(path) do
+      {:ok, source} ->
+        case BeamLang.Linter.lint(source, path) do
+          {:ok, diagnostics} ->
+            Enum.each(diagnostics, fn diagnostic ->
+              IO.puts("#{path}:#{diagnostic.line}:#{diagnostic.col}: #{diagnostic.message}")
+            end)
+
+            length(diagnostics)
+
+          {:error, reason} ->
+            IO.puts(:stderr, "Error linting #{path}: #{reason}")
+            0
+        end
+
+      {:error, reason} ->
+        IO.puts(:stderr, "Error reading #{path}: #{inspect(reason)}")
+        0
     end
   end
 
@@ -224,18 +285,24 @@ defmodule BeamLang.CLI do
 
     case BeamLang.compile_file(path) do
       {:ok, %{entry: entry_module, modules: modules}} ->
-        if opts[:print_tokens] || opts[:print_ast] || opts[:print_ast_pretty] || opts[:print_types] || opts[:print_forms] do
+        if opts[:print_tokens] || opts[:print_ast] || opts[:print_ast_pretty] ||
+             opts[:print_types] || opts[:print_forms] do
           case BeamLang.Lexer.tokenize(source, path) do
             {:ok, tokens} ->
               case BeamLang.Parser.parse(tokens) do
                 {:ok, ast} ->
-                  if opts[:print_tokens], do: IO.inspect(tokens, label: "TOKENS", limit: :infinity)
+                  if opts[:print_tokens],
+                    do: IO.inspect(tokens, label: "TOKENS", limit: :infinity)
+
                   if opts[:print_ast], do: IO.inspect(ast, label: "AST")
+
                   if opts[:print_ast_pretty] do
                     IO.puts("AST (pretty):")
                     IO.puts(BeamLang.ASTPrinter.format(ast))
                   end
+
                   if opts[:print_types], do: print_types(source, path)
+
                   if opts[:print_forms] do
                     forms = BeamLang.Codegen.to_erlang_forms(ast)
                     IO.inspect(forms, label: "ERLANG_FORMS", limit: :infinity)
@@ -273,11 +340,17 @@ defmodule BeamLang.CLI do
         else
           case BeamLang.Runtime.load_modules(modules) do
             :ok ->
-              case BeamLang.Runtime.load_and_run(entry_module, elem(List.keyfind(modules, entry_module, 0), 1), beamlang_args) do
+              case BeamLang.Runtime.load_and_run(
+                     entry_module,
+                     elem(List.keyfind(modules, entry_module, 0), 1),
+                     beamlang_args
+                   ) do
                 {:ok, exit_code} when is_integer(exit_code) ->
                   System.halt(exit_code)
+
                 {:ok, _value} ->
                   System.halt(0)
+
                 {:error, %{message: message}} ->
                   IO.puts(:stderr, "Error: #{message}")
                   System.halt(1)
@@ -301,8 +374,12 @@ defmodule BeamLang.CLI do
     |> Enum.map(fn {file, errs} ->
       source =
         cond do
-          file == entry_path -> entry_source
-          file == "<source>" -> entry_source
+          file == entry_path ->
+            entry_source
+
+          file == "<source>" ->
+            entry_source
+
           true ->
             case File.read(file) do
               {:ok, contents} -> contents
@@ -478,13 +555,23 @@ defmodule BeamLang.CLI do
   end
 
   defp format_function_type_dump(
-         {:function, %{name: name, type_params: type_params, params: params, return_type: return_type, body: body, span: span}},
+         {:function,
+          %{
+            name: name,
+            type_params: type_params,
+            params: params,
+            return_type: return_type,
+            body: body,
+            span: span
+          }},
          path
        ) do
     if span.file_id != path do
       nil
     else
-      header = "fn #{name}#{format_type_params(type_params)}(#{format_params(params)}) -> #{format_type(return_type)}"
+      header =
+        "fn #{name}#{format_type_params(type_params)}(#{format_params(params)}) -> #{format_type(return_type)}"
+
       bindings = collect_local_bindings(body, path)
       expr_types = collect_expression_types(body, path)
 
@@ -521,7 +608,9 @@ defmodule BeamLang.CLI do
     do: "  expr #{label}: #{format_type(type)} @#{span.start}"
 
   defp collect_local_bindings(nil, _path), do: []
-  defp collect_local_bindings({:block, %{stmts: stmts}}, path), do: collect_stmt_bindings(stmts, path)
+
+  defp collect_local_bindings({:block, %{stmts: stmts}}, path),
+    do: collect_stmt_bindings(stmts, path)
 
   defp collect_stmt_bindings(stmts, path) do
     Enum.flat_map(stmts, &collect_stmt_binding(&1, path))
@@ -531,7 +620,17 @@ defmodule BeamLang.CLI do
     if span.file_id == path, do: [{:let, name, type || :any, span}], else: []
   end
 
-  defp collect_stmt_binding({:for, %{name: name, item_type: item_type, collection_type: collection_type, body: body, span: span}}, path) do
+  defp collect_stmt_binding(
+         {:for,
+          %{
+            name: name,
+            item_type: item_type,
+            collection_type: collection_type,
+            body: body,
+            span: span
+          }},
+         path
+       ) do
     current =
       if span.file_id == path do
         [{:for_item, name, item_type || :any, collection_type || :any, span}]
@@ -548,31 +647,52 @@ defmodule BeamLang.CLI do
 
   defp collect_stmt_binding({:while, %{body: body}}, path), do: collect_local_bindings(body, path)
   defp collect_stmt_binding({:loop, %{body: body}}, path), do: collect_local_bindings(body, path)
-  defp collect_stmt_binding({:guard, %{else_block: else_block}}, path), do: collect_local_bindings(else_block, path)
+
+  defp collect_stmt_binding({:guard, %{else_block: else_block}}, path),
+    do: collect_local_bindings(else_block, path)
+
   defp collect_stmt_binding(_stmt, _path), do: []
 
   defp collect_else_bindings(nil, _path), do: []
-  defp collect_else_bindings({:else_block, %{block: block}}, path), do: collect_local_bindings(block, path)
-  defp collect_else_bindings({:else_if, %{if: if_stmt}}, path), do: collect_stmt_binding(if_stmt, path)
+
+  defp collect_else_bindings({:else_block, %{block: block}}, path),
+    do: collect_local_bindings(block, path)
+
+  defp collect_else_bindings({:else_if, %{if: if_stmt}}, path),
+    do: collect_stmt_binding(if_stmt, path)
 
   defp collect_expression_types(nil, _path), do: []
-  defp collect_expression_types({:block, %{stmts: stmts}}, path), do: Enum.flat_map(stmts, &collect_stmt_expr_types(&1, path))
+
+  defp collect_expression_types({:block, %{stmts: stmts}}, path),
+    do: Enum.flat_map(stmts, &collect_stmt_expr_types(&1, path))
 
   defp collect_stmt_expr_types({:let, %{expr: expr}}, path), do: collect_expr_types(expr, path)
   defp collect_stmt_expr_types({:expr, %{expr: expr}}, path), do: collect_expr_types(expr, path)
-  defp collect_stmt_expr_types({:return, %{expr: expr}}, path) when not is_nil(expr), do: collect_expr_types(expr, path)
-  defp collect_stmt_expr_types({:assign, %{expr: expr}}, path), do: collect_expr_types(expr, path)
-  defp collect_stmt_expr_types({:compound_assign, %{expr: expr}}, path), do: collect_expr_types(expr, path)
-  defp collect_stmt_expr_types({:let_destruct, %{expr: expr}}, path), do: collect_expr_types(expr, path)
 
-  defp collect_stmt_expr_types({:if_stmt, %{cond: cond, then_block: then_block, else_branch: else_branch}}, path) do
-    collect_expr_types(cond, path) ++ collect_expression_types(then_block, path) ++ collect_else_expr_types(else_branch, path)
+  defp collect_stmt_expr_types({:return, %{expr: expr}}, path) when not is_nil(expr),
+    do: collect_expr_types(expr, path)
+
+  defp collect_stmt_expr_types({:assign, %{expr: expr}}, path), do: collect_expr_types(expr, path)
+
+  defp collect_stmt_expr_types({:compound_assign, %{expr: expr}}, path),
+    do: collect_expr_types(expr, path)
+
+  defp collect_stmt_expr_types({:let_destruct, %{expr: expr}}, path),
+    do: collect_expr_types(expr, path)
+
+  defp collect_stmt_expr_types(
+         {:if_stmt, %{cond: cond, then_block: then_block, else_branch: else_branch}},
+         path
+       ) do
+    collect_expr_types(cond, path) ++
+      collect_expression_types(then_block, path) ++ collect_else_expr_types(else_branch, path)
   end
 
   defp collect_stmt_expr_types({:while, %{cond: cond, body: body}}, path),
     do: collect_expr_types(cond, path) ++ collect_expression_types(body, path)
 
-  defp collect_stmt_expr_types({:loop, %{body: body}}, path), do: collect_expression_types(body, path)
+  defp collect_stmt_expr_types({:loop, %{body: body}}, path),
+    do: collect_expression_types(body, path)
 
   defp collect_stmt_expr_types({:for, %{collection: collection, body: body}}, path),
     do: collect_expr_types(collection, path) ++ collect_expression_types(body, path)
@@ -583,8 +703,12 @@ defmodule BeamLang.CLI do
   defp collect_stmt_expr_types(_stmt, _path), do: []
 
   defp collect_else_expr_types(nil, _path), do: []
-  defp collect_else_expr_types({:else_block, %{block: block}}, path), do: collect_expression_types(block, path)
-  defp collect_else_expr_types({:else_if, %{if: if_stmt}}, path), do: collect_stmt_expr_types(if_stmt, path)
+
+  defp collect_else_expr_types({:else_block, %{block: block}}, path),
+    do: collect_expression_types(block, path)
+
+  defp collect_else_expr_types({:else_if, %{if: if_stmt}}, path),
+    do: collect_stmt_expr_types(if_stmt, path)
 
   defp collect_expr_types(expr, path) do
     own = maybe_collect_expr_type(expr, path)
@@ -610,27 +734,62 @@ defmodule BeamLang.CLI do
     do: if(span.file_id == path and not is_nil(type), do: [{"struct", type, span}], else: [])
 
   defp maybe_collect_expr_type({:method_call, %{target_type: type, span: span}}, path),
-    do: if(span.file_id == path and not is_nil(type), do: [{"method_target", type, span}], else: [])
+    do:
+      if(span.file_id == path and not is_nil(type), do: [{"method_target", type, span}], else: [])
 
-  defp maybe_collect_expr_type({:binary, %{operator_info: %{result_type: type}, span: span}}, path),
-    do: if(span.file_id == path, do: [{"binary_result", type, span}], else: [])
+  defp maybe_collect_expr_type(
+         {:binary, %{operator_info: %{result_type: type}, span: span}},
+         path
+       ),
+       do: if(span.file_id == path, do: [{"binary_result", type, span}], else: [])
 
   defp maybe_collect_expr_type(_expr, _path), do: []
 
-  defp nested_expr_types({:call, %{args: args}}, path), do: Enum.flat_map(args, &collect_expr_types(&1, path))
-  defp nested_expr_types({:method_call, %{target: target, args: args}}, path), do: collect_expr_types(target, path) ++ Enum.flat_map(args, &collect_expr_types(&1, path))
+  defp nested_expr_types({:call, %{args: args}}, path),
+    do: Enum.flat_map(args, &collect_expr_types(&1, path))
+
+  defp nested_expr_types({:method_call, %{target: target, args: args}}, path),
+    do: collect_expr_types(target, path) ++ Enum.flat_map(args, &collect_expr_types(&1, path))
+
   defp nested_expr_types({:field, %{target: target}}, path), do: collect_expr_types(target, path)
-  defp nested_expr_types({:binary, %{left: left, right: right}}, path), do: collect_expr_types(left, path) ++ collect_expr_types(right, path)
-  defp nested_expr_types({:if_expr, %{cond: cond, then_block: then_block, else_branch: else_branch}}, path), do: collect_expr_types(cond, path) ++ collect_expression_types(then_block, path) ++ collect_else_expr_types(else_branch, path)
-  defp nested_expr_types({:block_expr, %{block: block}}, path), do: collect_expression_types(block, path)
-  defp nested_expr_types({:match, %{expr: expr, cases: cases}}, path), do: collect_expr_types(expr, path) ++ Enum.flat_map(cases, fn %{guard: guard, body: body} -> (if guard == nil, do: [], else: collect_expr_types(guard, path)) ++ collect_expr_types(body, path) end)
-  defp nested_expr_types({:struct, %{fields: fields}}, path), do: Enum.flat_map(fields, fn %{expr: expr} -> collect_expr_types(expr, path) end)
-  defp nested_expr_types({:tuple, %{elements: elements}}, path), do: Enum.flat_map(elements, &collect_expr_types(&1, path))
-  defp nested_expr_types({:list_literal, %{elements: elements}}, path), do: Enum.flat_map(elements, &collect_expr_types(&1, path))
+
+  defp nested_expr_types({:binary, %{left: left, right: right}}, path),
+    do: collect_expr_types(left, path) ++ collect_expr_types(right, path)
+
+  defp nested_expr_types(
+         {:if_expr, %{cond: cond, then_block: then_block, else_branch: else_branch}},
+         path
+       ),
+       do:
+         collect_expr_types(cond, path) ++
+           collect_expression_types(then_block, path) ++
+           collect_else_expr_types(else_branch, path)
+
+  defp nested_expr_types({:block_expr, %{block: block}}, path),
+    do: collect_expression_types(block, path)
+
+  defp nested_expr_types({:match, %{expr: expr, cases: cases}}, path),
+    do:
+      collect_expr_types(expr, path) ++
+        Enum.flat_map(cases, fn %{guard: guard, body: body} ->
+          if(guard == nil, do: [], else: collect_expr_types(guard, path)) ++
+            collect_expr_types(body, path)
+        end)
+
+  defp nested_expr_types({:struct, %{fields: fields}}, path),
+    do: Enum.flat_map(fields, fn %{expr: expr} -> collect_expr_types(expr, path) end)
+
+  defp nested_expr_types({:tuple, %{elements: elements}}, path),
+    do: Enum.flat_map(elements, &collect_expr_types(&1, path))
+
+  defp nested_expr_types({:list_literal, %{elements: elements}}, path),
+    do: Enum.flat_map(elements, &collect_expr_types(&1, path))
+
   defp nested_expr_types({:opt_some, %{expr: expr}}, path), do: collect_expr_types(expr, path)
   defp nested_expr_types({:res_ok, %{expr: expr}}, path), do: collect_expr_types(expr, path)
   defp nested_expr_types({:res_err, %{expr: expr}}, path), do: collect_expr_types(expr, path)
   defp nested_expr_types({:try_expr, %{expr: expr}}, path), do: collect_expr_types(expr, path)
+
   defp nested_expr_types({:enum_variant, %{fields: fields}}, path) when is_list(fields) do
     Enum.flat_map(fields, fn
       {_, value} -> collect_expr_types(value, path)
@@ -638,9 +797,13 @@ defmodule BeamLang.CLI do
       _ -> []
     end)
   end
+
   defp nested_expr_types(_expr, _path), do: []
 
-  defp format_type_def({:type_def, %{name: name, params: params, fields: fields, span: span}}, path) do
+  defp format_type_def(
+         {:type_def, %{name: name, params: params, fields: fields, span: span}},
+         path
+       ) do
     if span.file_id != path do
       nil
     else
@@ -660,7 +823,10 @@ defmodule BeamLang.CLI do
     end
   end
 
-  defp format_enum_def({:enum_def, %{name: name, params: params, variants: variants, span: span}}, path) do
+  defp format_enum_def(
+         {:enum_def, %{name: name, params: params, variants: variants, span: span}},
+         path
+       ) do
     if span.file_id != path do
       nil
     else
