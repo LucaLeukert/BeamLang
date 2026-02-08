@@ -320,8 +320,9 @@ defmodule BeamLang.LSP.Server do
         }
 
       :no_string ->
-        with %BeamLang.Token{type: :identifier, value: name} <- identifier_at(doc, offset),
-             {:ok, info} <- lookup_hover_with_field_access(doc, name, offset) do
+        with %BeamLang.Token{type: :identifier, value: name} = token <- identifier_at(doc, offset),
+             lookup_name <- qualified_lookup_name(doc, token, name),
+             {:ok, info} <- lookup_hover_with_field_access(doc, lookup_name, offset) do
           %{
             "contents" => %{
               "kind" => "markdown",
@@ -407,11 +408,29 @@ defmodule BeamLang.LSP.Server do
     end
   end
 
+  # If the identifier is the right side of `module::name`, return `module::name`.
+  defp qualified_lookup_name(doc, %BeamLang.Token{span: span}, fallback_name) do
+    case previous_token(doc.tokens, span.start) do
+      %BeamLang.Token{type: :double_colon, span: dc_span} ->
+        case previous_token(doc.tokens, dc_span.start) do
+          %BeamLang.Token{type: :identifier, value: module_name} ->
+            module_name <> "::" <> fallback_name
+
+          _ ->
+            fallback_name
+        end
+
+      _ ->
+        fallback_name
+    end
+  end
+
   defp definition_for(doc, %{"line" => line, "character" => character}) do
     offset = position_to_offset(doc.text, line, character)
 
-    with %BeamLang.Token{type: :identifier, value: name} <- identifier_at(doc, offset),
-         {:ok, %{span: span, path: path}} <- lookup_definition(doc, name, offset) do
+    with %BeamLang.Token{type: :identifier, value: name} = token <- identifier_at(doc, offset),
+         lookup_name <- qualified_lookup_name(doc, token, name),
+         {:ok, %{span: span, path: path}} <- lookup_definition(doc, lookup_name, offset) do
       [
         %{
           "uri" => path_to_uri(path),

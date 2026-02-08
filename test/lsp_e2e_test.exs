@@ -510,4 +510,34 @@ defmodule BeamLang.LSP.E2ETest do
 
     stop_server(port)
   end
+
+  test "qualified module refs resolve without explicit import" do
+    port = start_server()
+    initialize(port)
+
+    path = Path.expand("examples/modules/use_math.bl")
+    uri = "file://" <> path
+    source = File.read!(path)
+    open_document(port, uri, source)
+
+    send_request(port, 17, "textDocument/hover", %{
+      "textDocument" => %{"uri" => uri},
+      "position" => %{"line" => 6, "character" => 22}
+    })
+
+    {resp, notifications} = recv_response_by_id(port, 17)
+
+    diagnostics =
+      notifications
+      |> Enum.filter(fn msg ->
+        msg["method"] == "textDocument/publishDiagnostics" and
+          get_in(msg, ["params", "uri"]) == uri
+      end)
+      |> Enum.flat_map(fn msg -> get_in(msg, ["params", "diagnostics"]) || [] end)
+
+    assert diagnostics == []
+    assert resp["result"] != nil
+
+    stop_server(port)
+  end
 end

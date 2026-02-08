@@ -67,20 +67,24 @@ defmodule BeamLang do
              tokens: [BeamLang.Token.t()],
              ast: BeamLang.AST.t(),
              errors: [BeamLang.Error.t()]
-           }}
+          }}
           | {:error, [BeamLang.Error.t()]}
   def analyze_source(source, filename) when is_binary(source) and is_binary(filename) do
     with {:ok, tokens} <- Lexer.tokenize(source, filename),
          {:ok, ast} <- Parser.parse(tokens),
-         {:ok, stdlib_ast} <- load_stdlib_ast(),
-         {:ok, stdlib_ast} <- load_ext_modules_for_imports(ast, stdlib_ast),
-         {:ok, merged} <- merge_programs(stdlib_ast, ast) do
-      case Semantic.validate(merged, require_main: false) do
-        {:ok, checked} ->
-          {:ok, %{tokens: tokens, ast: checked, errors: []}}
+         {:ok, stdlib_ast} <- load_stdlib_ast() do
+      case analyze_merged_program(ast, filename, stdlib_ast) do
+        {:ok, merged} ->
+          case Semantic.validate(merged, require_main: false) do
+            {:ok, checked} ->
+              {:ok, %{tokens: tokens, ast: checked, errors: []}}
+
+            {:error, errors} when is_list(errors) ->
+              {:ok, %{tokens: tokens, ast: merged, errors: errors}}
+          end
 
         {:error, errors} when is_list(errors) ->
-          {:ok, %{tokens: tokens, ast: merged, errors: errors}}
+          {:ok, %{tokens: tokens, ast: ast, errors: errors}}
       end
     else
       {:error, %BeamLang.Error{} = error} ->
@@ -90,6 +94,55 @@ defmodule BeamLang do
         {:error, errors}
     end
   end
+
+  defp analyze_merged_program(ast, filename, stdlib_ast) do
+    if File.exists?(filename) and requires_local_module_analysis?(ast) do
+      analyze_merged_program_with_modules(ast, filename, stdlib_ast)
+    else
+      analyze_merged_program_single(ast, stdlib_ast)
+    end
+  end
+
+  defp analyze_merged_program_with_modules(ast, filename, stdlib_ast) do
+    module_name = module_name_from_path(filename)
+    ast = set_program_module(ast, module_name)
+
+    with {:ok, modules, _entry_module} <- load_modules(filename),
+         modules <- Map.put(modules, module_name, %{ast: ast, path: filename}),
+         exports <- module_exports(modules),
+         {:ok, resolved} <- resolve_imports_and_qualify(ast, exports, module_name),
+         {:ok, full_stdlib} <- load_ext_modules_for_imports(resolved, stdlib_ast),
+         {:ok, merged} <- merge_programs(full_stdlib, resolved) do
+      {:ok, merged}
+    else
+      {:error, errors} when is_list(errors) ->
+        {:error, errors}
+    end
+  end
+
+  defp analyze_merged_program_single(ast, stdlib_ast) do
+    with {:ok, stdlib_ast} <- load_ext_modules_for_imports(ast, stdlib_ast),
+         {:ok, merged} <- merge_programs(stdlib_ast, ast) do
+      {:ok, merged}
+    end
+  end
+
+  defp requires_local_module_analysis?({:program, %{imports: imports}} = program) do
+    has_local_imports? =
+      imports
+      |> Enum.map(fn {:import, %{module: module}} -> module end)
+      |> Enum.any?(fn module -> not stdlib_ext_module?(module) end)
+
+    has_qualified_module_refs? =
+      case qualified_module_refs(program) do
+        [] -> false
+        _ -> true
+      end
+
+    has_local_imports? or has_qualified_module_refs?
+  end
+
+  defp requires_local_module_analysis?(_), do: false
 
   @spec compile_file(binary()) ::
           {:ok,
@@ -449,7 +502,7 @@ defmodule BeamLang do
         types
         |> Enum.filter(fn {:type_def, %{exported: exported}} -> exported end)
         |> Enum.map(fn {:type_def, %{name: name, params: params, fields: fields}} ->
-          {name, %{params: params, fields: fields}}
+          {export_name(name, module_name), %{params: params, fields: fields}}
         end)
         |> Map.new()
 
@@ -460,7 +513,7 @@ defmodule BeamLang do
         end)
         |> Enum.map(fn {:function, %{name: name, params: params, return_type: return_type}} ->
           param_types = Enum.map(params, & &1.type)
-          {name, {param_types, return_type}}
+          {export_name(name, module_name), {param_types, return_type}}
         end)
         |> Map.new()
 
@@ -474,6 +527,10 @@ defmodule BeamLang do
         func_defs: func_defs
       })
     end)
+  end
+
+  defp export_name(name, module_name) when is_binary(name) do
+    normalize_export_name(name, module_name)
   end
 
   defp resolve_imports_and_qualify(
@@ -633,7 +690,7 @@ defmodule BeamLang do
 
         {:ok, %{type_defs: type_defs, func_defs: func_defs}} ->
           {t_map, errors} =
-            Enum.reduce(Map.keys(type_defs), {t_map, errors}, fn name, {acc, errs} ->
+            Enum.reduce(export_keys(type_defs, module), {t_map, errors}, fn name, {acc, errs} ->
               cond do
                 MapSet.member?(local_types, name) -> {acc, errs}
                 Map.has_key?(acc, name) -> {acc, errs}
@@ -642,7 +699,7 @@ defmodule BeamLang do
             end)
 
           {f_map, errors} =
-            Enum.reduce(Map.keys(func_defs), {f_map, errors}, fn name, {acc, errs} ->
+            Enum.reduce(export_keys(func_defs, module), {f_map, errors}, fn name, {acc, errs} ->
               cond do
                 MapSet.member?(local_funcs, name) -> {acc, errs}
                 Map.has_key?(acc, name) -> {acc, errs}
@@ -817,10 +874,10 @@ defmodule BeamLang do
             case items do
               :all ->
                 all_items =
-                  Map.keys(type_defs)
+                  export_keys(type_defs, module)
                   |> Enum.map(fn name -> %{name: name, span: span} end)
                   |> Kernel.++(
-                    Map.keys(func_defs)
+                    export_keys(func_defs, module)
                     |> Enum.map(fn name -> %{name: name, span: span} end)
                   )
 
@@ -836,7 +893,8 @@ defmodule BeamLang do
           Enum.reduce(items, {type_map, func_map, errors}, fn %{name: name, span: item_span},
                                                               {t_map, f_map, errs} ->
             cond do
-              Map.has_key?(type_defs, name) and Map.has_key?(func_defs, name) ->
+              has_export_key?(type_defs, module, name) and
+                  has_export_key?(func_defs, module, name) ->
                 err =
                   BeamLang.Error.new(
                     :type,
@@ -846,7 +904,7 @@ defmodule BeamLang do
 
                 {t_map, f_map, [err | errs]}
 
-              Map.has_key?(type_defs, name) ->
+              has_export_key?(type_defs, module, name) ->
                 if MapSet.member?(local_types, name) do
                   err =
                     BeamLang.Error.new(
@@ -873,7 +931,7 @@ defmodule BeamLang do
                   end
                 end
 
-              Map.has_key?(func_defs, name) ->
+              has_export_key?(func_defs, module, name) ->
                 if MapSet.member?(local_funcs, name) do
                   err =
                     BeamLang.Error.new(
@@ -995,7 +1053,7 @@ defmodule BeamLang do
        ) do
     case Map.fetch(exports, module) do
       {:ok, %{type_defs: type_defs}} ->
-        case Map.fetch(type_defs, name) do
+        case fetch_export(type_defs, module, name) do
           {:ok, %{params: params, fields: fields}} ->
             fields =
               Enum.map(fields, fn %{name: field_name, type: type, span: span} = field ->
@@ -1021,7 +1079,7 @@ defmodule BeamLang do
   defp export_signature(exports, module, name) do
     case Map.fetch(exports, module) do
       {:ok, %{func_defs: func_defs}} ->
-        case Map.fetch(func_defs, name) do
+        case fetch_export(func_defs, module, name) do
           {:ok, {param_types, return_type}} ->
             param_types = Enum.map(param_types, &qualify_type_in_module(&1, module, exports))
             return_type = qualify_type_in_module(return_type, module, exports)
@@ -1044,7 +1102,14 @@ defmodule BeamLang do
         else
           case Map.fetch(exports, module) do
             {:ok, %{type_defs: type_defs}} ->
-              if Map.has_key?(type_defs, name) do
+              matches =
+                type_defs
+                |> Map.keys()
+                |> Enum.filter(fn key -> normalize_export_name(key, module) == name end)
+
+              if Map.has_key?(type_defs, name) or
+                   Map.has_key?(type_defs, qualified_name(module, name)) or
+                   matches != [] do
                 {:named, qualified_name(module, name)}
               else
                 {:named, name}
@@ -1089,6 +1154,49 @@ defmodule BeamLang do
   defp export_return(exports, module, name) do
     {_param_types, return_type} = export_signature(exports, module, name)
     return_type
+  end
+
+  defp export_keys(defs, module) do
+    defs
+    |> Map.keys()
+    |> Enum.map(&normalize_export_name(&1, module))
+    |> Enum.uniq()
+  end
+
+  defp has_export_key?(defs, module, name) do
+    Map.has_key?(defs, name) or
+      Map.has_key?(defs, qualified_name(module, name)) or
+      Enum.any?(Map.keys(defs), fn key -> normalize_export_name(key, module) == name end)
+  end
+
+  defp fetch_export(defs, module, name) do
+    case Map.fetch(defs, name) do
+      {:ok, value} ->
+        {:ok, value}
+
+      :error ->
+        case Map.fetch(defs, qualified_name(module, name)) do
+          {:ok, value} ->
+            {:ok, value}
+
+          :error ->
+            case Enum.find(Map.keys(defs), fn key ->
+                   normalize_export_name(key, module) == name
+                 end) do
+              nil -> :error
+              key -> Map.fetch(defs, key)
+            end
+        end
+    end
+  end
+
+  defp normalize_export_name(name, module) when is_binary(name) do
+    _ = module
+
+    case String.split(name, "::") do
+      [] -> name
+      parts -> List.last(parts)
+    end
   end
 
   defp qualified_name(module, name), do: "#{module}::#{name}"
