@@ -37,6 +37,9 @@ mix beamlang run examples/basics/hello.bl
 # With debug (print AST, don't run)
 mix beamlang run --print-ast --no-run examples/basics/hello.bl
 
+# Print inferred/declared type information (don't run)
+mix beamlang run --print-types --no-run examples/basics/hello.bl
+
 # Build a standalone binary
 mix beamlang compile examples/basics/hello.bl
 ./examples/basics/hello

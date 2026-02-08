@@ -49,6 +49,7 @@ defmodule BeamLang.CLI do
           print_tokens: :boolean,
           print_ast: :boolean,
           print_ast_pretty: :boolean,
+          print_types: :boolean,
           print_forms: :boolean,
           emit_beam: :string,
           no_run: :boolean,
@@ -69,6 +70,7 @@ defmodule BeamLang.CLI do
               print_tokens: :boolean,
               print_ast: :boolean,
               print_ast_pretty: :boolean,
+              print_types: :boolean,
               print_forms: :boolean,
               emit_beam: :string,
               lsp: :boolean,
@@ -222,7 +224,7 @@ defmodule BeamLang.CLI do
 
     case BeamLang.compile_file(path) do
       {:ok, %{entry: entry_module, modules: modules}} ->
-        if opts[:print_tokens] || opts[:print_ast] || opts[:print_ast_pretty] || opts[:print_forms] do
+        if opts[:print_tokens] || opts[:print_ast] || opts[:print_ast_pretty] || opts[:print_types] || opts[:print_forms] do
           case BeamLang.Lexer.tokenize(source, path) do
             {:ok, tokens} ->
               case BeamLang.Parser.parse(tokens) do
@@ -233,6 +235,7 @@ defmodule BeamLang.CLI do
                     IO.puts("AST (pretty):")
                     IO.puts(BeamLang.ASTPrinter.format(ast))
                   end
+                  if opts[:print_types], do: print_types(source, path)
                   if opts[:print_forms] do
                     forms = BeamLang.Codegen.to_erlang_forms(ast)
                     IO.inspect(forms, label: "ERLANG_FORMS", limit: :infinity)
@@ -418,5 +421,295 @@ defmodule BeamLang.CLI do
       {head, tail} = String.split_at(str, size)
       [head | chunk_string(tail, size)]
     end
+  end
+
+  defp print_types(source, path) do
+    case BeamLang.analyze_source(source, path) do
+      {:ok, %{ast: ast}} ->
+        print_type_dump(ast, path)
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp print_type_dump({:program, info}, path) do
+    types = Map.get(info, :types, [])
+    enums = Map.get(info, :enums, [])
+    errors = Map.get(info, :errors, [])
+    functions = Map.get(info, :functions, [])
+
+    IO.puts("TYPE DUMP:")
+
+    print_declared_types(types, errors, enums, path)
+    print_function_types(functions, path)
+  end
+
+  defp print_declared_types(types, errors, enums, path) do
+    docs =
+      (Enum.map(types, &format_type_def(&1, path)) ++
+         Enum.map(errors, &format_error_def(&1, path)) ++
+         Enum.map(enums, &format_enum_def(&1, path)))
+      |> Enum.reject(&is_nil/1)
+
+    IO.puts("DECLARED TYPES:")
+
+    case docs do
+      [] -> IO.puts("(none)")
+      _ -> IO.puts(Enum.join(docs, "\n\n"))
+    end
+  end
+
+  defp print_function_types(functions, path) do
+    function_docs =
+      functions
+      |> Enum.map(&format_function_type_dump(&1, path))
+      |> Enum.reject(&is_nil/1)
+
+    IO.puts("\nFUNCTION TYPES:")
+
+    case function_docs do
+      [] ->
+        IO.puts("(none)")
+
+      _ ->
+        IO.puts(Enum.join(function_docs, "\n\n"))
+    end
+  end
+
+  defp format_function_type_dump(
+         {:function, %{name: name, type_params: type_params, params: params, return_type: return_type, body: body, span: span}},
+         path
+       ) do
+    if span.file_id != path do
+      nil
+    else
+      header = "fn #{name}#{format_type_params(type_params)}(#{format_params(params)}) -> #{format_type(return_type)}"
+      bindings = collect_local_bindings(body, path)
+      expr_types = collect_expression_types(body, path)
+
+      body_lines =
+        (Enum.map(bindings, &format_binding/1) ++ Enum.map(expr_types, &format_expr_type/1))
+        |> case do
+          [] -> ["  (no local typed bindings/expressions)"]
+          lines -> lines
+        end
+
+      Enum.join([header | body_lines], "\n")
+    end
+  end
+
+  defp format_function_type_dump(_other, _path), do: nil
+
+  defp format_params(params) do
+    params
+    |> Enum.map(fn
+      %{name: name, type: type} -> "#{name}: #{format_type(type)}"
+      %{pattern: _pattern, type: type} -> "_pattern: #{format_type(type)}"
+    end)
+    |> Enum.join(", ")
+  end
+
+  defp format_binding({:let, name, type, span}),
+    do: "  let #{name}: #{format_type(type)} @#{span.start}"
+
+  defp format_binding({:for_item, name, item_type, collection_type, span}),
+    do:
+      "  for #{name}: #{format_type(item_type)} (in #{format_type(collection_type)}) @#{span.start}"
+
+  defp format_expr_type({label, type, span}),
+    do: "  expr #{label}: #{format_type(type)} @#{span.start}"
+
+  defp collect_local_bindings(nil, _path), do: []
+  defp collect_local_bindings({:block, %{stmts: stmts}}, path), do: collect_stmt_bindings(stmts, path)
+
+  defp collect_stmt_bindings(stmts, path) do
+    Enum.flat_map(stmts, &collect_stmt_binding(&1, path))
+  end
+
+  defp collect_stmt_binding({:let, %{name: name, inferred_type: type, span: span}}, path) do
+    if span.file_id == path, do: [{:let, name, type || :any, span}], else: []
+  end
+
+  defp collect_stmt_binding({:for, %{name: name, item_type: item_type, collection_type: collection_type, body: body, span: span}}, path) do
+    current =
+      if span.file_id == path do
+        [{:for_item, name, item_type || :any, collection_type || :any, span}]
+      else
+        []
+      end
+
+    current ++ collect_local_bindings(body, path)
+  end
+
+  defp collect_stmt_binding({:if_stmt, %{then_block: then_block, else_branch: else_branch}}, path) do
+    collect_local_bindings(then_block, path) ++ collect_else_bindings(else_branch, path)
+  end
+
+  defp collect_stmt_binding({:while, %{body: body}}, path), do: collect_local_bindings(body, path)
+  defp collect_stmt_binding({:loop, %{body: body}}, path), do: collect_local_bindings(body, path)
+  defp collect_stmt_binding({:guard, %{else_block: else_block}}, path), do: collect_local_bindings(else_block, path)
+  defp collect_stmt_binding(_stmt, _path), do: []
+
+  defp collect_else_bindings(nil, _path), do: []
+  defp collect_else_bindings({:else_block, %{block: block}}, path), do: collect_local_bindings(block, path)
+  defp collect_else_bindings({:else_if, %{if: if_stmt}}, path), do: collect_stmt_binding(if_stmt, path)
+
+  defp collect_expression_types(nil, _path), do: []
+  defp collect_expression_types({:block, %{stmts: stmts}}, path), do: Enum.flat_map(stmts, &collect_stmt_expr_types(&1, path))
+
+  defp collect_stmt_expr_types({:let, %{expr: expr}}, path), do: collect_expr_types(expr, path)
+  defp collect_stmt_expr_types({:expr, %{expr: expr}}, path), do: collect_expr_types(expr, path)
+  defp collect_stmt_expr_types({:return, %{expr: expr}}, path) when not is_nil(expr), do: collect_expr_types(expr, path)
+  defp collect_stmt_expr_types({:assign, %{expr: expr}}, path), do: collect_expr_types(expr, path)
+  defp collect_stmt_expr_types({:compound_assign, %{expr: expr}}, path), do: collect_expr_types(expr, path)
+  defp collect_stmt_expr_types({:let_destruct, %{expr: expr}}, path), do: collect_expr_types(expr, path)
+
+  defp collect_stmt_expr_types({:if_stmt, %{cond: cond, then_block: then_block, else_branch: else_branch}}, path) do
+    collect_expr_types(cond, path) ++ collect_expression_types(then_block, path) ++ collect_else_expr_types(else_branch, path)
+  end
+
+  defp collect_stmt_expr_types({:while, %{cond: cond, body: body}}, path),
+    do: collect_expr_types(cond, path) ++ collect_expression_types(body, path)
+
+  defp collect_stmt_expr_types({:loop, %{body: body}}, path), do: collect_expression_types(body, path)
+
+  defp collect_stmt_expr_types({:for, %{collection: collection, body: body}}, path),
+    do: collect_expr_types(collection, path) ++ collect_expression_types(body, path)
+
+  defp collect_stmt_expr_types({:guard, %{cond: cond, else_block: else_block}}, path),
+    do: collect_expr_types(cond, path) ++ collect_expression_types(else_block, path)
+
+  defp collect_stmt_expr_types(_stmt, _path), do: []
+
+  defp collect_else_expr_types(nil, _path), do: []
+  defp collect_else_expr_types({:else_block, %{block: block}}, path), do: collect_expression_types(block, path)
+  defp collect_else_expr_types({:else_if, %{if: if_stmt}}, path), do: collect_stmt_expr_types(if_stmt, path)
+
+  defp collect_expr_types(expr, path) do
+    own = maybe_collect_expr_type(expr, path)
+    own ++ nested_expr_types(expr, path)
+  end
+
+  defp maybe_collect_expr_type({:list_literal, %{type: type, span: span}}, path),
+    do: if(span.file_id == path, do: [{"list_literal", type || :any, span}], else: [])
+
+  defp maybe_collect_expr_type({:opt_some, %{type: type, span: span}}, path),
+    do: if(span.file_id == path, do: [{"optional_some", type || :any, span}], else: [])
+
+  defp maybe_collect_expr_type({:opt_none, %{type: type, span: span}}, path),
+    do: if(span.file_id == path, do: [{"optional_none", type || :any, span}], else: [])
+
+  defp maybe_collect_expr_type({:res_ok, %{type: type, span: span}}, path),
+    do: if(span.file_id == path, do: [{"result_ok", type || :any, span}], else: [])
+
+  defp maybe_collect_expr_type({:res_err, %{type: type, span: span}}, path),
+    do: if(span.file_id == path, do: [{"result_err", type || :any, span}], else: [])
+
+  defp maybe_collect_expr_type({:struct, %{type: type, span: span}}, path),
+    do: if(span.file_id == path and not is_nil(type), do: [{"struct", type, span}], else: [])
+
+  defp maybe_collect_expr_type({:method_call, %{target_type: type, span: span}}, path),
+    do: if(span.file_id == path and not is_nil(type), do: [{"method_target", type, span}], else: [])
+
+  defp maybe_collect_expr_type({:binary, %{operator_info: %{result_type: type}, span: span}}, path),
+    do: if(span.file_id == path, do: [{"binary_result", type, span}], else: [])
+
+  defp maybe_collect_expr_type(_expr, _path), do: []
+
+  defp nested_expr_types({:call, %{args: args}}, path), do: Enum.flat_map(args, &collect_expr_types(&1, path))
+  defp nested_expr_types({:method_call, %{target: target, args: args}}, path), do: collect_expr_types(target, path) ++ Enum.flat_map(args, &collect_expr_types(&1, path))
+  defp nested_expr_types({:field, %{target: target}}, path), do: collect_expr_types(target, path)
+  defp nested_expr_types({:binary, %{left: left, right: right}}, path), do: collect_expr_types(left, path) ++ collect_expr_types(right, path)
+  defp nested_expr_types({:if_expr, %{cond: cond, then_block: then_block, else_branch: else_branch}}, path), do: collect_expr_types(cond, path) ++ collect_expression_types(then_block, path) ++ collect_else_expr_types(else_branch, path)
+  defp nested_expr_types({:block_expr, %{block: block}}, path), do: collect_expression_types(block, path)
+  defp nested_expr_types({:match, %{expr: expr, cases: cases}}, path), do: collect_expr_types(expr, path) ++ Enum.flat_map(cases, fn %{guard: guard, body: body} -> (if guard == nil, do: [], else: collect_expr_types(guard, path)) ++ collect_expr_types(body, path) end)
+  defp nested_expr_types({:struct, %{fields: fields}}, path), do: Enum.flat_map(fields, fn %{expr: expr} -> collect_expr_types(expr, path) end)
+  defp nested_expr_types({:tuple, %{elements: elements}}, path), do: Enum.flat_map(elements, &collect_expr_types(&1, path))
+  defp nested_expr_types({:list_literal, %{elements: elements}}, path), do: Enum.flat_map(elements, &collect_expr_types(&1, path))
+  defp nested_expr_types({:opt_some, %{expr: expr}}, path), do: collect_expr_types(expr, path)
+  defp nested_expr_types({:res_ok, %{expr: expr}}, path), do: collect_expr_types(expr, path)
+  defp nested_expr_types({:res_err, %{expr: expr}}, path), do: collect_expr_types(expr, path)
+  defp nested_expr_types({:try_expr, %{expr: expr}}, path), do: collect_expr_types(expr, path)
+  defp nested_expr_types({:enum_variant, %{fields: fields}}, path) when is_list(fields) do
+    Enum.flat_map(fields, fn
+      {_, value} -> collect_expr_types(value, path)
+      %{expr: expr} -> collect_expr_types(expr, path)
+      _ -> []
+    end)
+  end
+  defp nested_expr_types(_expr, _path), do: []
+
+  defp format_type_def({:type_def, %{name: name, params: params, fields: fields, span: span}}, path) do
+    if span.file_id != path do
+      nil
+    else
+      header = "type #{name}#{format_type_params(params)} {"
+      body = Enum.map(fields, &format_field/1) |> Enum.join("\n")
+      [header, body, "}"] |> Enum.join("\n")
+    end
+  end
+
+  defp format_error_def({:error_def, %{name: name, fields: fields, span: span}}, path) do
+    if span.file_id != path do
+      nil
+    else
+      header = "error #{name} {"
+      body = Enum.map(fields, &format_field/1) |> Enum.join("\n")
+      [header, body, "}"] |> Enum.join("\n")
+    end
+  end
+
+  defp format_enum_def({:enum_def, %{name: name, params: params, variants: variants, span: span}}, path) do
+    if span.file_id != path do
+      nil
+    else
+      header = "enum #{name}#{format_type_params(params)} {"
+      body = Enum.map(variants, &format_variant/1) |> Enum.join("\n")
+      [header, body, "}"] |> Enum.join("\n")
+    end
+  end
+
+  defp format_field(%{name: name, type: type, internal: internal}) do
+    visibility = if internal, do: "internal ", else: ""
+    "  #{visibility}#{name}: #{format_type(type)}"
+  end
+
+  defp format_variant(%{name: name, fields: fields}) when fields == nil or fields == [] do
+    "  #{name}"
+  end
+
+  defp format_variant(%{name: name, fields: fields}) do
+    formatted_fields =
+      fields
+      |> Enum.map(fn %{name: field_name, type: field_type} ->
+        "#{field_name}: #{format_type(field_type)}"
+      end)
+      |> Enum.join(", ")
+
+    "  #{name} { #{formatted_fields} }"
+  end
+
+  defp format_type_params([]), do: ""
+  defp format_type_params(params), do: "<" <> Enum.join(params, ", ") <> ">"
+
+  defp format_type(:number), do: "number"
+  defp format_type(:String), do: "String"
+  defp format_type(:char), do: "char"
+  defp format_type(:bool), do: "bool"
+  defp format_type(:void), do: "void"
+  defp format_type(:any), do: "any"
+  defp format_type({:named, name}), do: name
+  defp format_type({:optional, inner}), do: "#{format_type(inner)}?"
+  defp format_type({:result, ok, err}), do: "#{format_type(ok)}!#{format_type(err)}"
+  defp format_type({:tuple, items}), do: "(" <> Enum.map_join(items, ", ", &format_type/1) <> ")"
+  defp format_type({:type_var, name}), do: name
+
+  defp format_type({:generic, base, args}) do
+    "#{format_type(base)}<#{Enum.map_join(args, ", ", &format_type/1)}>"
+  end
+
+  defp format_type({:fn, params, return_type}) do
+    "fn(#{Enum.map_join(params, ", ", &format_type/1)}) -> #{format_type(return_type)}"
   end
 end
