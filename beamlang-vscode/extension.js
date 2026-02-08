@@ -1,7 +1,7 @@
 const vscode = require('vscode');
 const path = require('path');
 const { execFile } = require('child_process');
-const { LanguageClient, TransportKind } = require('vscode-languageclient/node');
+const { LanguageClient, TransportKind, Trace, State } = require('vscode-languageclient/node');
 
 let client;
 let outputChannel;
@@ -48,7 +48,20 @@ function activate(context) {
     clientOptions
   );
 
-  context.subscriptions.push(client.start());
+  const clientDisposable = client.start();
+  context.subscriptions.push(clientDisposable);
+
+  client.onDidChangeState((event) => {
+    if (event.newState === State.Running) {
+      if (debug) {
+        client.setTrace(Trace.Verbose);
+        traceOutputChannel.show(true);
+        outputChannel.appendLine('[BeamLang] LSP trace: verbose (all client/server messages)');
+      } else {
+        client.setTrace(Trace.Off);
+      }
+    }
+  });
 
   // Register "Format File" command using CLI (works even without the LSP)
   const formatCmd = vscode.commands.registerCommand('beamlang.formatFile', () => {
