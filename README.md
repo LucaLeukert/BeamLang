@@ -34,6 +34,9 @@ fn main(args: [String]) -> number {
 # Run a program
 mix beamlang run examples/basics/hello.bl
 
+# Lint BeamLang files
+mix beamlang lint examples/
+
 # With debug (print AST, don't run)
 mix beamlang run --print-ast --no-run examples/basics/hello.bl
 
@@ -87,6 +90,7 @@ Debug LSP logs: `./beamlang --lsp --lsp-debug`
 | **Modules** | `examples/modules/use_math.bl`, `examples/modules/math_ops.bl`, `examples/modules/stdlib_methods.bl` |
 | **Apps** | `examples/apps/cat.bl`, `examples/apps/standalone.bl` |
 | **LSP** | `examples/lsp/lsp_features.bl` |
+| **Linting** | `examples/basics/lint_match_branches.bl` |
 
 ---
 

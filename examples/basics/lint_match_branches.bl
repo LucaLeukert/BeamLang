@@ -1,0 +1,11 @@
+fn main(args: [String]) -> number {
+    let value = match (true) {
+        case true -> { 7; },
+        case false -> {
+            println("fallback");
+            return 1;
+        }
+    };
+
+    return value;
+}

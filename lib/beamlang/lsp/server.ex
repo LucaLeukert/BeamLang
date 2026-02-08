@@ -60,6 +60,7 @@ defmodule BeamLang.LSP.Server do
         "hoverProvider" => true,
         "definitionProvider" => true,
         "completionProvider" => %{"resolveProvider" => false},
+        "codeActionProvider" => true,
         "documentSymbolProvider" => true,
         "workspaceSymbolProvider" => true,
         "signatureHelpProvider" => %{"triggerCharacters" => ["(", ","]},
@@ -261,6 +262,23 @@ defmodule BeamLang.LSP.Server do
     state
   end
 
+  defp handle_message(state, %{
+         "method" => "textDocument/codeAction",
+         "id" => id,
+         "params" => params
+       }) do
+    result =
+      with %{"textDocument" => %{"uri" => uri}} <- params,
+           doc when not is_nil(doc) <- Map.get(state.documents, uri) do
+        code_actions_for(doc, params)
+      else
+        _ -> []
+      end
+
+    Protocol.send_response(id, result)
+    state
+  end
+
   defp handle_message(state, _message) do
     state
   end
@@ -335,12 +353,70 @@ defmodule BeamLang.LSP.Server do
   end
 
   defp diagnostic_for(source, %BeamLang.Error{} = error) do
-    %{
+    dot_method_hint = dot_method_hint_message(source, error)
+    has_dot_method_fix_note = Enum.member?(error.notes || [], "fix:replace_dot_with_arrow")
+    message = dot_method_hint || error.message
+
+    diagnostic = %{
       "range" => range_for_span(source, error.span),
       "severity" => 1,
       "source" => "BeamLang",
-      "message" => error.message
+      "message" => message
     }
+
+    if has_dot_method_fix_note or is_binary(dot_method_hint) do
+      Map.put(diagnostic, "code", "BL001")
+    else
+      diagnostic
+    end
+  end
+
+  defp dot_method_hint_message(source, %BeamLang.Error{
+         kind: :parser,
+         message: "Expected semicolon.",
+         span: %BeamLang.Span{start: start_offset}
+       }) do
+    case infer_dot_method_name(source, start_offset) do
+      {:ok, method_name} ->
+        "BeamLang uses '->' for method calls, not '.'. Replace '.' with '->' (for example: receiver->#{method_name}(...) )."
+
+      :error ->
+        nil
+    end
+  end
+
+  defp dot_method_hint_message(_source, _error), do: nil
+
+  defp infer_dot_method_name(source, start_offset)
+       when is_binary(source) and is_integer(start_offset) and start_offset >= 0 do
+    if start_offset >= byte_size(source) do
+      :error
+    else
+      case binary_part(source, start_offset, 1) do
+        "." ->
+          rest = binary_part(source, start_offset + 1, byte_size(source) - start_offset - 1)
+          rest = String.trim_leading(rest, " \t")
+          {method_name, _rest} = take_identifier_prefix(rest)
+
+          if method_name == "" do
+            :error
+          else
+            {:ok, method_name}
+          end
+
+        _ ->
+          :error
+      end
+    end
+  end
+
+  defp infer_dot_method_name(_source, _start_offset), do: :error
+
+  defp take_identifier_prefix(binary) when is_binary(binary) do
+    case Regex.run(~r/^([A-Za-z_][A-Za-z0-9_]*)(.*)$/s, binary) do
+      [_, ident, rest] -> {ident, rest}
+      _ -> {"", binary}
+    end
   end
 
   defp hover_for(doc, %{"line" => line, "character" => character}) do
@@ -723,6 +799,83 @@ defmodule BeamLang.LSP.Server do
         []
     end
   end
+
+  # --- Code actions ---
+
+  defp code_actions_for(doc, %{"range" => range} = params) when is_map(range) do
+    context = Map.get(params, "context", %{})
+    diagnostics = Map.get(context, "diagnostics", [])
+
+    case dot_token_for_range(doc, range) do
+      %BeamLang.Token{type: :dot, span: span} ->
+        [
+          %{
+            "title" => "Replace '.' with '->' for method call",
+            "kind" => "quickfix",
+            "isPreferred" => true,
+            "diagnostics" => related_dot_method_diagnostics(diagnostics),
+            "edit" => %{
+              "changes" => %{
+                doc.uri => [
+                  %{
+                    "range" => range_for_span(doc.text, span),
+                    "newText" => "->"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+
+      _ ->
+        []
+    end
+  end
+
+  defp code_actions_for(_doc, _params), do: []
+
+  defp dot_token_for_range(doc, %{"start" => %{"line" => line, "character" => character}} = _range) do
+    offset = position_to_offset(doc.text, line, character)
+
+    case token_at(doc.tokens, offset) || token_at(doc.tokens, max(offset - 1, 0)) do
+      %BeamLang.Token{type: :dot} = dot_tok ->
+        if dot_method_token?(doc.tokens, dot_tok), do: dot_tok, else: nil
+
+      _ ->
+        nil
+    end
+  end
+
+  defp dot_token_for_range(_doc, _range), do: nil
+
+  defp dot_method_token?(tokens, %BeamLang.Token{span: dot_span}) do
+    case token_index(tokens, dot_span.start) do
+      {:ok, idx} ->
+        case Enum.at(tokens, idx + 1) do
+          %BeamLang.Token{type: :identifier} -> true
+          _ -> false
+        end
+
+      :error ->
+        false
+    end
+  end
+
+  defp token_index(tokens, start_offset) do
+    case Enum.find_index(tokens, fn %BeamLang.Token{span: span} -> span.start == start_offset end) do
+      nil -> :error
+      idx -> {:ok, idx}
+    end
+  end
+
+  defp related_dot_method_diagnostics(diagnostics) when is_list(diagnostics) do
+    Enum.filter(diagnostics, fn diagnostic ->
+      (diagnostic["code"] == "BL001" and is_map(diagnostic["range"])) or
+        (is_binary(diagnostic["message"]) and String.contains?(diagnostic["message"], "uses '->' for method calls"))
+    end)
+  end
+
+  defp related_dot_method_diagnostics(_), do: []
 
   defp document_symbols_for(doc) do
     functions =

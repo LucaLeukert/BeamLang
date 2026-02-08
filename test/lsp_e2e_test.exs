@@ -192,6 +192,7 @@ defmodule BeamLang.LSP.E2ETest do
     assert capabilities["hoverProvider"] == true
     assert capabilities["completionProvider"]
     assert capabilities["definitionProvider"] == true
+    assert capabilities["codeActionProvider"] == true
     assert capabilities["renameProvider"]
     assert capabilities["referencesProvider"] == true
     assert capabilities["documentFormattingProvider"] == true
@@ -609,6 +610,79 @@ defmodule BeamLang.LSP.E2ETest do
     [type_loc | _] = resp_type["result"] || []
     assert type_loc["uri"] == math_ops_uri
     assert get_in(type_loc, ["range", "start", "line"]) == 0
+
+    stop_server(port)
+  end
+
+  test "code action suggests replacing dot method call with arrow" do
+    port = start_server()
+    initialize(port)
+
+    source = """
+    fn main() -> void {
+        let body = "x";
+        "/".concat(body);
+    }
+    """
+
+    open_document(port, test_uri(), source)
+
+    send_request(port, 21, "textDocument/codeAction", %{
+      "textDocument" => %{"uri" => test_uri()},
+      "range" => %{
+        "start" => %{"line" => 2, "character" => 7},
+        "end" => %{"line" => 2, "character" => 8}
+      },
+      "context" => %{"diagnostics" => []}
+    })
+
+    {resp, _} = recv_response_by_id(port, 21)
+    actions = resp["result"] || []
+    assert is_list(actions)
+    assert length(actions) > 0
+
+    action = Enum.find(actions, fn item -> item["kind"] == "quickfix" end)
+    assert is_map(action)
+    assert action["title"] =~ "Replace '.' with '->'"
+
+    edits = get_in(action, ["edit", "changes", test_uri()]) || []
+    assert Enum.any?(edits, fn edit -> edit["newText"] == "->" end)
+
+    stop_server(port)
+  end
+
+  test "diagnostics show method-call arrow hint instead of generic semicolon error" do
+    port = start_server()
+    initialize(port)
+
+    source = """
+    fn main() -> void {
+        let body = "x";
+        "/".concat(body);
+    }
+    """
+
+    open_document(port, test_uri(), source)
+
+    send_request(port, 22, "textDocument/documentSymbol", %{
+      "textDocument" => %{"uri" => test_uri()}
+    })
+
+    {resp, notifications} = recv_response_by_id(port, 22)
+    assert is_list(resp["result"])
+
+    diagnostics =
+      notifications
+      |> Enum.filter(fn msg ->
+        msg["method"] == "textDocument/publishDiagnostics" and
+          get_in(msg, ["params", "uri"]) == test_uri()
+      end)
+      |> Enum.flat_map(fn msg -> get_in(msg, ["params", "diagnostics"]) || [] end)
+
+    assert Enum.any?(diagnostics, fn diagnostic ->
+             msg = diagnostic["message"] || ""
+             msg =~ "uses '->' for method calls"
+           end)
 
     stop_server(port)
   end

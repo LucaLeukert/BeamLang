@@ -13,12 +13,13 @@ The standard library is written in BeamLang (`.bl` files) and is loaded automati
 ## Tooling
 
 - The CLI can run as a Language Server Protocol (LSP) server using `beamlang --lsp`.
+- The CLI includes `beamlang lint` for token-level lint checks (currently includes single-expression `match` branch style).
 - The BeamLang VS Code extension launches the CLI LSP server for diagnostics, hover, go-to definition, and completion.
 
 ## Files, Modules, Imports
 
 - Each `.bl` file is a module. The module name is the file name without `.bl`.
-- `export` exposes functions and types from a module.
+- `export` exposes functions, types, enums, and error types from a module.
 - `internal` marks functions that can only be called from within the same module file.
   Exception: stdlib files (`stdlib/core/*`, `stdlib/ext/*`) may call each other's `internal` functions.
 
@@ -105,6 +106,44 @@ Struct literals require a type annotation unless the expected type is clear from
 
 ```beamlang
 let user: User = { name = "Ada", age = 30 };
+```
+
+### Enum Types
+
+Enums define tagged variants:
+
+```beamlang
+enum Color {
+    Red,
+    Green,
+    Rgb { r: number, g: number, b: number }
+}
+```
+
+Enums can be exported:
+
+```beamlang
+export enum Status {
+    Ok,
+    Error { message: String }
+}
+```
+
+Enum values are created with namespace syntax:
+
+```beamlang
+let c = Color::Rgb { r = 255, g = 0, b = 0 };
+let status = Status::Error { message = "failed" };
+```
+
+Pattern matching supports enum variants directly:
+
+```beamlang
+match (c) {
+    case Color::Red => 0,
+    case Color::Green => 1,
+    case Color::Rgb => 2
+}
 ```
 
 ### Operator Overloading

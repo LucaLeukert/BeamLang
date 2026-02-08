@@ -75,6 +75,16 @@ defmodule BeamLang.IntegrationTest do
     assert {:ok, 3} == BeamLang.run_source(source)
   end
 
+  test "runs lint match branch example" do
+    source = File.read!("examples/basics/lint_match_branches.bl")
+    assert {:ok, 7} == BeamLang.run_source(source)
+  end
+
+  test "runs path operator example" do
+    source = File.read!("examples/modules/path_operator.bl")
+    assert {:ok, 0} == BeamLang.run_source(source)
+  end
+
   test "supports compound assignment operators" do
     source = """
     fn main(args: [String]) -> number {

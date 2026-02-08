@@ -1,0 +1,12 @@
+import system.*;
+
+fn main(args: [String]) -> number {
+    let base = path_from_string("usr/local");
+    let full = base / "bin" / "beamlang";
+
+    if (full->to_string() == "usr/local/bin/beamlang") {
+        return 0;
+    }
+
+    return 1;
+}
